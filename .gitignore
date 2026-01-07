@@ -12,3 +12,9 @@ build/
 
 # OS files
 .DS_Store
+
+# Transcripts (private meeting data)
+transcripts/
+
+# Lambda build artifacts
+lambda/*.zip
