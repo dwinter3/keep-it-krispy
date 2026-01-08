@@ -4,8 +4,14 @@ import { S3Client, ListObjectsV2Command, GetObjectCommand } from '@aws-sdk/clien
 const BUCKET_NAME = process.env.KRISP_S3_BUCKET || 'krisp-transcripts-dwinter'
 const AWS_REGION = process.env.AWS_REGION || 'us-east-1'
 
-// S3 client - uses default credential chain (env vars, IAM role, etc.)
-const s3 = new S3Client({ region: AWS_REGION })
+// S3 client - use custom env vars for Amplify (AWS_ prefix is reserved)
+const s3 = new S3Client({
+  region: AWS_REGION,
+  credentials: process.env.S3_ACCESS_KEY_ID ? {
+    accessKeyId: process.env.S3_ACCESS_KEY_ID,
+    secretAccessKey: process.env.S3_SECRET_ACCESS_KEY || '',
+  } : undefined,
+})
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url)
