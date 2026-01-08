@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { S3Client, ListObjectsV2Command, GetObjectCommand } from '@aws-sdk/client-s3'
 
-const BUCKET_NAME = process.env.KRISP_S3_BUCKET || 'krisp-transcripts-dwinter'
+const BUCKET_NAME = process.env.KRISP_S3_BUCKET || 'krisp-transcripts-754639201213'
 const AWS_REGION = process.env.AWS_REGION || 'us-east-1'
 
 // S3 client - use custom env vars for Amplify (AWS_ prefix is reserved)

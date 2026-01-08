@@ -6,7 +6,7 @@ const nextConfig: NextConfig = {
     // S3 credentials for transcript access
     S3_ACCESS_KEY_ID: process.env.S3_ACCESS_KEY_ID || '',
     S3_SECRET_ACCESS_KEY: process.env.S3_SECRET_ACCESS_KEY || '',
-    KRISP_S3_BUCKET: process.env.KRISP_S3_BUCKET || 'krisp-transcripts-dwinter',
+    KRISP_S3_BUCKET: process.env.KRISP_S3_BUCKET || 'krisp-transcripts-754639201213',
   },
 };
 
