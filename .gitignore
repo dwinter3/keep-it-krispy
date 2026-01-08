@@ -39,8 +39,8 @@ next-env.d.ts
 # Vercel
 .vercel
 
-# Transcripts (private meeting data)
-transcripts/
+# Transcripts (private meeting data at root level)
+/transcripts/
 
 # Lambda build artifacts
 lambda/*.zip
