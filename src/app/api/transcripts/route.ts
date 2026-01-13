@@ -1,24 +1,29 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { S3Client, ListObjectsV2Command, GetObjectCommand } from '@aws-sdk/client-s3'
+import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3'
+import { DynamoDBClient } from '@aws-sdk/client-dynamodb'
+import { DynamoDBDocumentClient, ScanCommand, QueryCommand } from '@aws-sdk/lib-dynamodb'
 
 const BUCKET_NAME = process.env.KRISP_S3_BUCKET || 'krisp-transcripts-754639201213'
+const TABLE_NAME = process.env.DYNAMODB_TABLE || 'krisp-transcripts-index'
 const AWS_REGION = process.env.AWS_REGION || 'us-east-1'
 
-// S3 client - use custom env vars for Amplify (AWS_ prefix is reserved)
-const s3 = new S3Client({
-  region: AWS_REGION,
-  credentials: process.env.S3_ACCESS_KEY_ID ? {
-    accessKeyId: process.env.S3_ACCESS_KEY_ID,
-    secretAccessKey: process.env.S3_SECRET_ACCESS_KEY || '',
-  } : undefined,
-})
+// AWS clients with custom credentials for Amplify
+const credentials = process.env.S3_ACCESS_KEY_ID ? {
+  accessKeyId: process.env.S3_ACCESS_KEY_ID,
+  secretAccessKey: process.env.S3_SECRET_ACCESS_KEY || '',
+} : undefined
+
+const s3 = new S3Client({ region: AWS_REGION, credentials })
+const dynamoClient = new DynamoDBClient({ region: AWS_REGION, credentials })
+const dynamodb = DynamoDBDocumentClient.from(dynamoClient)
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url)
   const key = searchParams.get('key')
+  const action = searchParams.get('action')
 
   try {
-    // If key provided, fetch specific transcript
+    // If key provided, fetch specific transcript from S3
     if (key) {
       const command = new GetObjectCommand({
         Bucket: BUCKET_NAME,
@@ -34,54 +39,65 @@ export async function GET(request: NextRequest) {
       return NextResponse.json(JSON.parse(body))
     }
 
-    // Otherwise, list all transcripts
-    const command = new ListObjectsV2Command({
-      Bucket: BUCKET_NAME,
-      Prefix: 'meetings/',
+    // Get stats for dashboard
+    if (action === 'stats') {
+      const scanCommand = new ScanCommand({
+        TableName: TABLE_NAME,
+        Select: 'COUNT',
+      })
+      const countResult = await dynamodb.send(scanCommand)
+
+      // Get unique speakers
+      const speakersCommand = new ScanCommand({
+        TableName: TABLE_NAME,
+        ProjectionExpression: 'speakers',
+      })
+      const speakersResult = await dynamodb.send(speakersCommand)
+      const allSpeakers = new Set<string>()
+      for (const item of speakersResult.Items || []) {
+        for (const speaker of item.speakers || []) {
+          allSpeakers.add(speaker)
+        }
+      }
+
+      return NextResponse.json({
+        totalTranscripts: countResult.Count || 0,
+        totalSpeakers: allSpeakers.size,
+        thisWeek: countResult.Count || 0, // TODO: filter by date
+      })
+    }
+
+    // List all transcripts from DynamoDB (fast!)
+    const scanCommand = new ScanCommand({
+      TableName: TABLE_NAME,
+      Limit: 100,
     })
 
-    const response = await s3.send(command)
-    const objects = response.Contents || []
+    const response = await dynamodb.send(scanCommand)
+    const items = response.Items || []
 
-    // Parse transcript metadata from S3 keys
-    const transcripts = objects
-      .filter(obj => obj.Key?.endsWith('.json'))
-      .map(obj => {
-        const key = obj.Key || ''
-        // Key format: meetings/YYYY/MM/DD/YYYYMMDD_HHMMSS_title_meetingId.json
-        const parts = key.split('/')
-        const filename = parts[parts.length - 1]
-        const dateMatch = filename.match(/^(\d{8})_(\d{6})_(.+)_([^_]+)\.json$/)
+    // Sort by timestamp descending
+    items.sort((a, b) => {
+      const dateA = new Date(a.timestamp || a.date)
+      const dateB = new Date(b.timestamp || b.date)
+      return dateB.getTime() - dateA.getTime()
+    })
 
-        let date = obj.LastModified?.toISOString() || ''
-        let title = filename.replace('.json', '')
-        let meetingId = ''
-
-        if (dateMatch) {
-          const [, dateStr, timeStr, titlePart, id] = dateMatch
-          // Format date nicely
-          const year = dateStr.slice(0, 4)
-          const month = dateStr.slice(4, 6)
-          const day = dateStr.slice(6, 8)
-          date = `${year}-${month}-${day}`
-          title = titlePart.replace(/_/g, ' ')
-          meetingId = id
-        }
-
-        return {
-          key,
-          title,
-          date,
-          meetingId,
-          size: obj.Size || 0,
-          lastModified: obj.LastModified?.toISOString(),
-        }
-      })
-      .sort((a, b) => (b.lastModified || '').localeCompare(a.lastModified || ''))
+    // Format for frontend
+    const transcripts = items.map(item => ({
+      key: item.s3_key,
+      meetingId: item.meeting_id,
+      title: item.title || 'Untitled Meeting',
+      date: item.date,
+      timestamp: item.timestamp,
+      duration: item.duration || 0,
+      speakers: item.speakers || [],
+      eventType: item.event_type,
+    }))
 
     return NextResponse.json({ transcripts })
   } catch (error) {
-    console.error('S3 error:', error)
+    console.error('API error:', error)
     return NextResponse.json(
       { error: 'Failed to fetch transcripts', details: String(error) },
       { status: 500 }
