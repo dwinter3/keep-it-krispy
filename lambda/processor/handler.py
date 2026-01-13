@@ -108,6 +108,25 @@ def extract_transcript_text(content: dict) -> str:
     return data.get('raw_content', '')
 
 
+def is_real_speaker_name(name: str) -> bool:
+    """
+    Check if a speaker name is a real name vs generic placeholder.
+    Filters out names like "Speaker 1", "Speaker 2", "Unknown", etc.
+    """
+    if not name:
+        return False
+    name_lower = name.lower().strip()
+    # Filter out generic speaker names
+    if name_lower.startswith('speaker '):
+        return False
+    if name_lower in ('unknown', 'guest', 'participant'):
+        return False
+    # Must have at least 2 characters
+    if len(name_lower) < 2:
+        return False
+    return True
+
+
 def process_vectors(
     meeting_id: str,
     s3_key: str,
@@ -117,6 +136,9 @@ def process_vectors(
     """
     Chunk transcript, generate embeddings, and store vectors.
 
+    Includes real speaker names in embeddings for relationship-based search.
+    Filters out generic names like "Speaker 1", "Speaker 2".
+
     Returns number of vectors stored.
     """
     # Chunk the transcript
@@ -125,13 +147,27 @@ def process_vectors(
     if not chunks:
         return 0
 
+    # Filter to only real speaker names (not "Speaker 1", etc.)
+    real_speakers = [s for s in speakers if is_real_speaker_name(s)]
+
+    # Create speaker context prefix if we have real names
+    speaker_context = ""
+    if real_speakers:
+        speaker_names = ", ".join(real_speakers)
+        speaker_context = f"Meeting participants: {speaker_names}. "
+        print(f"Including speakers in embeddings: {speaker_names}")
+
     # Generate embeddings and prepare vectors
     vectors_to_store = []
-    primary_speaker = speakers[0] if speakers else 'unknown'
+    primary_speaker = real_speakers[0] if real_speakers else (speakers[0] if speakers else 'unknown')
 
     for i, chunk in enumerate(chunks):
-        # Generate embedding
-        embedding = generate_embedding(chunk, bedrock_client)
+        # Prepend speaker context to chunk for embedding generation
+        # This ensures speaker names are part of the semantic embedding
+        text_for_embedding = speaker_context + chunk
+
+        # Generate embedding with speaker-enriched text
+        embedding = generate_embedding(text_for_embedding, bedrock_client)
 
         # Create vector record
         vector_key = f"{meeting_id}_chunk_{i:04d}"
