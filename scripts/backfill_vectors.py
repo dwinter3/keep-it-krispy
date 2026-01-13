@@ -107,6 +107,25 @@ def chunk_text(text: str, chunk_size: int = 500, overlap: int = 50) -> List[str]
     return chunks
 
 
+def is_real_speaker_name(name: str) -> bool:
+    """
+    Check if a speaker name is a real name vs generic placeholder.
+    Filters out names like "Speaker 1", "Speaker 2", "Unknown", etc.
+    """
+    if not name:
+        return False
+    name_lower = name.lower().strip()
+    # Filter out generic speaker names
+    if name_lower.startswith('speaker '):
+        return False
+    if name_lower in ('unknown', 'guest', 'participant'):
+        return False
+    # Must have at least 2 characters
+    if len(name_lower) < 2:
+        return False
+    return True
+
+
 def generate_embedding(text: str) -> List[float]:
     """Generate embedding using Bedrock Titan."""
     # Truncate if too long
@@ -155,7 +174,11 @@ def store_vectors(vectors: List[Dict[str, Any]]) -> Dict[str, Any]:
 
 
 def process_transcript(s3_key: str, content: dict) -> int:
-    """Process a single transcript and return number of vectors stored."""
+    """Process a single transcript and return number of vectors stored.
+
+    Includes real speaker names in embeddings for relationship-based search.
+    Filters out generic names like "Speaker 1", "Speaker 2".
+    """
     meeting_id = get_meeting_id_from_key(s3_key, content)
     transcript_text = extract_transcript_text(content)
     speakers = get_speakers(content)
@@ -171,15 +194,29 @@ def process_transcript(s3_key: str, content: dict) -> int:
         print(f"  -> No chunks generated")
         return 0
 
+    # Filter to only real speaker names (not "Speaker 1", etc.)
+    real_speakers = [s for s in speakers if is_real_speaker_name(s)]
+
+    # Create speaker context prefix if we have real names
+    speaker_context = ""
+    if real_speakers:
+        speaker_names = ", ".join(real_speakers)
+        speaker_context = f"Meeting participants: {speaker_names}. "
+        print(f"  -> Including speakers in embeddings: {speaker_names}")
+
     print(f"  -> Generating embeddings for {len(chunks)} chunks...")
 
     # Generate embeddings and prepare vectors
     vectors_to_store = []
-    primary_speaker = speakers[0] if speakers else 'unknown'
+    primary_speaker = real_speakers[0] if real_speakers else (speakers[0] if speakers else 'unknown')
 
     for i, chunk in enumerate(chunks):
-        # Generate embedding
-        embedding = generate_embedding(chunk)
+        # Prepend speaker context to chunk for embedding generation
+        # This ensures speaker names are part of the semantic embedding
+        text_for_embedding = speaker_context + chunk
+
+        # Generate embedding with speaker-enriched text
+        embedding = generate_embedding(text_for_embedding)
 
         # Create vector record
         vector_key = f"{meeting_id}_chunk_{i:04d}"
@@ -191,7 +228,7 @@ def process_transcript(s3_key: str, content: dict) -> int:
                 's3_key': s3_key,
                 'chunk_index': str(i),
                 'speaker': primary_speaker,
-                'text': chunk[:500]  # Truncate for metadata storage
+                'text': chunk[:500]  # Store original chunk (without speaker prefix) for display
             }
         })
 
