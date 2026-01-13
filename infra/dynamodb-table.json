@@ -1,0 +1,33 @@
+{
+  "TableName": "krisp-transcripts-index",
+  "KeySchema": [
+    { "AttributeName": "meeting_id", "KeyType": "HASH" }
+  ],
+  "AttributeDefinitions": [
+    { "AttributeName": "meeting_id", "AttributeType": "S" },
+    { "AttributeName": "date", "AttributeType": "S" },
+    { "AttributeName": "speaker_name", "AttributeType": "S" }
+  ],
+  "GlobalSecondaryIndexes": [
+    {
+      "IndexName": "date-index",
+      "KeySchema": [
+        { "AttributeName": "date", "KeyType": "HASH" },
+        { "AttributeName": "meeting_id", "KeyType": "RANGE" }
+      ],
+      "Projection": { "ProjectionType": "ALL" }
+    },
+    {
+      "IndexName": "speaker-index",
+      "KeySchema": [
+        { "AttributeName": "speaker_name", "KeyType": "HASH" },
+        { "AttributeName": "date", "KeyType": "RANGE" }
+      ],
+      "Projection": { "ProjectionType": "ALL" }
+    }
+  ],
+  "BillingMode": "PAY_PER_REQUEST",
+  "Tags": [
+    { "Key": "Project", "Value": "krisp-buddy" }
+  ]
+}

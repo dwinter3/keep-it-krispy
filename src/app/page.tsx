@@ -66,9 +66,14 @@ export default function DashboardPage() {
       if (diffHours < 24) return `${diffHours}h ago`
       if (diffDays < 7) return `${diffDays}d ago`
 
+      // Display in EST timezone with time
       return date.toLocaleDateString('en-US', {
         month: 'short',
         day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+        timeZone: 'America/New_York',
+        timeZoneName: 'short',
       })
     } catch {
       return dateStr

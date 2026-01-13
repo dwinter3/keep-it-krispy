@@ -1,0 +1,23 @@
+{
+  "LambdaFunctionConfigurations": [
+    {
+      "Id": "ProcessNewTranscripts",
+      "LambdaFunctionArn": "arn:aws:lambda:us-east-1:754639201213:function:krisp-transcript-processor",
+      "Events": ["s3:ObjectCreated:*"],
+      "Filter": {
+        "Key": {
+          "FilterRules": [
+            {
+              "Name": "prefix",
+              "Value": "meetings/"
+            },
+            {
+              "Name": "suffix",
+              "Value": ".json"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

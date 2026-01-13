@@ -1,0 +1,251 @@
+"""
+Processing Lambda for Krisp transcripts.
+Triggered by S3 events when new transcripts are uploaded.
+
+Phase 1: Extract metadata and index to DynamoDB
+Phase 2: Generate embeddings and store in S3 Vectors
+"""
+
+import json
+import os
+import boto3
+from datetime import datetime
+from typing import Any, List, Dict
+from urllib.parse import unquote_plus
+
+from embeddings import generate_embedding, chunk_text, get_bedrock_client
+from vectors import store_vectors, get_vectors_client
+
+# Initialize clients outside handler for reuse
+# AWS_REGION is automatically set by Lambda
+dynamodb = boto3.resource('dynamodb')
+s3 = boto3.client('s3')
+bedrock_client = get_bedrock_client()
+vectors_client = get_vectors_client()
+
+TABLE_NAME = os.environ.get('DYNAMODB_TABLE', 'krisp-transcripts-index')
+ENABLE_VECTORS = os.environ.get('ENABLE_VECTORS', 'true').lower() == 'true'
+table = dynamodb.Table(TABLE_NAME)
+
+
+def handler(event: dict, context: Any) -> dict:
+    """
+    Process S3 events for new transcript uploads.
+    """
+    print(f"Processing event: {json.dumps(event)}")
+
+    processed = 0
+    vectors_stored = 0
+    errors = []
+
+    for record in event.get('Records', []):
+        try:
+            # Extract S3 info from event
+            bucket = record['s3']['bucket']['name']
+            key = unquote_plus(record['s3']['object']['key'])
+
+            # Skip non-JSON files
+            if not key.endswith('.json'):
+                print(f"Skipping non-JSON file: {key}")
+                continue
+
+            # Skip files not in meetings/ prefix
+            if not key.startswith('meetings/'):
+                print(f"Skipping file outside meetings/: {key}")
+                continue
+
+            print(f"Processing: s3://{bucket}/{key}")
+
+            # Fetch transcript from S3
+            response = s3.get_object(Bucket=bucket, Key=key)
+            content = json.loads(response['Body'].read().decode('utf-8'))
+
+            # Extract and index metadata to DynamoDB
+            metadata = extract_metadata(key, content)
+            index_to_dynamodb(metadata)
+            print(f"Indexed to DynamoDB: {metadata['meeting_id']}")
+
+            # Generate embeddings and store vectors
+            if ENABLE_VECTORS:
+                try:
+                    transcript_text = extract_transcript_text(content)
+                    if transcript_text:
+                        num_vectors = process_vectors(
+                            meeting_id=metadata['meeting_id'],
+                            s3_key=key,
+                            transcript_text=transcript_text,
+                            speakers=metadata.get('speakers', [])
+                        )
+                        vectors_stored += num_vectors
+                        print(f"Stored {num_vectors} vectors for: {metadata['meeting_id']}")
+                except Exception as ve:
+                    print(f"Vector processing error (non-fatal): {ve}")
+
+            processed += 1
+
+        except Exception as e:
+            error_msg = f"Error processing {record}: {str(e)}"
+            print(error_msg)
+            errors.append(error_msg)
+
+    result = {
+        'statusCode': 200,
+        'body': json.dumps({
+            'processed': processed,
+            'vectors_stored': vectors_stored,
+            'errors': errors
+        })
+    }
+
+    print(f"Result: {json.dumps(result)}")
+    return result
+
+
+def extract_transcript_text(content: dict) -> str:
+    """Extract raw transcript text from content."""
+    raw_payload = content.get('raw_payload', {})
+    data = raw_payload.get('data', {})
+    return data.get('raw_content', '')
+
+
+def process_vectors(
+    meeting_id: str,
+    s3_key: str,
+    transcript_text: str,
+    speakers: List[str]
+) -> int:
+    """
+    Chunk transcript, generate embeddings, and store vectors.
+
+    Returns number of vectors stored.
+    """
+    # Chunk the transcript
+    chunks = chunk_text(transcript_text, chunk_size=500, overlap=50)
+
+    if not chunks:
+        return 0
+
+    # Generate embeddings and prepare vectors
+    vectors_to_store = []
+    primary_speaker = speakers[0] if speakers else 'unknown'
+
+    for i, chunk in enumerate(chunks):
+        # Generate embedding
+        embedding = generate_embedding(chunk, bedrock_client)
+
+        # Create vector record
+        vector_key = f"{meeting_id}_chunk_{i:04d}"
+        vectors_to_store.append({
+            'key': vector_key,
+            'data': embedding,
+            'metadata': {
+                'meeting_id': meeting_id,
+                's3_key': s3_key,
+                'chunk_index': str(i),
+                'speaker': primary_speaker,
+                'text': chunk[:500]  # Truncate for metadata storage
+            }
+        })
+
+    # Store vectors in batches of 100
+    batch_size = 100
+    for i in range(0, len(vectors_to_store), batch_size):
+        batch = vectors_to_store[i:i + batch_size]
+        store_vectors(batch, vectors_client)
+
+    return len(vectors_to_store)
+
+
+def extract_metadata(s3_key: str, content: dict) -> dict:
+    """
+    Extract metadata from transcript content.
+    """
+    raw_payload = content.get('raw_payload', {})
+    data = raw_payload.get('data', {})
+    meeting = data.get('meeting', {})
+
+    # Extract meeting ID from key or content
+    meeting_id = meeting.get('id', '')
+    if not meeting_id:
+        # Try to extract from filename: YYYYMMDD_HHMMSS_title_meetingId.json
+        filename = s3_key.split('/')[-1]
+        parts = filename.replace('.json', '').split('_')
+        if len(parts) >= 4:
+            meeting_id = parts[-1]
+        else:
+            meeting_id = filename.replace('.json', '')
+
+    # Extract date from meeting or key
+    start_date = meeting.get('start_date', '')
+    if start_date:
+        try:
+            dt = datetime.fromisoformat(start_date.replace('Z', '+00:00'))
+            date_str = dt.strftime('%Y-%m-%d')
+            timestamp = start_date
+        except:
+            date_str = datetime.now().strftime('%Y-%m-%d')
+            timestamp = datetime.now().isoformat()
+    else:
+        # Extract from key: meetings/YYYY/MM/DD/...
+        parts = s3_key.split('/')
+        if len(parts) >= 4:
+            date_str = f"{parts[1]}-{parts[2]}-{parts[3]}"
+        else:
+            date_str = datetime.now().strftime('%Y-%m-%d')
+        timestamp = content.get('received_at', datetime.now().isoformat())
+
+    # Extract speakers
+    speakers_raw = meeting.get('speakers', [])
+    speakers = []
+    for s in speakers_raw:
+        if s.get('first_name'):
+            name = f"{s['first_name']} {s.get('last_name', '')}".strip()
+            speakers.append(name)
+        elif s.get('index'):
+            speakers.append(f"Speaker {s['index']}")
+
+    # Build metadata object
+    metadata = {
+        'meeting_id': meeting_id,
+        'title': meeting.get('title', 'Untitled'),
+        'date': date_str,
+        'timestamp': timestamp,
+        'duration': meeting.get('duration', 0),
+        'speakers': speakers,
+        's3_key': s3_key,
+        'event_type': content.get('event_type', 'unknown'),
+        'received_at': content.get('received_at', ''),
+        'url': meeting.get('url', ''),
+        'indexed_at': datetime.now().isoformat()
+    }
+
+    return metadata
+
+
+def index_to_dynamodb(metadata: dict) -> None:
+    """
+    Index transcript metadata to DynamoDB.
+    """
+    # Prepare item for DynamoDB
+    item = {
+        'meeting_id': metadata['meeting_id'],
+        'title': metadata['title'],
+        'date': metadata['date'],
+        'timestamp': metadata['timestamp'],
+        'duration': metadata['duration'],
+        's3_key': metadata['s3_key'],
+        'event_type': metadata['event_type'],
+        'received_at': metadata['received_at'],
+        'url': metadata['url'],
+        'indexed_at': metadata['indexed_at']
+    }
+
+    # Add speakers (DynamoDB doesn't allow empty lists/sets)
+    if metadata['speakers']:
+        item['speakers'] = metadata['speakers']
+        # Add first speaker as speaker_name for GSI
+        item['speaker_name'] = metadata['speakers'][0].lower()
+
+    # Put item (will overwrite if exists)
+    table.put_item(Item=item)
+    print(f"Indexed to DynamoDB: {metadata['meeting_id']}")

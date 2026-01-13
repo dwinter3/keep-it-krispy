@@ -71,14 +71,22 @@ export default function TranscriptsPage() {
     }
   }
 
-  function formatDate(dateStr: string) {
+  function formatDate(dateStr: string, includeTime = false) {
     try {
       const date = new Date(dateStr)
-      return date.toLocaleDateString('en-US', {
+      // Display in EST timezone
+      const options: Intl.DateTimeFormatOptions = {
         month: 'short',
         day: 'numeric',
         year: 'numeric',
-      })
+        timeZone: 'America/New_York',
+      }
+      if (includeTime) {
+        options.hour = 'numeric'
+        options.minute = '2-digit'
+        options.timeZoneName = 'short'
+      }
+      return date.toLocaleDateString('en-US', options)
     } catch {
       return dateStr
     }
@@ -207,7 +215,7 @@ export default function TranscriptsPage() {
 
                   <div className="flex flex-wrap gap-2 mb-4 text-sm">
                     <span className="px-2 py-1 bg-zinc-800 rounded text-zinc-400">
-                      {formatDate(selectedTranscript.date || selectedTranscript.timestamp)}
+                      {formatDate(selectedTranscript.timestamp || selectedTranscript.date, true)}
                     </span>
                     <span className="px-2 py-1 bg-zinc-800 rounded text-zinc-400">
                       {formatDuration(selectedTranscript.duration)}
