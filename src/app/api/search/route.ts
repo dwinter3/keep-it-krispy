@@ -43,10 +43,14 @@ export async function GET(request: NextRequest) {
 
   try {
     // Generate embedding for query using Bedrock Titan
+    console.log('Generating embedding for:', query)
     const embedding = await generateEmbedding(query)
+    console.log('Embedding generated, length:', embedding.length)
 
     // Query S3 Vectors
+    console.log('Querying vectors with topK:', limit * 2)
     const vectorResults = await queryVectors(embedding, limit * 2)
+    console.log('Vector results count:', vectorResults.length)
 
     // Group by meeting and get metadata from DynamoDB
     const meetingGroups = new Map<string, {
@@ -128,6 +132,8 @@ async function generateEmbedding(text: string): Promise<number[]> {
 
 async function queryVectors(embedding: number[], topK: number): Promise<VectorResult[]> {
   try {
+    console.log('Creating S3VectorsClient with region:', AWS_REGION)
+    console.log('Vector bucket:', VECTOR_BUCKET, 'Index:', INDEX_NAME)
     const vectorsClient = new S3VectorsClient({ region: AWS_REGION, credentials })
     const command = new QueryVectorsCommand({
       vectorBucketName: VECTOR_BUCKET,
@@ -136,11 +142,14 @@ async function queryVectors(embedding: number[], topK: number): Promise<VectorRe
       topK,
       returnMetadata: true,
     })
+    console.log('Sending query to S3 Vectors...')
     const response = await vectorsClient.send(command)
+    console.log('S3 Vectors response vectors count:', response.vectors?.length || 0)
     return (response.vectors || []) as VectorResult[]
   } catch (error) {
     console.error('Vector query error:', error)
-    return []
+    // Return error details for debugging
+    throw error
   }
 }
 
