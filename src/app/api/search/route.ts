@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { BedrockRuntimeClient, InvokeModelCommand } from '@aws-sdk/client-bedrock-runtime'
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb'
 import { DynamoDBDocumentClient, GetCommand } from '@aws-sdk/lib-dynamodb'
+import { S3VectorsClient, QueryVectorsCommand } from '@aws-sdk/client-s3vectors'
 
 const AWS_REGION = process.env.APP_REGION || 'us-east-1'
 const VECTOR_BUCKET = process.env.VECTOR_BUCKET || 'krisp-vectors'
@@ -126,44 +127,17 @@ async function generateEmbedding(text: string): Promise<number[]> {
 }
 
 async function queryVectors(embedding: number[], topK: number): Promise<VectorResult[]> {
-  // Use AWS CLI via fetch to internal endpoint or direct SDK
-  // For Amplify, we'll use a simplified approach with the vectors API
-
-  // Since @aws-sdk/client-s3vectors may not be available, we use a workaround
-  // This calls the S3 Vectors API directly using fetch
-
-  const endpoint = `https://s3vectors.${AWS_REGION}.amazonaws.com`
-  const path = `/vector-buckets/${VECTOR_BUCKET}/indexes/${INDEX_NAME}/query`
-
-  const body = JSON.stringify({
-    queryVector: { float32: embedding },
-    topK,
-    returnMetadata: true,
-  })
-
   try {
-    // For server-side, we need to sign the request
-    // Using the AWS SDK's built-in signing would be ideal
-    // For now, we'll use a simpler approach with environment-based auth
-
-    const { S3VectorsClient, QueryVectorsCommand } = await import('@aws-sdk/client-s3vectors').catch(() => ({ S3VectorsClient: null, QueryVectorsCommand: null }))
-
-    if (S3VectorsClient && QueryVectorsCommand) {
-      const vectorsClient = new S3VectorsClient({ region: AWS_REGION, credentials })
-      const command = new QueryVectorsCommand({
-        vectorBucketName: VECTOR_BUCKET,
-        indexName: INDEX_NAME,
-        queryVector: { float32: embedding },
-        topK,
-        returnMetadata: true,
-      })
-      const response = await vectorsClient.send(command)
-      return (response.vectors || []) as VectorResult[]
-    }
-
-    // Fallback: return empty if SDK not available
-    console.warn('S3 Vectors SDK not available')
-    return []
+    const vectorsClient = new S3VectorsClient({ region: AWS_REGION, credentials })
+    const command = new QueryVectorsCommand({
+      vectorBucketName: VECTOR_BUCKET,
+      indexName: INDEX_NAME,
+      queryVector: { float32: embedding },
+      topK,
+      returnMetadata: true,
+    })
+    const response = await vectorsClient.send(command)
+    return (response.vectors || []) as VectorResult[]
   } catch (error) {
     console.error('Vector query error:', error)
     return []
