@@ -3,7 +3,7 @@ import { BedrockRuntimeClient, InvokeModelCommand } from '@aws-sdk/client-bedroc
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb'
 import { DynamoDBDocumentClient, GetCommand } from '@aws-sdk/lib-dynamodb'
 
-const AWS_REGION = process.env.AWS_REGION || 'us-east-1'
+const AWS_REGION = process.env.APP_REGION || 'us-east-1'
 const VECTOR_BUCKET = process.env.VECTOR_BUCKET || 'krisp-vectors'
 const INDEX_NAME = process.env.VECTOR_INDEX || 'transcript-chunks'
 const TABLE_NAME = process.env.DYNAMODB_TABLE || 'krisp-transcripts-index'

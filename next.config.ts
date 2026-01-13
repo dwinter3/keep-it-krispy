@@ -10,7 +10,7 @@ const nextConfig: NextConfig = {
     DYNAMODB_TABLE: process.env.DYNAMODB_TABLE || 'krisp-transcripts-index',
     VECTOR_BUCKET: process.env.VECTOR_BUCKET || 'krisp-vectors',
     VECTOR_INDEX: process.env.VECTOR_INDEX || 'transcript-chunks',
-    AWS_REGION: process.env.AWS_REGION || 'us-east-1',
+    APP_REGION: process.env.APP_REGION || 'us-east-1',
   },
 };
 

@@ -5,7 +5,7 @@ import { DynamoDBDocumentClient, ScanCommand, QueryCommand } from '@aws-sdk/lib-
 
 const BUCKET_NAME = process.env.KRISP_S3_BUCKET || 'krisp-transcripts-754639201213'
 const TABLE_NAME = process.env.DYNAMODB_TABLE || 'krisp-transcripts-index'
-const AWS_REGION = process.env.AWS_REGION || 'us-east-1'
+const AWS_REGION = process.env.APP_REGION || 'us-east-1'
 
 // AWS clients with custom credentials for Amplify
 const credentials = process.env.S3_ACCESS_KEY_ID ? {
