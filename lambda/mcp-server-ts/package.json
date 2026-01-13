@@ -12,7 +12,11 @@
     "stdio": "node dist/stdio-server.js",
     "local": "npx tsx src/local-server.ts"
   },
-  "keywords": ["mcp", "krisp", "transcripts"],
+  "keywords": [
+    "mcp",
+    "krisp",
+    "transcripts"
+  ],
   "author": "",
   "license": "ISC",
   "type": "module",
@@ -20,6 +24,7 @@
     "@aws-sdk/client-bedrock-runtime": "^3.967.0",
     "@aws-sdk/client-dynamodb": "^3.967.0",
     "@aws-sdk/client-s3": "^3.967.0",
+    "@aws-sdk/client-s3vectors": "^3.968.0",
     "@aws-sdk/lib-dynamodb": "^3.967.0",
     "@modelcontextprotocol/sdk": "^1.25.2",
     "express": "^5.2.1",
