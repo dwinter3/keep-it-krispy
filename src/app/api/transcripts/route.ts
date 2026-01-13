@@ -3,7 +3,7 @@ import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3'
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb'
 import { DynamoDBDocumentClient, ScanCommand, QueryCommand } from '@aws-sdk/lib-dynamodb'
 
-const BUCKET_NAME = process.env.KRISP_S3_BUCKET || 'krisp-transcripts-754639201213'
+const BUCKET_NAME = process.env.KRISP_S3_BUCKET || ''  // Required: set via environment variable
 const TABLE_NAME = process.env.DYNAMODB_TABLE || 'krisp-transcripts-index'
 const AWS_REGION = process.env.APP_REGION || 'us-east-1'
 

@@ -21,6 +21,7 @@ dist/
 
 # Environment files
 .env*
+!.env.example
 
 # OS files
 .DS_Store
@@ -44,3 +45,11 @@ next-env.d.ts
 
 # Lambda build artifacts
 lambda/*.zip
+lambda/*/package/
+lambda/*/.build/
+lambda/*/deployment.zip
+lambda/*/__pycache__/
+lambda/*/.venv/
+
+# Root level build artifacts
+/package/

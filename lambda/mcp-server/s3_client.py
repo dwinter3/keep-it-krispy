@@ -9,7 +9,7 @@ from typing import List, Optional, Dict, Any
 import boto3
 from botocore.config import Config
 
-BUCKET_NAME = os.environ.get("KRISP_S3_BUCKET", "krisp-transcripts-754639201213")
+BUCKET_NAME = os.environ.get("KRISP_S3_BUCKET", "")  # Required: set via environment variable
 AWS_REGION = os.environ.get("AWS_REGION", "us-east-1")
 
 # Key format regex: YYYYMMDD_HHMMSS_title_meetingId.json

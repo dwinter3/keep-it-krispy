@@ -4,7 +4,7 @@
 
 import { S3Client, ListObjectsV2Command, GetObjectCommand } from '@aws-sdk/client-s3';
 
-const BUCKET_NAME = process.env.KRISP_S3_BUCKET || 'krisp-transcripts-754639201213';
+const BUCKET_NAME = process.env.KRISP_S3_BUCKET || '';  // Required: set via environment variable
 const AWS_REGION = process.env.AWS_REGION || 'us-east-1';
 
 // Key format regex: YYYYMMDD_HHMMSS_title_meetingId.json

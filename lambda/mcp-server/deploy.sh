@@ -8,7 +8,7 @@ FUNCTION_NAME="${FUNCTION_NAME:-krisp-mcp-server}"
 REGION="${AWS_REGION:-us-east-1}"
 RUNTIME="python3.11"
 ROLE_NAME="krisp-mcp-server-role"
-BUCKET_NAME="${KRISP_S3_BUCKET:-krisp-transcripts-754639201213}"
+BUCKET_NAME="${KRISP_S3_BUCKET:?ERROR: Set KRISP_S3_BUCKET environment variable}"
 
 echo "=== Keep It Krispy MCP Server Deployment ==="
 echo "Function: $FUNCTION_NAME"

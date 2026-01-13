@@ -15,7 +15,7 @@
       "Action": [
         "s3:GetObject"
       ],
-      "Resource": "arn:aws:s3:::krisp-transcripts-754639201213/*"
+      "Resource": "arn:aws:s3:::${KRISP_S3_BUCKET}/*"
     },
     {
       "Effect": "Allow",
@@ -26,8 +26,8 @@
         "dynamodb:Query"
       ],
       "Resource": [
-        "arn:aws:dynamodb:us-east-1:754639201213:table/krisp-transcripts-index",
-        "arn:aws:dynamodb:us-east-1:754639201213:table/krisp-transcripts-index/index/*"
+        "arn:aws:dynamodb:${AWS_REGION}:${AWS_ACCOUNT_ID}:table/${DYNAMODB_TABLE}",
+        "arn:aws:dynamodb:${AWS_REGION}:${AWS_ACCOUNT_ID}:table/${DYNAMODB_TABLE}/index/*"
       ]
     },
     {
@@ -35,7 +35,7 @@
       "Action": [
         "bedrock:InvokeModel"
       ],
-      "Resource": "arn:aws:bedrock:us-east-1::foundation-model/amazon.titan-embed-text-v2:0"
+      "Resource": "arn:aws:bedrock:${AWS_REGION}::foundation-model/amazon.titan-embed-text-v2:0"
     },
     {
       "Effect": "Allow",
@@ -46,8 +46,8 @@
         "s3vectors:DeleteVectors"
       ],
       "Resource": [
-        "arn:aws:s3vectors:us-east-1:754639201213:bucket/krisp-vectors",
-        "arn:aws:s3vectors:us-east-1:754639201213:bucket/krisp-vectors/index/*"
+        "arn:aws:s3vectors:${AWS_REGION}:${AWS_ACCOUNT_ID}:bucket/${VECTOR_BUCKET}",
+        "arn:aws:s3vectors:${AWS_REGION}:${AWS_ACCOUNT_ID}:bucket/${VECTOR_BUCKET}/index/*"
       ]
     }
   ]

@@ -8,9 +8,11 @@ import json
 import boto3
 from datetime import datetime
 
-BUCKET_NAME = 'krisp-transcripts-754639201213'
-TABLE_NAME = 'krisp-transcripts-index'
-REGION = 'us-east-1'
+import os
+
+BUCKET_NAME = os.environ.get('KRISP_S3_BUCKET', '')  # Required: set KRISP_S3_BUCKET env var
+TABLE_NAME = os.environ.get('DYNAMODB_TABLE', 'krisp-transcripts-index')
+REGION = os.environ.get('AWS_REGION', 'us-east-1')
 
 s3 = boto3.client('s3', region_name=REGION)
 dynamodb = boto3.resource('dynamodb', region_name=REGION)

@@ -3,8 +3,8 @@ set -e
 
 FUNCTION_NAME="krisp-transcript-processor"
 ROLE_NAME="krisp-processor-lambda-role"
-REGION="us-east-1"
-ACCOUNT_ID="754639201213"
+REGION="${AWS_REGION:-us-east-1}"
+ACCOUNT_ID="${AWS_ACCOUNT_ID:?ERROR: Set AWS_ACCOUNT_ID environment variable}"
 
 cd "$(dirname "$0")"
 
@@ -68,4 +68,4 @@ rm -rf package deployment.zip
 
 echo ""
 echo "Next: Configure S3 event notification with:"
-echo "aws s3api put-bucket-notification-configuration --bucket krisp-transcripts-754639201213 --notification-configuration file://s3-notification.json"
+echo "aws s3api put-bucket-notification-configuration --bucket \$KRISP_S3_BUCKET --notification-configuration file://s3-notification.json"

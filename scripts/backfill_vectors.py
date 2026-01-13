@@ -12,10 +12,12 @@ from typing import List, Dict, Any
 # Add processor module to path
 sys.path.insert(0, '../lambda/processor')
 
-BUCKET_NAME = 'krisp-transcripts-754639201213'
-VECTOR_BUCKET = 'krisp-vectors'
-INDEX_NAME = 'transcript-chunks'
-REGION = 'us-east-1'
+import os
+
+BUCKET_NAME = os.environ.get('KRISP_S3_BUCKET', '')  # Required: set KRISP_S3_BUCKET env var
+VECTOR_BUCKET = os.environ.get('VECTOR_BUCKET', 'krisp-vectors')
+INDEX_NAME = os.environ.get('VECTOR_INDEX', 'transcript-chunks')
+REGION = os.environ.get('AWS_REGION', 'us-east-1')
 
 # Titan Text Embeddings V2 configuration
 MODEL_ID = 'amazon.titan-embed-text-v2:0'

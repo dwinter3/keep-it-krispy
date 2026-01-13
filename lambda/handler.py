@@ -5,7 +5,7 @@ from datetime import datetime
 
 s3 = boto3.client('s3')
 
-BUCKET_NAME = os.environ.get('KRISP_S3_BUCKET', 'krisp-transcripts-754639201213')
+BUCKET_NAME = os.environ.get('KRISP_S3_BUCKET', '')  # Required: set via environment variable
 WEBHOOK_AUTH_KEY = os.environ.get('KRISP_WEBHOOK_AUTH_KEY')
 
 
