@@ -622,6 +622,33 @@
     .step-dot.completed {
       background: #00d4aa;
     }
+
+    /* AWS Setup steps */
+    .setup-step {
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 8px;
+      padding: 20px;
+      margin-bottom: 15px;
+    }
+
+    .setup-step h4 {
+      color: #00d4aa;
+      margin-bottom: 10px;
+      font-size: 1rem;
+    }
+
+    .setup-step p {
+      margin-bottom: 10px;
+    }
+
+    .setup-step ol {
+      margin: 10px 0 10px 20px;
+    }
+
+    .setup-step li {
+      margin-bottom: 6px;
+    }
   </style>
 </head>
 <body>
@@ -791,6 +818,73 @@
         </div>
       </div>
 
+      <h3>AWS Setup Guide</h3>
+      <p>If you don't have AWS CLI configured yet, follow these steps:</p>
+
+      <div class="setup-step">
+        <h4>1. Install AWS CLI</h4>
+        <p>Download and install from <a href="https://aws.amazon.com/cli/" style="color: #00d4aa;">aws.amazon.com/cli</a></p>
+        <div class="curl-command" style="font-size: 0.85rem;">brew install awscli</div>
+        <p style="font-size: 0.85rem; margin-top: 8px;">Or use the official installer for your platform.</p>
+      </div>
+
+      <div class="setup-step">
+        <h4>2. Create an IAM User (if needed)</h4>
+        <p>The install script needs an IAM user with permissions to create AWS resources. If you have admin access, you're good. Otherwise:</p>
+        <ol style="font-size: 0.9rem;">
+          <li>Go to <strong>AWS Console → IAM → Users → Create User</strong></li>
+          <li>Name it something like <code>krisp-deployer</code></li>
+          <li>Attach the <code>AdministratorAccess</code> policy (or create a scoped policy)</li>
+          <li>Create an <strong>Access Key</strong> (Security credentials → Create access key → CLI)</li>
+          <li>Save the <strong>Access Key ID</strong> and <strong>Secret Access Key</strong></li>
+        </ol>
+        <div class="info-box" style="margin-top: 15px;">
+          <h4>Minimum Required Permissions</h4>
+          <p style="font-size: 0.85rem; margin: 0;">If you prefer not to use AdministratorAccess, the installer needs: <code>cloudformation:*</code>, <code>s3:*</code>, <code>dynamodb:*</code>, <code>lambda:*</code>, <code>iam:*</code>, <code>bedrock:*</code>, <code>logs:*</code></p>
+        </div>
+      </div>
+
+      <div class="setup-step">
+        <h4>3. Configure AWS CLI</h4>
+        <p>Run <code>aws configure</code> and enter your credentials:</p>
+        <pre class="architecture" style="font-size: 0.85rem;">$ aws configure
+AWS Access Key ID [None]: <span style="color: #fbbf24;">AKIA...</span>
+AWS Secret Access Key [None]: <span style="color: #fbbf24;">wJalr...</span>
+Default region name [None]: <span style="color: #fbbf24;">us-east-1</span>
+Default output format [None]: <span style="color: #fbbf24;">json</span></pre>
+        <p style="font-size: 0.85rem; margin-top: 10px;">This stores credentials in <code>~/.aws/credentials</code>. You can also use named profiles with <code>aws configure --profile myprofile</code>.</p>
+      </div>
+
+      <div class="setup-step">
+        <h4>4. Enable Bedrock Model Access</h4>
+        <p>The semantic search feature uses Amazon Bedrock's Titan embeddings. You need to enable model access:</p>
+        <ol style="font-size: 0.9rem;">
+          <li>Go to <strong>AWS Console → Amazon Bedrock → Model access</strong></li>
+          <li>Click <strong>"Manage model access"</strong></li>
+          <li>Find <strong>Amazon → Titan Text Embeddings V2</strong></li>
+          <li>Check the box and click <strong>"Request model access"</strong></li>
+          <li>Access is usually granted instantly</li>
+        </ol>
+      </div>
+
+      <div class="setup-step">
+        <h4>5. Verify Setup</h4>
+        <p>Confirm everything is working:</p>
+        <pre class="architecture" style="font-size: 0.85rem;">$ aws sts get-caller-identity
+{
+    "UserId": "AIDA...",
+    "Account": "<span style="color: #00d4aa;">123456789012</span>",
+    "Arn": "arn:aws:iam::123456789012:user/krisp-deployer"
+}</pre>
+        <p style="font-size: 0.85rem; margin-top: 10px;">If this works, you're ready to run the install script!</p>
+      </div>
+
+      <div class="info-box" style="margin-top: 20px;">
+        <h4>Using a Named Profile?</h4>
+        <p>If your credentials are in a named profile (not default), set the environment variable before running the install:</p>
+        <div class="curl-command" style="font-size: 0.85rem;">AWS_PROFILE=myprofile curl -fsSL https://krispy.alpha-pm.dev/install.sh | bash</div>
+      </div>
+
       <h3>What It Asks You</h3>
       <ul>
         <li><strong>"Continue with deployment? [y/N]"</strong> — Confirmation before creating AWS resources</li>
@@ -951,53 +1045,101 @@ Krisp App → Webhook Lambda → S3 (raw JSON)
     const installSteps = [
       {
         label: 'auto',
-        title: 'Downloading & Running',
+        title: 'Prerequisites Check',
         content: `<span class="muted">$ curl -fsSL https://krispy.alpha-pm.dev/install.sh | bash</span>
 
 <span class="success">Keep It Krispy - Installer</span>
 ========================================
 
 Checking prerequisites...
-  <span class="success">✓</span> Git found
-  <span class="success">✓</span> Node.js 20.11.0 found
-  <span class="success">✓</span> Python 3.12.0 found
-  <span class="success">✓</span> AWS CLI found
 
-Checking AWS configuration...
-  <span class="success">✓</span> AWS credentials configured
-  <span class="success">✓</span> Region: us-east-1
-  <span class="success">✓</span> Account: 123456789012`
+  Git...         <span class="success">✓</span> (2.43.0)
+  Node.js 18+... <span class="success">✓</span> (v20.11.0)
+  Python 3.11+.. <span class="success">✓</span> (3.12.0)
+  AWS CLI...     <span class="success">✓</span> (2.15.0)
+
+<span class="muted">If AWS CLI is missing, the installer will show
+OS-specific install instructions (brew, apt, etc.)</span>`
       },
       {
         label: 'auto',
-        title: 'Cloning Repository',
-        content: `Cloning repository...
-  <span class="success">✓</span> Cloned to ~/keep-it-krispy
+        title: 'AWS Credentials Check',
+        content: `Checking AWS credentials...
 
-Installing MCP server dependencies...
-  <span class="muted">npm install...</span>
-  <span class="success">✓</span> Dependencies installed
+  AWS credentials... <span class="success">✓</span>
+  Account: <span class="highlight-url">123456789012</span>
+  Identity: arn:aws:iam::123456789012:user/my-user
+  Region: us-east-1
 
-Building MCP server...
-  <span class="muted">npm run build...</span>
-  <span class="success">✓</span> Built to dist/stdio-server.cjs`
+<span class="muted">If credentials aren't configured, the installer will
+offer to run 'aws configure' interactively and guide
+you through creating an IAM user + access key.</span>`
+      },
+      {
+        label: 'auto',
+        title: 'Permission Validation',
+        content: `→ Validating AWS permissions...
+
+  Checking S3...            <span class="success">✓</span>
+  Checking CloudFormation... <span class="success">✓</span>
+  Checking Lambda...        <span class="success">✓</span>
+  Checking DynamoDB...      <span class="success">✓</span>
+  Checking IAM...           <span class="success">✓</span>
+  Checking Bedrock...       <span class="success">✓</span>
+
+<span class="success">✓ AWS permissions validated</span>
+
+<span class="muted">The installer validates your IAM permissions BEFORE
+attempting deployment. If permissions are missing,
+it tells you exactly what's needed.</span>`
+      },
+      {
+        label: 'auto',
+        title: 'Bedrock Model Access',
+        content: `→ Checking Bedrock model access...
+
+<span class="success">✓ Bedrock Titan Embeddings: Access granted</span>
+
+<span class="muted">If model access isn't enabled, the installer provides
+a direct link to the Bedrock console to request access:
+
+  1. Go to AWS Console → Amazon Bedrock → Model access
+  2. Click "Manage model access"
+  3. Select "Amazon" → "Titan Text Embeddings V2"
+  4. Click "Request model access"
+
+Access is usually granted instantly.</span>`
+      },
+      {
+        label: 'auto',
+        title: 'Clone Repository',
+        content: `→ Cloning repository...
+<span class="success">✓ Repository ready at ~/keep-it-krispy</span>
+
+→ Building MCP server...
+<span class="muted">npm install...</span>
+<span class="success">✓ Dependencies installed</span>
+<span class="muted">npm run build...</span>
+<span class="success">✓ MCP server built</span>`
       },
       {
         label: 'input',
         title: 'Confirmation Required',
-        content: `<span class="warning">AWS Resources to be created:</span>
-  • S3 Bucket: krisp-transcripts-123456789012
-  • S3 Bucket: krisp-vectors-123456789012
-  • DynamoDB Table: krisp-transcripts-index
-  • Lambda: krisp-webhook-handler
-  • Lambda: krisp-transcript-processor
-  • IAM Roles for Lambda execution
+        content: `═══════════════════════════════════════════════════════════
+  Deploying AWS Infrastructure
+═══════════════════════════════════════════════════════════
 
-Estimated monthly cost: <span class="success">&lt; $2/month</span>
+This will create in your AWS account:
+  • S3 bucket for transcripts
+  • S3 bucket for vector embeddings
+  • DynamoDB table for metadata
+  • Lambda functions for webhook & processing
+
+Estimated cost: <span class="success">&lt; $2/month</span> (mostly free tier)
 
 <span class="warning">Continue with deployment? [y/N]</span> <span class="user-input">y</span>
 
-<span class="muted">This is the only input required during install.</span>`
+<span class="muted">This is the only user input required during install.</span>`
       },
       {
         label: 'auto',
