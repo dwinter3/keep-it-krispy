@@ -829,18 +829,27 @@
       </div>
 
       <div class="setup-step">
-        <h4>2. Create an IAM User (if needed)</h4>
-        <p>The install script needs an IAM user with permissions to create AWS resources. If you have admin access, you're good. Otherwise:</p>
+        <h4>2. Create an IAM User with Scoped Permissions</h4>
+        <p>The install script needs an IAM user with permissions to create AWS resources. We provide a minimal policy:</p>
         <ol style="font-size: 0.9rem;">
-          <li>Go to <strong>AWS Console → IAM → Users → Create User</strong></li>
-          <li>Name it something like <code>krisp-deployer</code></li>
-          <li>Attach the <code>AdministratorAccess</code> policy (or create a scoped policy)</li>
+          <li>Go to <strong>AWS Console → IAM → Policies → Create Policy</strong></li>
+          <li>Click <strong>JSON</strong> tab and paste the policy below</li>
+          <li>Name it <code>KrispBuddyDeployerPolicy</code></li>
+          <li>Go to <strong>IAM → Users → Create User</strong></li>
+          <li>Name it <code>krisp-deployer</code></li>
+          <li>Attach your new <code>KrispBuddyDeployerPolicy</code></li>
           <li>Create an <strong>Access Key</strong> (Security credentials → Create access key → CLI)</li>
           <li>Save the <strong>Access Key ID</strong> and <strong>Secret Access Key</strong></li>
         </ol>
+        <div style="margin-top: 15px;">
+          <a href="iam-policy.json" download="KrispBuddyDeployerPolicy.json" class="preview-btn" style="text-decoration: none;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+            Download IAM Policy JSON
+          </a>
+        </div>
         <div class="info-box" style="margin-top: 15px;">
-          <h4>Minimum Required Permissions</h4>
-          <p style="font-size: 0.85rem; margin: 0;">If you prefer not to use AdministratorAccess, the installer needs: <code>cloudformation:*</code>, <code>s3:*</code>, <code>dynamodb:*</code>, <code>lambda:*</code>, <code>iam:*</code>, <code>bedrock:*</code>, <code>logs:*</code></p>
+          <h4>What the policy allows</h4>
+          <p style="font-size: 0.85rem; margin: 0;">CloudFormation stack deployment, S3 bucket creation (krisp-* only), DynamoDB table creation, Lambda function management, IAM role creation (krisp-buddy-* only), CloudWatch Logs, Bedrock Titan embeddings, and S3 Vectors.</p>
         </div>
       </div>
 

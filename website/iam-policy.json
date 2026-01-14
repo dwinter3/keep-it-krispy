@@ -1,0 +1,183 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "CloudFormationFullAccess",
+      "Effect": "Allow",
+      "Action": [
+        "cloudformation:CreateStack",
+        "cloudformation:UpdateStack",
+        "cloudformation:DeleteStack",
+        "cloudformation:DescribeStacks",
+        "cloudformation:DescribeStackEvents",
+        "cloudformation:DescribeStackResources",
+        "cloudformation:GetTemplate",
+        "cloudformation:ValidateTemplate",
+        "cloudformation:CreateChangeSet",
+        "cloudformation:DescribeChangeSet",
+        "cloudformation:ExecuteChangeSet",
+        "cloudformation:DeleteChangeSet",
+        "cloudformation:ListStacks"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "S3BucketManagement",
+      "Effect": "Allow",
+      "Action": [
+        "s3:CreateBucket",
+        "s3:DeleteBucket",
+        "s3:PutBucketPolicy",
+        "s3:GetBucketPolicy",
+        "s3:PutBucketNotification",
+        "s3:GetBucketNotification",
+        "s3:PutBucketVersioning",
+        "s3:GetBucketVersioning",
+        "s3:PutEncryptionConfiguration",
+        "s3:GetEncryptionConfiguration",
+        "s3:PutBucketPublicAccessBlock",
+        "s3:GetBucketPublicAccessBlock",
+        "s3:ListBucket",
+        "s3:GetBucketLocation",
+        "s3:PutObject",
+        "s3:GetObject",
+        "s3:DeleteObject"
+      ],
+      "Resource": [
+        "arn:aws:s3:::krisp-transcripts-*",
+        "arn:aws:s3:::krisp-transcripts-*/*",
+        "arn:aws:s3:::krisp-vectors-*",
+        "arn:aws:s3:::krisp-vectors-*/*"
+      ]
+    },
+    {
+      "Sid": "S3VectorsManagement",
+      "Effect": "Allow",
+      "Action": [
+        "s3vectors:CreateVectorBucket",
+        "s3vectors:DeleteVectorBucket",
+        "s3vectors:ListVectorBuckets",
+        "s3vectors:CreateIndex",
+        "s3vectors:DeleteIndex",
+        "s3vectors:ListIndexes",
+        "s3vectors:PutVectors",
+        "s3vectors:GetVectors",
+        "s3vectors:QueryVectors",
+        "s3vectors:DeleteVectors"
+      ],
+      "Resource": [
+        "arn:aws:s3vectors:*:*:bucket/krisp-vectors-*",
+        "arn:aws:s3vectors:*:*:bucket/krisp-vectors-*/index/*"
+      ]
+    },
+    {
+      "Sid": "DynamoDBTableManagement",
+      "Effect": "Allow",
+      "Action": [
+        "dynamodb:CreateTable",
+        "dynamodb:DeleteTable",
+        "dynamodb:DescribeTable",
+        "dynamodb:UpdateTable",
+        "dynamodb:ListTables",
+        "dynamodb:PutItem",
+        "dynamodb:GetItem",
+        "dynamodb:UpdateItem",
+        "dynamodb:DeleteItem",
+        "dynamodb:Query",
+        "dynamodb:Scan"
+      ],
+      "Resource": [
+        "arn:aws:dynamodb:*:*:table/krisp-transcripts-index",
+        "arn:aws:dynamodb:*:*:table/krisp-transcripts-index/index/*"
+      ]
+    },
+    {
+      "Sid": "LambdaFunctionManagement",
+      "Effect": "Allow",
+      "Action": [
+        "lambda:CreateFunction",
+        "lambda:DeleteFunction",
+        "lambda:GetFunction",
+        "lambda:GetFunctionConfiguration",
+        "lambda:UpdateFunctionCode",
+        "lambda:UpdateFunctionConfiguration",
+        "lambda:AddPermission",
+        "lambda:RemovePermission",
+        "lambda:CreateFunctionUrlConfig",
+        "lambda:DeleteFunctionUrlConfig",
+        "lambda:GetFunctionUrlConfig",
+        "lambda:ListFunctions",
+        "lambda:InvokeFunction",
+        "lambda:TagResource"
+      ],
+      "Resource": [
+        "arn:aws:lambda:*:*:function:krisp-buddy-*"
+      ]
+    },
+    {
+      "Sid": "IAMRoleManagement",
+      "Effect": "Allow",
+      "Action": [
+        "iam:CreateRole",
+        "iam:DeleteRole",
+        "iam:GetRole",
+        "iam:PutRolePolicy",
+        "iam:DeleteRolePolicy",
+        "iam:GetRolePolicy",
+        "iam:AttachRolePolicy",
+        "iam:DetachRolePolicy",
+        "iam:ListRolePolicies",
+        "iam:ListAttachedRolePolicies",
+        "iam:PassRole",
+        "iam:TagRole",
+        "iam:ListRoles"
+      ],
+      "Resource": [
+        "arn:aws:iam::*:role/krisp-buddy-*"
+      ]
+    },
+    {
+      "Sid": "CloudWatchLogsManagement",
+      "Effect": "Allow",
+      "Action": [
+        "logs:CreateLogGroup",
+        "logs:DeleteLogGroup",
+        "logs:DescribeLogGroups",
+        "logs:PutRetentionPolicy",
+        "logs:TagLogGroup"
+      ],
+      "Resource": [
+        "arn:aws:logs:*:*:log-group:/aws/lambda/krisp-buddy-*"
+      ]
+    },
+    {
+      "Sid": "BedrockModelAccess",
+      "Effect": "Allow",
+      "Action": [
+        "bedrock:InvokeModel",
+        "bedrock:ListFoundationModels",
+        "bedrock:GetFoundationModel"
+      ],
+      "Resource": [
+        "arn:aws:bedrock:*::foundation-model/amazon.titan-embed-text-v1",
+        "arn:aws:bedrock:*::foundation-model/amazon.titan-embed-text-v2:0"
+      ]
+    },
+    {
+      "Sid": "BedrockListModels",
+      "Effect": "Allow",
+      "Action": [
+        "bedrock:ListFoundationModels"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "STSGetCallerIdentity",
+      "Effect": "Allow",
+      "Action": [
+        "sts:GetCallerIdentity"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
