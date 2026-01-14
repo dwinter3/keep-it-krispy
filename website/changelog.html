@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Changelog - Keep It Krispy</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="icon" type="image/png" sizes="32x32" href="favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="favicon-16x16.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
+  <link rel="icon" href="favicon.ico">
+  <meta name="theme-color" content="#0a0a0a">
+</head>
+<body>
+  <nav>
+    <div class="nav-container">
+      <a href="index.html" class="nav-brand">Keep It Krispy</a>
+      <ul class="nav-links">
+        <li><a href="index.html">Home</a></li>
+        <li><a href="install.html">Install</a></li>
+        <li><a href="mcp.html">MCP Setup</a></li>
+        <li><a href="examples.html">Examples</a></li>
+        <li><a href="changelog.html" class="active">Changelog</a></li>
+        <li><a href="https://github.com/dwinter3/keep-it-krispy">GitHub</a></li>
+      </ul>
+    </div>
+  </nav>
+
+  <div class="container">
+    <h1>Changelog</h1>
+    <p>All notable changes to Keep It Krispy. Also available on <a href="https://github.com/dwinter3/keep-it-krispy/blob/main/CHANGELOG.md" style="color: #00d4aa;">GitHub</a>.</p>
+
+    <!-- v1.2.0 -->
+    <section class="changelog-version">
+      <div class="version-header">
+        <h2>v1.2.0</h2>
+        <span class="version-date">January 14, 2025</span>
+        <span class="version-tag latest">Latest</span>
+      </div>
+
+      <h3>Speaker Identification</h3>
+      <ul class="changelog-list">
+        <li>
+          <span class="badge new">New</span>
+          <strong>Speaker Correction Tool</strong> — Map unknown speakers like "Speaker 2" to real names via the <code>update_speakers</code> MCP tool
+        </li>
+        <li>
+          <span class="badge new">New</span>
+          <strong>LinkedIn Integration</strong> — Optionally store LinkedIn URLs when identifying speakers
+        </li>
+        <li>
+          <span class="badge new">New</span>
+          <strong>Auto-Apply Corrections</strong> — Speaker corrections automatically applied when fetching transcripts
+        </li>
+        <li>
+          <span class="badge new">New</span>
+          <strong>Transcript Text Replacement</strong> — Corrected names replace original names throughout the transcript text
+        </li>
+      </ul>
+
+      <h3>Admin Dashboard</h3>
+      <ul class="changelog-list">
+        <li>
+          <span class="badge new">New</span>
+          <strong>Optional Web Dashboard</strong> — Browse transcripts, semantic search, and manage speakers via web UI
+        </li>
+        <li>
+          <span class="badge new">New</span>
+          <strong>Docker Deployment</strong> — Dashboard deploys to AWS App Runner with automatic SSL
+        </li>
+        <li>
+          <span class="badge new">New</span>
+          <strong>Password Protection</strong> — Simple password auth protects your dashboard
+        </li>
+      </ul>
+
+      <h3>Website</h3>
+      <ul class="changelog-list">
+        <li>
+          <span class="badge new">New</span>
+          <strong>Favicon</strong> — Added site favicon in all standard sizes
+        </li>
+        <li>
+          <span class="badge new">New</span>
+          <strong>Mobile Responsive</strong> — Full mobile-friendly design for all pages
+        </li>
+        <li>
+          <span class="badge new">New</span>
+          <strong>Changelog Page</strong> — You're looking at it!
+        </li>
+      </ul>
+    </section>
+
+    <!-- v1.1.0 -->
+    <section class="changelog-version">
+      <div class="version-header">
+        <h2>v1.1.0</h2>
+        <span class="version-date">January 13, 2025</span>
+      </div>
+
+      <h3>Security & Performance</h3>
+      <ul class="changelog-list">
+        <li>
+          <span class="badge new">New</span>
+          <strong>Webhook Authentication</strong> — API key validation ensures only your Krisp can send data
+        </li>
+        <li>
+          <span class="badge new">New</span>
+          <strong>Instant Indexing</strong> — Transcripts indexed to DynamoDB immediately on webhook receipt
+        </li>
+        <li>
+          <span class="badge new">New</span>
+          <strong>Auto MCP Configuration</strong> — Installer auto-configures Claude Desktop and Claude Code
+        </li>
+        <li>
+          <span class="badge new">New</span>
+          <strong>Debug Logging</strong> — Comprehensive logging in MCP server for troubleshooting
+        </li>
+      </ul>
+
+      <h3>Bug Fixes</h3>
+      <ul class="changelog-list">
+        <li>
+          <span class="badge fix">Fix</span>
+          <strong>listRecent() Query</strong> — Now uses date GSI instead of arbitrary scan results
+        </li>
+      </ul>
+    </section>
+
+    <!-- v1.0.0 -->
+    <section class="changelog-version">
+      <div class="version-header">
+        <h2>v1.0.0</h2>
+        <span class="version-date">January 12, 2025</span>
+      </div>
+
+      <h3>Initial Release</h3>
+      <ul class="changelog-list">
+        <li>
+          <span class="badge new">New</span>
+          <strong>Webhook Lambda</strong> — Receives Krisp webhooks and stores transcripts to S3
+        </li>
+        <li>
+          <span class="badge new">New</span>
+          <strong>Processor Lambda</strong> — Indexes transcripts and generates vector embeddings
+        </li>
+        <li>
+          <span class="badge new">New</span>
+          <strong>DynamoDB Index</strong> — Fast metadata queries with date and speaker GSIs
+        </li>
+        <li>
+          <span class="badge new">New</span>
+          <strong>S3 Vectors</strong> — Semantic search using Amazon Bedrock Titan embeddings
+        </li>
+        <li>
+          <span class="badge new">New</span>
+          <strong>MCP Server</strong> — Three tools: <code>list_transcripts</code>, <code>search_transcripts</code>, <code>get_transcripts</code>
+        </li>
+        <li>
+          <span class="badge new">New</span>
+          <strong>One-Line Installer</strong> — <code>curl | bash</code> deployment to your AWS account
+        </li>
+        <li>
+          <span class="badge new">New</span>
+          <strong>Documentation Website</strong> — krispy.alpha-pm.dev
+        </li>
+      </ul>
+    </section>
+  </div>
+
+  <footer>
+    <p>Built by <a href="https://github.com/dwinter3">@dwinter3</a> | <a href="https://github.com/dwinter3/keep-it-krispy">GitHub</a></p>
+  </footer>
+</body>
+</html>

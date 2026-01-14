@@ -20,6 +20,7 @@
         <li><a href="install.html">Install</a></li>
         <li><a href="mcp.html">MCP Setup</a></li>
         <li><a href="examples.html" class="active">Examples</a></li>
+        <li><a href="changelog.html">Changelog</a></li>
         <li><a href="https://github.com/dwinter3/keep-it-krispy">GitHub</a></li>
       </ul>
     </div>
@@ -255,6 +256,48 @@
       </div>
     </section>
 
+    <!-- Speaker Correction -->
+    <section>
+      <h2>Correct Unknown Speakers</h2>
+      <p>Krisp sometimes labels participants as "Speaker 1", "Speaker 2", etc. You can tell Claude to fix this.</p>
+
+      <div class="conversation">
+        <div class="chat-bubble user">
+          <span class="chat-label">You</span>
+          In my last meeting, Speaker 2 was actually John Smith from Acme Corp. Can you fix that?
+        </div>
+        <div class="chat-bubble claude">
+          <span class="chat-label">Claude</span>
+          I've updated the speaker mapping for that meeting. "Speaker 2" is now identified as <strong>John Smith</strong>.
+          <br><br>
+          This correction will be applied automatically whenever you view this transcript. The name will also be replaced throughout the transcript text.
+          <br><br>
+          Would you like me to add a LinkedIn URL for John Smith for future reference?
+        </div>
+      </div>
+
+      <div class="conversation">
+        <div class="chat-bubble user">
+          <span class="chat-label">You</span>
+          Yes, his LinkedIn is linkedin.com/in/johnsmith. Also, Speaker 1 was Jane Doe.
+        </div>
+        <div class="chat-bubble claude">
+          <span class="chat-label">Claude</span>
+          Done! I've updated both speakers:
+          <ul style="margin: 10px 0 0 20px;">
+            <li><strong>Speaker 1</strong> → Jane Doe</li>
+            <li><strong>Speaker 2</strong> → John Smith (LinkedIn: linkedin.com/in/johnsmith)</li>
+          </ul>
+          <br>
+          These corrections are saved and will apply to this transcript going forward.
+        </div>
+      </div>
+
+      <div class="info-box">
+        <strong>How it works:</strong> Speaker corrections are stored in DynamoDB and automatically applied when you fetch transcripts. The corrected names replace the original names both in the speaker list and throughout the transcript text.
+      </div>
+    </section>
+
     <!-- Quick Prompts -->
     <section>
       <h2>Quick Prompts to Try</h2>
@@ -284,6 +327,12 @@
           <code>Draft a follow-up email for [meeting]</code><br><br>
           <code>Create meeting notes from my call with [person]</code><br><br>
           <code>What should I prepare for my next 1:1 with [person]?</code>
+        </div>
+        <div class="card">
+          <h3>Speaker Correction</h3>
+          <code>Speaker 2 in my last meeting was [name]</code><br><br>
+          <code>Fix the speaker names in meeting [id]</code><br><br>
+          <code>Who were the speakers in my last call?</code>
         </div>
       </div>
     </section>
