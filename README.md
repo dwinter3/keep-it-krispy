@@ -38,13 +38,13 @@ Basically turned Krisp into my external brain. Every conversation I have is now 
 
 ---
 
-## What is Krisp?
+## What is Krisp.ai?
 
-[Krisp](https://krisp.ai) is a desktop app for Mac/Windows that provides **AI noise cancellation** and **real-time transcription** for any meeting — Zoom, Google Meet, Teams, phone calls, anything with audio.
+[Krisp.ai](https://krisp.ai) is a desktop app for Mac/Windows that provides **AI noise cancellation** and **real-time transcription** for any meeting — Zoom, Google Meet, Teams, phone calls, anything with audio.
 
-### Why Krisp Pro/Business?
+### Why Krisp.ai Pro/Business?
 
-Krisp's free tier does transcription, but **webhooks require Krisp Pro or Business**. Webhooks are the unlock — they automatically send transcripts to your infrastructure the moment a call ends. [See Krisp pricing →](https://krisp.ai/pricing/)
+Krisp.ai's free tier does transcription, but **webhooks require Krisp.ai Pro or Business**. Webhooks are the unlock — they automatically send transcripts to your infrastructure the moment a call ends. [See Krisp.ai pricing →](https://krisp.ai/pricing/)
 
 ### Automatic Ingestion (Zero Effort)
 
