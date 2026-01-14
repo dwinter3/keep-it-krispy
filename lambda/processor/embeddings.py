@@ -6,9 +6,9 @@ import json
 import boto3
 from typing import List
 
-# Titan Text Embeddings V2 configuration
-MODEL_ID = 'amazon.titan-embed-text-v2:0'
-EMBEDDING_DIMENSIONS = 1024
+# Titan Text Embeddings V1 configuration (1536 dimensions)
+MODEL_ID = 'amazon.titan-embed-text-v1'
+EMBEDDING_DIMENSIONS = 1536
 MAX_TOKENS = 8192  # ~6000 words
 
 
@@ -36,10 +36,9 @@ def generate_embedding(text: str, bedrock_client=None) -> List[float]:
     if len(text) > max_chars:
         text = text[:max_chars]
 
+    # Titan v1 only takes inputText (v2 supports dimensions/normalize)
     body = json.dumps({
-        'inputText': text,
-        'dimensions': EMBEDDING_DIMENSIONS,
-        'normalize': True
+        'inputText': text
     })
 
     response = bedrock_client.invoke_model(
