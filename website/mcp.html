@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MCP Setup - Keep It Krispy</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <nav>
+    <div class="nav-container">
+      <a href="index.html" class="nav-brand">Keep It Krispy</a>
+      <ul class="nav-links">
+        <li><a href="index.html">Home</a></li>
+        <li><a href="install.html">Install</a></li>
+        <li><a href="mcp.html" class="active">MCP Setup</a></li>
+        <li><a href="examples.html">Examples</a></li>
+        <li><a href="https://github.com/dwinter3/keep-it-krispy">GitHub</a></li>
+      </ul>
+    </div>
+  </nav>
+
+  <div class="container">
+    <h1>MCP Integration</h1>
+    <p>Connect Claude to your meeting transcripts via Model Context Protocol (MCP).</p>
+
+    <!-- What is MCP -->
+    <section>
+      <h2>What is MCP?</h2>
+      <p><a href="https://modelcontextprotocol.io" style="color: #00d4aa;">Model Context Protocol (MCP)</a> is Anthropic's standard for connecting AI assistants to external tools and data sources. Keep It Krispy provides an MCP server that gives Claude access to your meeting data.</p>
+
+      <div class="info-box">
+        <strong>MCP Server Location:</strong> After installation, the MCP server is built at:
+        <div class="curl-command" style="font-size: 0.85rem; margin-top: 10px;">~/keep-it-krispy/lambda/mcp-server-ts/dist/stdio-server.cjs</div>
+      </div>
+    </section>
+
+    <!-- Available Tools -->
+    <section>
+      <h2>Available Tools</h2>
+      <p>The MCP server exposes three tools to Claude:</p>
+
+      <div class="card-grid">
+        <div class="card">
+          <h3>list_transcripts</h3>
+          <p>List recent meetings with metadata (title, date, duration, speakers). Filter by date range or speaker.</p>
+          <pre class="architecture" style="font-size: 0.8rem; margin-top: 10px;">{
+  "start_date": "2025-01-01",
+  "end_date": "2025-01-15",
+  "speaker": "john",
+  "limit": 10
+}</pre>
+        </div>
+        <div class="card">
+          <h3>search_transcripts</h3>
+          <p>Semantic search across all meetings. Find content by meaning, not just keywords.</p>
+          <pre class="architecture" style="font-size: 0.8rem; margin-top: 10px;">{
+  "query": "budget concerns",
+  "limit": 5
+}</pre>
+        </div>
+        <div class="card">
+          <h3>get_transcripts</h3>
+          <p>Fetch full transcript content by S3 key. Returns summary, notes, action items, and full text.</p>
+          <pre class="architecture" style="font-size: 0.8rem; margin-top: 10px;">{
+  "keys": ["meetings/2025/01/14/...json"]
+}</pre>
+        </div>
+      </div>
+    </section>
+
+    <!-- Claude Desktop -->
+    <section>
+      <h2>Claude Desktop</h2>
+      <p>Add the MCP server to Claude Desktop by editing the config file:</p>
+
+      <div class="setup-step">
+        <h3>1. Open Config File</h3>
+        <div class="tabs">
+          <button class="tab active" onclick="showTab('mac-path')">macOS</button>
+          <button class="tab" onclick="showTab('win-path')">Windows</button>
+        </div>
+
+        <div id="mac-path" class="tab-content active">
+          <div class="curl-command" style="font-size: 0.85rem;">~/Library/Application Support/Claude/claude_desktop_config.json</div>
+          <p style="margin-top: 10px; color: #888; font-size: 0.85rem;">Open with: <code>open -e ~/Library/Application\ Support/Claude/claude_desktop_config.json</code></p>
+        </div>
+
+        <div id="win-path" class="tab-content">
+          <div class="curl-command" style="font-size: 0.85rem;">%APPDATA%\Claude\claude_desktop_config.json</div>
+        </div>
+      </div>
+
+      <div class="setup-step">
+        <h3>2. Add MCP Server Config</h3>
+        <p>Add this to your config file (replace <code>{account-id}</code> with your AWS account ID):</p>
+        <pre class="architecture" style="font-size: 0.85rem;">{
+  "mcpServers": {
+    "krisp": {
+      "command": "node",
+      "args": ["/Users/YOUR_USERNAME/keep-it-krispy/lambda/mcp-server-ts/dist/stdio-server.cjs"],
+      "env": {
+        "AWS_REGION": "us-east-1",
+        "KRISP_S3_BUCKET": "krisp-transcripts-{account-id}",
+        "DYNAMODB_TABLE": "krisp-transcripts-index",
+        "VECTOR_BUCKET": "krisp-vectors-{account-id}",
+        "VECTOR_INDEX": "transcript-chunks",
+        "AWS_PROFILE": "default"
+      }
+    }
+  }
+}</pre>
+        <div class="info-box" style="margin-top: 15px;">
+          <strong>Tip:</strong> The installer prints your exact configuration at the end. Copy it from there.
+        </div>
+      </div>
+
+      <div class="setup-step">
+        <h3>3. Restart Claude Desktop</h3>
+        <p>Quit Claude Desktop completely (Cmd+Q) and reopen it. The krisp server should appear in your MCP servers list.</p>
+      </div>
+
+      <div class="setup-step">
+        <h3>Troubleshooting</h3>
+        <p>Check the MCP server logs:</p>
+        <div class="curl-command" style="font-size: 0.85rem;">tail -f ~/Library/Logs/Claude/mcp-server-krisp.log</div>
+        <p style="margin-top: 10px;">Common issues:</p>
+        <ul style="margin-left: 20px; color: #b0b0c0;">
+          <li><strong>Server won't turn on:</strong> Check AWS credentials in the env section</li>
+          <li><strong>Tools not working:</strong> Verify AWS_PROFILE points to valid credentials</li>
+          <li><strong>Connection errors:</strong> Make sure Node.js is in your PATH</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- Claude Code -->
+    <section>
+      <h2>Claude Code (CLI)</h2>
+      <p>Add the MCP server to Claude Code with a single command:</p>
+
+      <div class="setup-step">
+        <h3>Add MCP Server</h3>
+        <pre class="architecture" style="font-size: 0.8rem;">claude mcp add --transport stdio \
+  --env AWS_REGION=us-east-1 \
+  --env KRISP_S3_BUCKET=krisp-transcripts-{account-id} \
+  --env DYNAMODB_TABLE=krisp-transcripts-index \
+  --env VECTOR_BUCKET=krisp-vectors-{account-id} \
+  --env VECTOR_INDEX=transcript-chunks \
+  --env AWS_PROFILE=default \
+  --scope user \
+  krisp -- node ~/keep-it-krispy/lambda/mcp-server-ts/dist/stdio-server.cjs</pre>
+
+        <div class="info-box" style="margin-top: 15px;">
+          <strong>Scope options:</strong>
+          <ul style="margin-left: 20px; margin-top: 10px;">
+            <li><code>--scope user</code> - Available in all projects</li>
+            <li><code>--scope project</code> - Available only in current project</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="setup-step">
+        <h3>Verify Installation</h3>
+        <div class="curl-command" style="font-size: 0.85rem;">claude mcp list</div>
+        <p style="margin-top: 10px;">You should see <code>krisp</code> in the list of servers.</p>
+      </div>
+
+      <div class="setup-step">
+        <h3>Test It</h3>
+        <p>Start a Claude Code session and try:</p>
+        <div class="curl-command" style="font-size: 0.85rem;">claude "what was my last meeting about?"</div>
+      </div>
+    </section>
+
+    <!-- Other MCP Clients -->
+    <section>
+      <h2>Other MCP Clients</h2>
+      <p>The Keep It Krispy MCP server works with any MCP-compatible client. It uses the standard stdio transport.</p>
+
+      <div class="setup-step">
+        <h3>Server Details</h3>
+        <table class="cost-table">
+          <tr><th>Property</th><th>Value</th></tr>
+          <tr><td>Transport</td><td>stdio (stdin/stdout)</td></tr>
+          <tr><td>Command</td><td><code>node</code></td></tr>
+          <tr><td>Args</td><td><code>["/path/to/stdio-server.cjs"]</code></td></tr>
+          <tr><td>Protocol</td><td>MCP 2025-06-18</td></tr>
+        </table>
+      </div>
+
+      <div class="setup-step">
+        <h3>Required Environment Variables</h3>
+        <table class="cost-table">
+          <tr><th>Variable</th><th>Description</th></tr>
+          <tr><td><code>AWS_REGION</code></td><td>AWS region (e.g., us-east-1)</td></tr>
+          <tr><td><code>KRISP_S3_BUCKET</code></td><td>S3 bucket for transcripts</td></tr>
+          <tr><td><code>DYNAMODB_TABLE</code></td><td>DynamoDB table name</td></tr>
+          <tr><td><code>VECTOR_BUCKET</code></td><td>S3 bucket for vectors</td></tr>
+          <tr><td><code>VECTOR_INDEX</code></td><td>Vector index name</td></tr>
+          <tr><td><code>AWS_PROFILE</code></td><td>AWS credentials profile (optional)</td></tr>
+        </table>
+      </div>
+
+      <div class="setup-step">
+        <h3>Standalone Testing</h3>
+        <p>Test the MCP server directly from command line:</p>
+        <pre class="architecture" style="font-size: 0.8rem;"># List tools
+echo '{"jsonrpc":"2.0","method":"tools/list","id":1}' | \
+  AWS_PROFILE=default \
+  AWS_REGION=us-east-1 \
+  KRISP_S3_BUCKET=krisp-transcripts-123456789012 \
+  DYNAMODB_TABLE=krisp-transcripts-index \
+  VECTOR_BUCKET=krisp-vectors-123456789012 \
+  VECTOR_INDEX=transcript-chunks \
+  node ~/keep-it-krispy/lambda/mcp-server-ts/dist/stdio-server.cjs
+
+# Call a tool
+echo '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"list_transcripts","arguments":{"limit":3}},"id":1}' | \
+  ... (same env vars) ... \
+  node ~/keep-it-krispy/lambda/mcp-server-ts/dist/stdio-server.cjs</pre>
+      </div>
+    </section>
+
+    <!-- HTTP/REST API -->
+    <section>
+      <h2>Direct AWS Access (No MCP)</h2>
+      <p>You can also query your meeting data directly using AWS APIs:</p>
+
+      <div class="setup-step">
+        <h3>List Recent Transcripts (DynamoDB)</h3>
+        <pre class="architecture" style="font-size: 0.8rem;">aws dynamodb scan \
+  --table-name krisp-transcripts-index \
+  --limit 10 \
+  --projection-expression "meeting_id, title, #d, duration" \
+  --expression-attribute-names '{"#d": "date"}'</pre>
+      </div>
+
+      <div class="setup-step">
+        <h3>Get Transcript Content (S3)</h3>
+        <pre class="architecture" style="font-size: 0.8rem;">aws s3 cp s3://krisp-transcripts-{account-id}/meetings/2025/01/14/your-meeting.json -</pre>
+      </div>
+
+      <div class="setup-step">
+        <h3>Semantic Search (S3 Vectors)</h3>
+        <p>S3 Vectors requires the AWS SDK. See the <a href="https://docs.aws.amazon.com/AmazonS3/latest/userguide/s3-vectors.html" style="color: #00d4aa;">S3 Vectors documentation</a> for query examples.</p>
+      </div>
+    </section>
+
+    <!-- Debug Logging -->
+    <section>
+      <h2>Debug Logging</h2>
+      <p>The MCP server outputs detailed debug logs to stderr, which Claude Desktop captures in its log files.</p>
+
+      <div class="setup-step">
+        <h3>View Logs (macOS)</h3>
+        <div class="curl-command" style="font-size: 0.85rem;">tail -f ~/Library/Logs/Claude/mcp-server-krisp.log</div>
+      </div>
+
+      <div class="setup-step">
+        <h3>Log Output Example</h3>
+        <pre class="architecture" style="font-size: 0.8rem;">[KRISP DEBUG 2025-01-14T15:49:38.036Z] Server module loading: {"AWS_PROFILE":"default"}
+[KRISP DEBUG 2025-01-14T15:49:38.039Z] S3 client initialized
+[KRISP DEBUG 2025-01-14T15:49:38.040Z] DynamoDB client initialized
+[KRISP DEBUG 2025-01-14T15:49:38.040Z] Vectors client initialized
+[KRISP DEBUG 2025-01-14T15:49:38.043Z] Server connected and ready
+[KRISP DEBUG 2025-01-14T15:49:44.102Z] tools/call: list_transcripts: {"args":{"limit":2}}
+[KRISP DEBUG 2025-01-14T15:49:44.929Z] list_transcripts: found 2 transcripts in 827ms</pre>
+      </div>
+    </section>
+  </div>
+
+  <footer>
+    <p>Built by <a href="https://github.com/dwinter3">@dwinter3</a> | <a href="https://github.com/dwinter3/keep-it-krispy">GitHub</a></p>
+  </footer>
+
+  <script>
+    function showTab(tabId) {
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+      document.querySelector(`[onclick="showTab('${tabId}')"]`).classList.add('active');
+      document.getElementById(tabId).classList.add('active');
+    }
+  </script>
+</body>
+</html>

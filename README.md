@@ -11,70 +11,23 @@ curl -fsSL https://krispy.alpha-pm.dev/install.sh | bash
 
 ---
 
-## The Brag
+## What It Does
 
-So I built a thing over the weekend. You know how Krisp has that webhook feature for transcripts? I wired it up so every meeting I have automatically flows into Claude's memory.
+Every Krisp call is automatically captured, indexed, and made searchable by Claude:
 
-Now I can literally ask Claude: *"What did Caroline say about the legal docs?"* or *"Summarize my calls from last week"* and it just... knows. Pulls the exact context from my meeting history and gives me a real answer.
+- **"What was my last meeting about?"** — Instant recall of any conversation
+- **"What did Ken commit to?"** — Extract action items and commitments
+- **"Find meetings where we discussed budget"** — Semantic search across all your calls
+- **"Summarize my calls with Sarah this week"** — AI-powered synthesis
 
-The kicker? **Semantic search.** I can search for "budget concerns" and it finds meetings where we talked about "cost overruns" or "we're spending too much" — no keyword matching, actual meaning. I even indexed speaker names into the embeddings so searching "meetings with Brian" works even if his name isn't in the transcript text.
-
-**The stack:**
-- Krisp webhook → Lambda → S3 (you guys handle the hard part)
-- S3 event trigger → Processing Lambda that chunks transcripts
-- Bedrock Titan for embeddings (1024 dimensions, ~$0.05 to index 500 meetings)
-- S3 Vectors for similarity search (the new serverless vector DB from AWS — way cheaper than OpenSearch)
-- DynamoDB for fast metadata queries
-- MCP server so Claude Desktop and Claude Code can query it natively
-- Next.js dashboard on Amplify for a web UI
-
-**Total AWS cost: < $2/month.** No OpenSearch cluster burning $350/month. No always-on anything. Pure serverless, pay-per-query.
-
-The whole thing runs as an MCP server, so Claude treats my meeting history like a native tool. I say "find meetings about the Q1 roadmap" and it does a vector similarity search, pulls the relevant chunks, and synthesizes an answer with citations.
-
-Basically turned Krisp into my external brain. Every conversation I have is now permanently searchable and summarizable by AI.
-
-**Would not have been possible without the webhook API.** That's the unlock. Real-time transcript delivery means everything is indexed within seconds of hanging up.
+The whole thing runs as an MCP server, so Claude treats your meeting history like a native tool.
 
 ---
 
-## What is Krisp.ai?
-
-[Krisp.ai](https://krisp.ai) is a desktop app for Mac/Windows that provides **AI noise cancellation** and **real-time transcription** for any meeting — Zoom, Google Meet, Teams, phone calls, anything with audio.
-
-### Why Krisp.ai Pro/Business?
-
-Krisp.ai's free tier does transcription, but **webhooks require Krisp.ai Pro or Business**. Webhooks are the unlock — they automatically send transcripts to your infrastructure the moment a call ends. [See Krisp.ai pricing →](https://krisp.ai/pricing/)
-
-### Automatic Ingestion (Zero Effort)
-
-**Once configured, ingestion is 100% automatic.** You don't do anything — just have your meetings:
-
-1. You finish a call → Krisp detects the meeting ended
-2. Krisp sends the transcript → Via webhook to your AWS Lambda (within seconds)
-3. Lambda stores it in S3 → Raw JSON preserved forever
-4. S3 triggers processing → Chunks transcript, generates embeddings
-5. Ready for Claude → Searchable within ~10 seconds of hanging up
-
-No manual export. No copy-paste. No "remember to save." Every conversation is automatically indexed.
-
-### Setting Up the Krisp Webhook
-
-After running the install script, you'll get a webhook URL. Configure Krisp:
-
-1. Open **Krisp app** → Settings (gear icon)
-2. Go to **Integrations** or **Webhooks** tab
-3. Click **"Add Webhook"**
-4. Paste your webhook URL (provided by the install script)
-5. Enable **"Send transcript on call end"**
-6. Save — done. Every call is now automatically captured.
-
----
-
-## Architecture
+## The Stack
 
 ```
-Krisp App → Webhook Lambda → S3 (raw JSON)
+Krisp App → Webhook Lambda → S3 (raw JSON) → DynamoDB (instant writes)
                                    ↓
                            S3 Event Trigger
                                    ↓
@@ -88,102 +41,140 @@ Krisp App → Webhook Lambda → S3 (raw JSON)
                                    ↓
                         MCP Server (stdio)
                                    ↓
-                   ┌───────────────┼───────────────┐
-                   ↓               ↓               ↓
-            Claude Desktop   Claude Code    Next.js Web App
+                   ┌───────────────┴───────────────┐
+                   ↓                               ↓
+            Claude Desktop                   Claude Code
 ```
 
-## Project Structure
+**Total AWS cost: < $2/month.** No OpenSearch cluster burning $350/month. Pure serverless.
 
-```
-├── lambda/
-│   ├── handler.py              # Webhook receiver (Krisp → S3)
-│   ├── processor/              # S3 event processor
-│   │   ├── handler.py          # Chunks transcripts, generates embeddings
-│   │   ├── embeddings.py       # Bedrock Titan client
-│   │   ├── dynamo.py           # DynamoDB operations
-│   │   └── vectors.py          # S3 Vectors operations
-│   └── mcp-server-ts/          # MCP server for Claude
-│       ├── src/
-│       │   ├── stdio-server.ts # Claude Desktop/Code integration
-│       │   └── s3-client.ts    # AWS service clients
-│       └── dist/
-│           └── stdio-server.cjs # Built server
-├── src/
-│   └── app/                    # Next.js web dashboard
-│       ├── api/
-│       │   ├── transcripts/    # REST API for transcript list
-│       │   └── search/         # Semantic search endpoint
-│       ├── transcripts/        # Browse transcripts UI
-│       └── search/             # Search UI
-├── scripts/
-│   └── backfill_vectors.py     # One-time indexing of existing transcripts
-└── infra/
-    └── dynamodb.json           # Table definition
-```
+---
 
-## Setup
+## MCP Tools
+
+The MCP server provides three tools to Claude:
+
+| Tool | Description |
+|------|-------------|
+| `list_transcripts` | List recent meetings with metadata. Filter by date or speaker. |
+| `search_transcripts` | Semantic search — find "budget concerns" even if you said "cost overruns" |
+| `get_transcripts` | Fetch full transcript content (summary, notes, action items, text) |
+
+---
+
+## Quick Start
 
 ### Prerequisites
-- AWS account with Bedrock access (Titan embeddings)
-- Krisp Pro with webhook access
-- Node.js 18+
-- Python 3.11+
+- [Krisp.ai Pro](https://krisp.ai) with webhook access
+- AWS account
+- Node.js 18+, Python 3.11+, AWS CLI
 
-### Quick Start
+### Install
 
-1. Deploy the webhook Lambda and point Krisp webhooks at it
-2. Create DynamoDB table and S3 Vectors index
-3. Deploy the processor Lambda with S3 event trigger
-4. Build and configure the MCP server for Claude Desktop/Code
-5. (Optional) Deploy Next.js dashboard to Amplify
+```bash
+curl -fsSL https://krispy.alpha-pm.dev/install.sh | bash
+```
 
-### Claude Desktop Config
+The installer:
+1. Deploys AWS infrastructure (S3, DynamoDB, Lambda)
+2. Builds the MCP server locally
+3. Prints your webhook URL and MCP config
+
+### Configure Krisp
+
+Add your webhook URL to Krisp:
+1. Krisp app → Settings → Integrations → Webhooks
+2. Paste the webhook URL from the installer
+3. Done — every call is now automatically captured
+
+### Configure Claude
+
+**Claude Desktop** — Edit `~/Library/Application Support/Claude/claude_desktop_config.json`:
 
 ```json
 {
   "mcpServers": {
     "krisp": {
       "command": "node",
-      "args": ["/path/to/dist/stdio-server.cjs"],
+      "args": ["~/keep-it-krispy/lambda/mcp-server-ts/dist/stdio-server.cjs"],
       "env": {
         "AWS_REGION": "us-east-1",
-        "KRISP_S3_BUCKET": "your-bucket",
+        "KRISP_S3_BUCKET": "krisp-transcripts-{account-id}",
         "DYNAMODB_TABLE": "krisp-transcripts-index",
-        "VECTOR_BUCKET": "krisp-vectors",
+        "VECTOR_BUCKET": "krisp-vectors-{account-id}",
         "VECTOR_INDEX": "transcript-chunks",
-        "AWS_PROFILE": "your-profile"
+        "AWS_PROFILE": "default"
       }
     }
   }
 }
 ```
 
-### Claude Code Config
+**Claude Code**:
 
 ```bash
 claude mcp add --transport stdio \
   --env AWS_REGION=us-east-1 \
-  --env KRISP_S3_BUCKET=your-bucket \
+  --env KRISP_S3_BUCKET=krisp-transcripts-{account-id} \
   --env DYNAMODB_TABLE=krisp-transcripts-index \
-  --env VECTOR_BUCKET=krisp-vectors \
+  --env VECTOR_BUCKET=krisp-vectors-{account-id} \
   --env VECTOR_INDEX=transcript-chunks \
-  --env AWS_PROFILE=your-profile \
   --scope user \
-  krisp -- node /path/to/dist/stdio-server.cjs
+  krisp -- node ~/keep-it-krispy/lambda/mcp-server-ts/dist/stdio-server.cjs
 ```
 
-## Cost Breakdown (500 transcripts/month)
+---
 
-| Component | Cost |
-|-----------|------|
+## Documentation
+
+- **[Installation Guide](https://krispy.alpha-pm.dev/install.html)** — Full setup walkthrough
+- **[MCP Setup](https://krispy.alpha-pm.dev/mcp.html)** — Claude Desktop, Code, and other clients
+- **[Examples](https://krispy.alpha-pm.dev/examples.html)** — Real-world usage demos
+
+---
+
+## Project Structure
+
+```
+├── cloudformation.yaml        # AWS infrastructure (one-click deploy)
+├── lambda/
+│   ├── mcp-server-ts/         # MCP server for Claude
+│   │   ├── src/
+│   │   │   ├── stdio-server.ts
+│   │   │   ├── s3-client.ts
+│   │   │   ├── dynamo-client.ts
+│   │   │   └── vectors-client.ts
+│   │   └── dist/
+│   │       └── stdio-server.cjs
+│   └── processor/             # S3 event processor (embeddings)
+├── website/                   # Static website (krispy.alpha-pm.dev)
+├── scripts/
+│   └── backfill_vectors.py    # Index existing transcripts
+└── src/                       # Next.js web dashboard (optional)
+```
+
+---
+
+## Cost Breakdown
+
+| Component | Monthly Cost |
+|-----------|--------------|
 | DynamoDB | Free tier |
-| S3 Vectors storage | ~$0.01 |
-| S3 Vectors queries | ~$0.01 |
-| Bedrock Titan embeddings | ~$0.05 (one-time) |
-| Lambda compute | Free tier |
-| S3 storage | ~$0.02 |
+| S3 Storage | ~$0.02 |
+| S3 Vectors | ~$0.01 |
+| Bedrock Embeddings | ~$0.05 (one-time) |
+| Lambda | Free tier |
 | **Total** | **< $2/month** |
+
+---
+
+## What is Krisp.ai?
+
+[Krisp.ai](https://krisp.ai) is a desktop app that provides real-time transcription for any meeting — Zoom, Teams, Meet, phone calls, anything with audio.
+
+**Why Krisp Pro?** The free tier does transcription, but **webhooks require Pro or Business**. Webhooks are the unlock — they automatically send transcripts to your infrastructure the moment a call ends.
+
+---
 
 ## License
 

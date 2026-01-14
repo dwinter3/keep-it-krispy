@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Examples - Keep It Krispy</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <nav>
+    <div class="nav-container">
+      <a href="index.html" class="nav-brand">Keep It Krispy</a>
+      <ul class="nav-links">
+        <li><a href="index.html">Home</a></li>
+        <li><a href="install.html">Install</a></li>
+        <li><a href="mcp.html">MCP Setup</a></li>
+        <li><a href="examples.html" class="active">Examples</a></li>
+        <li><a href="https://github.com/dwinter3/keep-it-krispy">GitHub</a></li>
+      </ul>
+    </div>
+  </nav>
+
+  <div class="container">
+    <h1>Real-World Examples</h1>
+    <p>See how Keep It Krispy helps you work with meeting transcripts in Claude.</p>
+
+    <!-- After a Business Call -->
+    <section>
+      <h2>After a Business Call</h2>
+      <p>Just finished a call and need to follow up? Ask Claude.</p>
+
+      <div class="conversation">
+        <div class="chat-bubble user">
+          <span class="chat-label">You</span>
+          What was my last meeting about?
+        </div>
+        <div class="chat-bubble claude">
+          <span class="chat-label">Claude</span>
+          Your last meeting was a <strong>Teams call at 9:59 AM today</strong> with Guy Farber, Ken Smythe, and Sandeep Chellingi. It lasted about 20 minutes.
+          <br><br>
+          Based on the transcript, you discussed:
+          <ul style="margin: 10px 0 0 20px;">
+            <li>Project timeline adjustments for Q1</li>
+            <li>Budget reallocation for the infrastructure upgrade</li>
+            <li>Action item: Ken to send updated cost estimates by Friday</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="conversation">
+        <div class="chat-bubble user">
+          <span class="chat-label">You</span>
+          What did Ken commit to?
+        </div>
+        <div class="chat-bubble claude">
+          <span class="chat-label">Claude</span>
+          Ken committed to:
+          <ol style="margin: 10px 0 0 20px;">
+            <li><strong>Send updated cost estimates</strong> by Friday (Jan 17)</li>
+            <li><strong>Review the vendor proposals</strong> and provide a recommendation</li>
+            <li><strong>Schedule a follow-up</strong> with the infrastructure team next week</li>
+          </ol>
+        </div>
+      </div>
+    </section>
+
+    <!-- Weekly Summary -->
+    <section>
+      <h2>Weekly Meeting Summary</h2>
+      <p>Catch up on what you discussed throughout the week.</p>
+
+      <div class="conversation">
+        <div class="chat-bubble user">
+          <span class="chat-label">You</span>
+          Summarize my meetings this week
+        </div>
+        <div class="chat-bubble claude">
+          <span class="chat-label">Claude</span>
+          You had <strong>5 meetings</strong> this week (Jan 13-14):
+          <br><br>
+          <strong>Monday, Jan 13:</strong>
+          <ul style="margin: 5px 0 10px 20px;">
+            <li>3:36 PM - Sprint planning (31 min) - Discussed backlog priorities</li>
+            <li>4:07 PM - 1:1 with Caroline (25 min) - Career development, upcoming projects</li>
+          </ul>
+          <strong>Tuesday, Jan 14:</strong>
+          <ul style="margin: 5px 0 10px 20px;">
+            <li>9:59 AM - Team sync (20 min) - Q1 timeline, budget discussion</li>
+          </ul>
+          <br>
+          Key themes: Budget planning, Q1 priorities, infrastructure upgrades.
+        </div>
+      </div>
+    </section>
+
+    <!-- Semantic Search -->
+    <section>
+      <h2>Semantic Search</h2>
+      <p>Find meetings by meaning, not just keywords.</p>
+
+      <div class="conversation">
+        <div class="chat-bubble user">
+          <span class="chat-label">You</span>
+          When did we talk about budget concerns?
+        </div>
+        <div class="chat-bubble claude">
+          <span class="chat-label">Claude</span>
+          I found <strong>2 meetings</strong> where budget concerns were discussed:
+          <br><br>
+          <strong>Jan 14 - Team sync (9:59 AM)</strong><br>
+          <span style="color: #888;">"...we need to be careful about the spending on infrastructure. The current estimates are 15% over what we budgeted for Q1..."</span>
+          <br><br>
+          <strong>Jan 10 - Planning session (2:30 PM)</strong><br>
+          <span style="color: #888;">"...cost overruns from last quarter are a concern. We should review vendor contracts before committing to the upgrade..."</span>
+        </div>
+      </div>
+
+      <div class="info-box">
+        <strong>How semantic search works:</strong> The query "budget concerns" also finds mentions of "cost overruns", "spending too much", "over budget", etc. It understands meaning, not just exact words.
+      </div>
+    </section>
+
+    <!-- Find Meetings with Someone -->
+    <section>
+      <h2>Find Meetings with Someone</h2>
+      <p>Look up conversations with a specific person.</p>
+
+      <div class="conversation">
+        <div class="chat-bubble user">
+          <span class="chat-label">You</span>
+          What have I discussed with Caroline recently?
+        </div>
+        <div class="chat-bubble claude">
+          <span class="chat-label">Claude</span>
+          I found <strong>3 meetings</strong> with Caroline in the past 2 weeks:
+          <br><br>
+          <strong>Jan 13 - 1:1 (25 min)</strong>
+          <ul style="margin: 5px 0 10px 20px;">
+            <li>Career development goals for H1</li>
+            <li>Interest in leading the new mobile project</li>
+            <li>Training budget for AWS certification</li>
+          </ul>
+          <strong>Jan 8 - Project kickoff (45 min)</strong>
+          <ul style="margin: 5px 0 10px 20px;">
+            <li>Mobile app requirements review</li>
+            <li>Timeline: beta by end of Q1</li>
+          </ul>
+          <strong>Jan 3 - Team standup (15 min)</strong>
+          <ul style="margin: 5px 0 10px 20px;">
+            <li>Caroline demoed the auth flow prototype</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- Action Items -->
+    <section>
+      <h2>Extract Action Items</h2>
+      <p>Pull out commitments and todos from your meetings.</p>
+
+      <div class="conversation">
+        <div class="chat-bubble user">
+          <span class="chat-label">You</span>
+          What action items came out of my meetings this week?
+        </div>
+        <div class="chat-bubble claude">
+          <span class="chat-label">Claude</span>
+          Here are the action items from this week's meetings:
+          <br><br>
+          <strong>For you:</strong>
+          <ul style="margin: 5px 0 10px 20px;">
+            <li>Review Ken's cost estimates (due: after Friday)</li>
+            <li>Approve Caroline's training budget request</li>
+            <li>Send project charter to stakeholders</li>
+          </ul>
+          <strong>For others:</strong>
+          <ul style="margin: 5px 0 10px 20px;">
+            <li><strong>Ken:</strong> Send cost estimates by Friday</li>
+            <li><strong>Caroline:</strong> Complete auth flow documentation</li>
+            <li><strong>Sandeep:</strong> Schedule vendor demos for next week</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- Draft Follow-up Email -->
+    <section>
+      <h2>Draft Follow-up Email</h2>
+      <p>Generate follow-up emails based on meeting content.</p>
+
+      <div class="conversation">
+        <div class="chat-bubble user">
+          <span class="chat-label">You</span>
+          Draft a follow-up email for my meeting with Ken and the team this morning
+        </div>
+        <div class="chat-bubble claude">
+          <span class="chat-label">Claude</span>
+          Here's a draft follow-up email:
+          <br><br>
+          <div style="background: rgba(0,0,0,0.2); padding: 15px; border-radius: 8px; font-size: 0.9rem;">
+            <strong>Subject:</strong> Follow-up: Q1 Infrastructure Budget Discussion<br><br>
+            Hi team,<br><br>
+            Thanks for the productive discussion this morning. Here's a quick summary of what we covered and next steps:<br><br>
+            <strong>Key decisions:</strong><br>
+            - We'll proceed with the phased infrastructure upgrade approach<br>
+            - Budget cap set at $X for Q1 (pending Ken's updated estimates)<br><br>
+            <strong>Action items:</strong><br>
+            - Ken: Send revised cost estimates by Friday<br>
+            - Sandeep: Schedule vendor demos for next week<br>
+            - I'll circulate the project charter once we have the final numbers<br><br>
+            Let me know if I missed anything.<br><br>
+            Best,<br>
+            [Your name]
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Prepare for Next Meeting -->
+    <section>
+      <h2>Prepare for Next Meeting</h2>
+      <p>Get context before a recurring meeting.</p>
+
+      <div class="conversation">
+        <div class="chat-bubble user">
+          <span class="chat-label">You</span>
+          I have a 1:1 with Caroline tomorrow. What did we discuss last time?
+        </div>
+        <div class="chat-bubble claude">
+          <span class="chat-label">Claude</span>
+          In your last 1:1 with Caroline (Jan 13), you discussed:
+          <br><br>
+          <strong>Career Development:</strong>
+          <ul style="margin: 5px 0 10px 20px;">
+            <li>She wants to lead the mobile project</li>
+            <li>Interested in AWS certification (requested training budget)</li>
+            <li>Goal: move to senior engineer level by end of year</li>
+          </ul>
+          <strong>Current Work:</strong>
+          <ul style="margin: 5px 0 10px 20px;">
+            <li>Auth flow prototype is nearly complete</li>
+            <li>Needs help with API design decisions</li>
+          </ul>
+          <strong>Open items from last time:</strong>
+          <ul style="margin: 5px 0 10px 20px;">
+            <li>You were going to approve training budget (pending)</li>
+            <li>She was going to finish auth documentation</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- Quick Prompts -->
+    <section>
+      <h2>Quick Prompts to Try</h2>
+      <p>Copy these prompts to get started:</p>
+
+      <div class="card-grid">
+        <div class="card">
+          <h3>Recent Activity</h3>
+          <code>What was my last meeting about?</code><br><br>
+          <code>Summarize my meetings this week</code><br><br>
+          <code>What meetings do I have from the past 3 days?</code>
+        </div>
+        <div class="card">
+          <h3>Search</h3>
+          <code>When did we discuss [topic]?</code><br><br>
+          <code>Find meetings where we talked about [project]</code><br><br>
+          <code>What have I discussed with [person]?</code>
+        </div>
+        <div class="card">
+          <h3>Action Items</h3>
+          <code>What action items came out of my last meeting?</code><br><br>
+          <code>What did [person] commit to?</code><br><br>
+          <code>What's pending from my meetings this week?</code>
+        </div>
+        <div class="card">
+          <h3>Follow-up</h3>
+          <code>Draft a follow-up email for [meeting]</code><br><br>
+          <code>Create meeting notes from my call with [person]</code><br><br>
+          <code>What should I prepare for my next 1:1 with [person]?</code>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <footer>
+    <p>Built by <a href="https://github.com/dwinter3">@dwinter3</a> | <a href="https://github.com/dwinter3/keep-it-krispy">GitHub</a></p>
+  </footer>
+</body>
+</html>

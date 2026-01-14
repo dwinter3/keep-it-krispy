@@ -561,10 +561,147 @@ build_mcp_server() {
     echo -e "${GREEN}✓ MCP server built${NC}"
 }
 
-# Print completion message
-print_completion() {
+# Configure MCP for Claude Desktop
+configure_claude_desktop() {
+    local account_id=$(aws sts get-caller-identity --query Account --output text)
+    local config_file="$HOME/Library/Application Support/Claude/claude_desktop_config.json"
+    local config_dir="$HOME/Library/Application Support/Claude"
+
+    echo ""
+    echo "═══════════════════════════════════════════════════════════"
+    echo "  Configure Claude Desktop MCP"
+    echo "═══════════════════════════════════════════════════════════"
+    echo ""
+
+    # Check if Claude Desktop is installed
+    if [ ! -d "$config_dir" ]; then
+        echo -e "${YELLOW}Claude Desktop config directory not found.${NC}"
+        echo "  Skipping auto-configuration."
+        echo "  Install Claude Desktop from: https://claude.ai/download"
+        return
+    fi
+
+    read -p "Auto-configure Claude Desktop with krisp MCP server? [Y/n] " -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Nn]$ ]]; then
+        echo "  Skipping Claude Desktop configuration."
+        return
+    fi
+
+    # Build the MCP config
+    local mcp_config=$(cat << EOF
+{
+  "mcpServers": {
+    "krisp": {
+      "command": "node",
+      "args": ["$INSTALL_DIR/lambda/mcp-server-ts/dist/stdio-server.cjs"],
+      "env": {
+        "AWS_REGION": "$AWS_REGION",
+        "KRISP_S3_BUCKET": "krisp-transcripts-${account_id}",
+        "DYNAMODB_TABLE": "krisp-transcripts-index",
+        "VECTOR_BUCKET": "krisp-vectors-${account_id}",
+        "VECTOR_INDEX": "transcript-chunks",
+        "AWS_PROFILE": "${AWS_PROFILE:-default}"
+      }
+    }
+  }
+}
+EOF
+)
+
+    # Check if config file exists
+    if [ -f "$config_file" ]; then
+        # Backup existing config
+        cp "$config_file" "${config_file}.backup.$(date +%Y%m%d_%H%M%S)"
+        echo "  Backed up existing config"
+
+        # Check if krisp is already configured
+        if grep -q '"krisp"' "$config_file" 2>/dev/null; then
+            echo -e "${YELLOW}  krisp MCP server already in config. Updating...${NC}"
+        fi
+
+        # Merge configs using Python (handles JSON properly)
+        python3 << PYTHON
+import json
+import sys
+
+config_file = "$config_file"
+new_server = json.loads('''$mcp_config''')
+
+try:
+    with open(config_file, 'r') as f:
+        existing = json.load(f)
+except:
+    existing = {}
+
+if 'mcpServers' not in existing:
+    existing['mcpServers'] = {}
+
+existing['mcpServers']['krisp'] = new_server['mcpServers']['krisp']
+
+with open(config_file, 'w') as f:
+    json.dump(existing, f, indent=2)
+
+print("  Config updated successfully")
+PYTHON
+    else
+        # Create new config file
+        echo "$mcp_config" > "$config_file"
+        echo "  Config file created"
+    fi
+
+    echo -e "${GREEN}✓ Claude Desktop configured${NC}"
+    echo ""
+    echo -e "${YELLOW}  Restart Claude Desktop to load the krisp MCP server.${NC}"
+}
+
+# Configure MCP for Claude Code
+configure_claude_code() {
     local account_id=$(aws sts get-caller-identity --query Account --output text)
 
+    echo ""
+    echo "═══════════════════════════════════════════════════════════"
+    echo "  Configure Claude Code MCP"
+    echo "═══════════════════════════════════════════════════════════"
+    echo ""
+
+    # Check if claude CLI is installed
+    if ! command -v claude >/dev/null 2>&1; then
+        echo -e "${YELLOW}Claude Code CLI not found.${NC}"
+        echo "  Skipping auto-configuration."
+        echo "  Install from: https://docs.anthropic.com/en/docs/claude-code"
+        return
+    fi
+
+    read -p "Auto-configure Claude Code with krisp MCP server? [Y/n] " -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Nn]$ ]]; then
+        echo "  Skipping Claude Code configuration."
+        return
+    fi
+
+    # Check if krisp is already configured
+    if claude mcp list 2>/dev/null | grep -q "krisp"; then
+        echo "  Removing existing krisp MCP server..."
+        claude mcp remove krisp --scope user 2>/dev/null || true
+    fi
+
+    # Add the MCP server
+    claude mcp add --transport stdio \
+        --env "AWS_REGION=$AWS_REGION" \
+        --env "KRISP_S3_BUCKET=krisp-transcripts-${account_id}" \
+        --env "DYNAMODB_TABLE=krisp-transcripts-index" \
+        --env "VECTOR_BUCKET=krisp-vectors-${account_id}" \
+        --env "VECTOR_INDEX=transcript-chunks" \
+        --env "AWS_PROFILE=${AWS_PROFILE:-default}" \
+        --scope user \
+        krisp -- node "$INSTALL_DIR/lambda/mcp-server-ts/dist/stdio-server.cjs"
+
+    echo -e "${GREEN}✓ Claude Code configured${NC}"
+}
+
+# Print completion message
+print_completion() {
     echo ""
     echo -e "${GREEN}════════════════════════════════════════════════════════════${NC}"
     echo -e "${GREEN}  ✓ Keep It Krispy Installed Successfully!${NC}"
@@ -576,44 +713,17 @@ print_completion() {
     echo -e "${CYAN}NEXT STEPS:${NC}"
     echo ""
     echo "  1. Configure Krisp webhook:"
-    echo "     Go to Krisp → Settings → Integrations → Webhooks"
-    echo "     Add URL: $WEBHOOK_URL"
+    echo "     Open Krisp → Settings → Integrations → Webhooks"
+    echo "     Paste URL: $WEBHOOK_URL"
     echo ""
-    echo "  2. Add MCP server to Claude Desktop:"
-    echo "     Edit: ~/Library/Application Support/Claude/claude_desktop_config.json"
+    echo "  2. Restart Claude Desktop (if configured above)"
     echo ""
-    cat << EOF
-     {
-       "mcpServers": {
-         "krisp": {
-           "command": "node",
-           "args": ["$INSTALL_DIR/lambda/mcp-server-ts/dist/stdio-server.cjs"],
-           "env": {
-             "AWS_REGION": "$AWS_REGION",
-             "KRISP_S3_BUCKET": "krisp-transcripts-${account_id}",
-             "DYNAMODB_TABLE": "krisp-transcripts-index",
-             "VECTOR_BUCKET": "krisp-vectors-${account_id}",
-             "VECTOR_INDEX": "transcript-chunks",
-             "AWS_PROFILE": "default"
-           }
-         }
-       }
-     }
-EOF
+    echo "  3. Have a meeting! Transcripts will auto-index."
     echo ""
-    echo "  3. Or add to Claude Code:"
-    echo "     claude mcp add --transport stdio \\"
-    echo "       --env AWS_REGION=$AWS_REGION \\"
-    echo "       --env KRISP_S3_BUCKET=krisp-transcripts-${account_id} \\"
-    echo "       --env DYNAMODB_TABLE=krisp-transcripts-index \\"
-    echo "       --env VECTOR_BUCKET=krisp-vectors-${account_id} \\"
-    echo "       --env VECTOR_INDEX=transcript-chunks \\"
-    echo "       --scope user \\"
-    echo "       krisp -- node $INSTALL_DIR/lambda/mcp-server-ts/dist/stdio-server.cjs"
+    echo "  4. Ask Claude: \"What was my last meeting about?\""
     echo ""
-    echo "  4. Have a meeting! Transcripts will auto-index."
-    echo ""
-    echo "Documentation: https://github.com/dwinter3/keep-it-krispy"
+    echo -e "${CYAN}DOCUMENTATION:${NC}"
+    echo "  https://krispy.alpha-pm.dev"
     echo ""
 }
 
@@ -628,6 +738,8 @@ main() {
     create_vectors_index
     deploy_processor
     build_mcp_server
+    configure_claude_desktop
+    configure_claude_code
     print_completion
 }
 

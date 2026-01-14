@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Install - Keep It Krispy</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <nav>
+    <div class="nav-container">
+      <a href="index.html" class="nav-brand">Keep It Krispy</a>
+      <ul class="nav-links">
+        <li><a href="index.html">Home</a></li>
+        <li><a href="install.html" class="active">Install</a></li>
+        <li><a href="mcp.html">MCP Setup</a></li>
+        <li><a href="examples.html">Examples</a></li>
+        <li><a href="https://github.com/dwinter3/keep-it-krispy">GitHub</a></li>
+      </ul>
+    </div>
+  </nav>
+
+  <div class="container">
+    <h1>Installation Guide</h1>
+    <p>Deploy Keep It Krispy to your AWS account in about 5 minutes.</p>
+
+    <!-- Prerequisites -->
+    <section>
+      <h2>Prerequisites</h2>
+
+      <div class="prereq-grid">
+        <div class="prereq">
+          <div class="prereq-icon">&#9745;</div>
+          <strong>Krisp.ai</strong>
+          <p>Desktop app</p>
+        </div>
+        <div class="prereq">
+          <div class="prereq-icon">&#9745;</div>
+          <strong>AWS Account</strong>
+          <p>Free tier OK</p>
+        </div>
+        <div class="prereq">
+          <div class="prereq-icon">&#9745;</div>
+          <strong>AWS CLI</strong>
+          <p>v2.x</p>
+        </div>
+        <div class="prereq">
+          <div class="prereq-icon">&#9745;</div>
+          <strong>Node.js</strong>
+          <p>18+</p>
+        </div>
+        <div class="prereq">
+          <div class="prereq-icon">&#9745;</div>
+          <strong>Git</strong>
+          <p>Any version</p>
+        </div>
+        <div class="prereq">
+          <div class="prereq-icon">&#9745;</div>
+          <strong>Python</strong>
+          <p>3.11+ (optional)</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- AWS Setup -->
+    <section>
+      <h2>Step 1: AWS CLI Setup</h2>
+
+      <div class="setup-step">
+        <h3>Install AWS CLI</h3>
+
+        <div class="tabs">
+          <button class="tab active" onclick="showTab('macos')">macOS</button>
+          <button class="tab" onclick="showTab('linux')">Linux</button>
+          <button class="tab" onclick="showTab('windows')">Windows</button>
+        </div>
+
+        <div id="macos" class="tab-content active">
+          <div class="curl-command" style="font-size: 0.85rem;">brew install awscli</div>
+          <p style="margin-top: 10px; color: #888; font-size: 0.85rem;">Or download from <a href="https://awscli.amazonaws.com/AWSCLIV2.pkg" style="color: #00d4aa;">awscli.amazonaws.com/AWSCLIV2.pkg</a></p>
+        </div>
+
+        <div id="linux" class="tab-content">
+          <pre class="architecture" style="font-size: 0.85rem;">curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+unzip awscliv2.zip
+sudo ./aws/install</pre>
+        </div>
+
+        <div id="windows" class="tab-content">
+          <p>Download and run: <a href="https://awscli.amazonaws.com/AWSCLIV2.msi" style="color: #00d4aa;">awscli.amazonaws.com/AWSCLIV2.msi</a></p>
+          <p style="margin-top: 10px;">Or via winget:</p>
+          <div class="curl-command" style="font-size: 0.85rem;">winget install Amazon.AWSCLI</div>
+        </div>
+      </div>
+
+      <div class="setup-step">
+        <h3>Create IAM Credentials</h3>
+        <ol class="step-list">
+          <li>Log into <a href="https://console.aws.amazon.com/iam" style="color: #00d4aa;">AWS Console &rarr; IAM</a></li>
+          <li>Create a new IAM User (e.g., <code>krisp-deployer</code>)</li>
+          <li>Attach the scoped policy below (or use AdministratorAccess for testing)</li>
+          <li>Create Access Key: Security credentials &rarr; Create access key &rarr; CLI</li>
+          <li>Save the Access Key ID and Secret Access Key</li>
+        </ol>
+
+        <a href="iam-policy.json" download="KrispBuddyDeployerPolicy.json" class="preview-btn" style="text-decoration: none; margin-top: 15px;">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Download Scoped IAM Policy
+        </a>
+
+        <div class="info-box" style="margin-top: 15px;">
+          <strong>Scoped Policy</strong> - The downloadable policy grants only the permissions needed for deployment. It's safer than using AdministratorAccess.
+        </div>
+      </div>
+
+      <div class="setup-step">
+        <h3>Configure AWS CLI</h3>
+        <pre class="architecture" style="font-size: 0.85rem;">$ aws configure
+
+AWS Access Key ID: AKIA...
+AWS Secret Access Key: wJalr...
+Default region name: us-east-1
+Default output format: json</pre>
+
+        <p style="margin-top: 10px;">Verify it works:</p>
+        <pre class="architecture" style="font-size: 0.85rem;">$ aws sts get-caller-identity
+
+{
+    "Account": "123456789012",
+    "Arn": "arn:aws:iam::123456789012:user/krisp-deployer"
+}</pre>
+      </div>
+
+      <div class="setup-step">
+        <h3>Enable Bedrock Model Access</h3>
+        <p>For semantic search, you need access to Amazon Titan Embeddings:</p>
+        <ol class="step-list">
+          <li>Go to <a href="https://console.aws.amazon.com/bedrock/home#/modelaccess" style="color: #00d4aa;">Bedrock &rarr; Model access</a></li>
+          <li>Click "Manage model access"</li>
+          <li>Select "Amazon" &rarr; "Titan Text Embeddings V2"</li>
+          <li>Click "Request model access" (instant approval)</li>
+        </ol>
+      </div>
+    </section>
+
+    <!-- Run Installer -->
+    <section>
+      <h2>Step 2: Run the Installer</h2>
+
+      <div class="install-box">
+        <h2>One-Line Install</h2>
+        <div class="curl-command">curl -fsSL https://krispy.alpha-pm.dev/install.sh | bash</div>
+      </div>
+
+      <p>The installer will:</p>
+      <ol class="step-list">
+        <li>Check prerequisites (Git, Node.js, AWS CLI, credentials)</li>
+        <li>Validate AWS permissions before deploying</li>
+        <li>Clone the repository to <code>~/keep-it-krispy</code></li>
+        <li>Deploy CloudFormation stack (S3, DynamoDB, Lambda)</li>
+        <li>Create S3 Vectors index for semantic search</li>
+        <li>Build the MCP server locally</li>
+        <li>Print your webhook URL and MCP configuration</li>
+      </ol>
+
+      <div class="info-box" style="margin-top: 20px;">
+        <strong>Using a specific AWS profile?</strong>
+        <div class="curl-command" style="font-size: 0.85rem; margin-top: 10px;">AWS_PROFILE=myprofile curl -fsSL https://krispy.alpha-pm.dev/install.sh | bash</div>
+      </div>
+    </section>
+
+    <!-- Configure Krisp -->
+    <section>
+      <h2>Step 3: Configure Krisp Webhook</h2>
+      <p>After installation, you'll see a webhook URL. Add it to Krisp:</p>
+
+      <ol class="step-list">
+        <li>Open Krisp desktop app</li>
+        <li>Go to Settings &rarr; Integrations &rarr; Webhooks</li>
+        <li>Add your webhook URL (looks like <code>https://xxxxx.lambda-url.us-east-1.on.aws/</code>)</li>
+        <li>Enable the webhook</li>
+      </ol>
+
+      <div class="info-box">
+        <strong>Test it:</strong> Have a quick meeting (even talking to yourself for 30 seconds works). Check your S3 bucket for new files.
+      </div>
+    </section>
+
+    <!-- MCP Setup -->
+    <section>
+      <h2>Step 4: Set Up MCP</h2>
+      <p>The final step is connecting Claude to your meeting data via MCP.</p>
+      <p><a href="mcp.html" class="btn btn-primary" style="margin-top: 10px;">MCP Setup Guide &rarr;</a></p>
+    </section>
+
+    <!-- Architecture -->
+    <section>
+      <h2>What Gets Deployed</h2>
+      <pre class="architecture">
+AWS Resources Created:
+----------------------
+S3 Bucket:    krisp-transcripts-{account-id}    (raw meeting JSON)
+S3 Bucket:    krisp-vectors-{account-id}        (embeddings for search)
+DynamoDB:     krisp-transcripts-index           (fast metadata queries)
+Lambda:       krisp-buddy-webhook               (receives Krisp webhooks)
+Lambda:       krisp-buddy-processor             (indexes + embeds transcripts)
+IAM Roles:    krisp-buddy-webhook-role
+              krisp-buddy-processor-role
+
+Local Files:
+------------
+~/keep-it-krispy/                              (cloned repository)
+~/keep-it-krispy/lambda/mcp-server-ts/dist/    (built MCP server)
+~/keep-it-krispy/.env.local                    (your configuration)
+      </pre>
+    </section>
+
+    <!-- Troubleshooting -->
+    <section>
+      <h2>Troubleshooting</h2>
+
+      <div class="card-grid">
+        <div class="card">
+          <h3>AWS Credentials Error</h3>
+          <p>Run <code>aws sts get-caller-identity</code> to verify credentials are configured. Check <code>~/.aws/credentials</code>.</p>
+        </div>
+        <div class="card">
+          <h3>Permission Denied</h3>
+          <p>Your IAM user needs permissions to create S3, DynamoDB, Lambda, and IAM resources. Use the scoped policy above.</p>
+        </div>
+        <div class="card">
+          <h3>Bedrock Access Denied</h3>
+          <p>You need to request model access for Titan Embeddings. See Step 1 above.</p>
+        </div>
+        <div class="card">
+          <h3>MCP Not Connecting</h3>
+          <p>Check logs in <code>~/Library/Logs/Claude/mcp-server-krisp.log</code>. See <a href="mcp.html" style="color: #00d4aa;">MCP Setup</a>.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Cost -->
+    <section>
+      <h2>Estimated Cost</h2>
+      <table class="cost-table">
+        <tr><th>Component</th><th>Monthly Cost</th><th>Notes</th></tr>
+        <tr><td>DynamoDB</td><td>Free</td><td>Free tier (25 GB, 25 RCU/WCU)</td></tr>
+        <tr><td>S3 Storage</td><td>~$0.02</td><td>~1 GB transcripts</td></tr>
+        <tr><td>S3 Vectors</td><td>~$0.01</td><td>~10 MB embeddings</td></tr>
+        <tr><td>Lambda</td><td>Free</td><td>Free tier (1M requests)</td></tr>
+        <tr><td>Bedrock</td><td>~$0.05</td><td>One-time indexing</td></tr>
+        <tr><td><strong>Total</strong></td><td><strong>< $2/month</strong></td><td></td></tr>
+      </table>
+    </section>
+  </div>
+
+  <footer>
+    <p>Built by <a href="https://github.com/dwinter3">@dwinter3</a> | <a href="https://github.com/dwinter3/keep-it-krispy">GitHub</a></p>
+  </footer>
+
+  <script>
+    function showTab(tabId) {
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+      document.querySelector(`[onclick="showTab('${tabId}')"]`).classList.add('active');
+      document.getElementById(tabId).classList.add('active');
+    }
+  </script>
+</body>
+</html>
