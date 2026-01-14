@@ -93,6 +93,14 @@ Resources:
                 Action:
                   - s3:PutObject
                 Resource: !Sub '${TranscriptsBucket.Arn}/*'
+        - PolicyName: DynamoDBWriteAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                Resource: !GetAtt TranscriptsIndex.Arn
 
   # IAM Role for Processor Lambda
   ProcessorLambdaRole:
@@ -156,6 +164,7 @@ Resources:
         Variables:
           KRISP_S3_BUCKET: !Ref TranscriptsBucket
           KRISP_WEBHOOK_AUTH_KEY: !Ref KrispWebhookAuthKey
+          DYNAMODB_TABLE: !Ref TranscriptsIndex
       Code:
         ZipFile: |
           import json
@@ -164,7 +173,9 @@ Resources:
           from datetime import datetime
 
           s3 = boto3.client('s3')
+          dynamodb = boto3.resource('dynamodb')
           BUCKET_NAME = os.environ.get('KRISP_S3_BUCKET', '')
+          DYNAMODB_TABLE = os.environ.get('DYNAMODB_TABLE', 'krisp-transcripts-index')
           WEBHOOK_AUTH_KEY = os.environ.get('KRISP_WEBHOOK_AUTH_KEY')
 
           def lambda_handler(event, context):
@@ -185,28 +196,63 @@ Resources:
                   return {'statusCode': 400, 'body': json.dumps({'error': 'Invalid JSON'})}
 
               event_type = payload.get('event', 'unknown')
-              meeting_id = payload.get('meeting_id', payload.get('meetingId', 'unknown'))
-              meeting_title = payload.get('title', payload.get('meeting_title', 'Untitled'))
+
+              # Extract meeting data from nested structure
+              data = payload.get('data', {})
+              meeting = data.get('meeting', {})
+
+              meeting_id = meeting.get('id') or payload.get('meeting_id', payload.get('meetingId', 'unknown'))
+              meeting_title = meeting.get('title') or payload.get('title', 'Untitled')
+              duration = meeting.get('duration', 0)
+              url = meeting.get('url', '')
+
+              # Extract speakers from participants
+              participants = meeting.get('participants', [])
+              speakers = list(set(p.get('name', '') for p in participants if p.get('name')))
 
               now = datetime.utcnow()
               date_prefix = now.strftime('%Y/%m/%d')
+              date_str = now.strftime('%Y-%m-%d')
               timestamp = now.strftime('%Y%m%d_%H%M%S')
+              received_at = now.isoformat() + 'Z'
 
               safe_title = "".join(c if c.isalnum() or c in (' ', '-', '_') else '_' for c in meeting_title)[:50]
               s3_key = f"meetings/{date_prefix}/{timestamp}_{safe_title}_{meeting_id}.json"
 
               enriched_payload = {
-                  'received_at': now.isoformat() + 'Z',
+                  'received_at': received_at,
                   'event_type': event_type,
                   'raw_payload': payload
               }
 
+              # Write to S3
               s3.put_object(
                   Bucket=BUCKET_NAME,
                   Key=s3_key,
                   Body=json.dumps(enriched_payload, indent=2, default=str),
                   ContentType='application/json'
               )
+
+              # Write to DynamoDB immediately for fast queries
+              table = dynamodb.Table(DYNAMODB_TABLE)
+              dynamo_item = {
+                  'meeting_id': meeting_id,
+                  'title': meeting_title,
+                  'date': date_str,
+                  'timestamp': received_at,
+                  'duration': int(duration) if duration else 0,
+                  's3_key': s3_key,
+                  'event_type': event_type,
+                  'received_at': received_at,
+                  'indexed_at': received_at,
+              }
+              if speakers:
+                  dynamo_item['speakers'] = speakers
+                  dynamo_item['speaker_name'] = speakers[0].lower() if speakers else ''
+              if url:
+                  dynamo_item['url'] = url
+
+              table.put_item(Item=dynamo_item)
 
               return {
                   'statusCode': 200,

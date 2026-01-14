@@ -117,26 +117,15 @@ export class DynamoTranscriptClient {
   }
 
   /**
-   * List recent transcripts (scan with limit).
+   * List recent transcripts using date GSI for last 30 days.
+   * This ensures we get the actual most recent records, not arbitrary scan results.
    */
   async listRecent(limit: number = 20): Promise<TranscriptRecord[]> {
-    // Use scan for simplicity - DynamoDB will handle efficiently for small datasets
-    const command = new ScanCommand({
-      TableName: this.tableName,
-      Limit: Math.min(limit * 2, 100), // Get extra to allow for sorting
-    });
+    // Query the last 30 days using the date GSI
+    const endDate = new Date().toISOString().slice(0, 10);
+    const startDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
 
-    const response = await this.client.send(command);
-    const records = (response.Items as TranscriptRecord[]) || [];
-
-    // Sort by timestamp descending
-    records.sort((a, b) => {
-      const dateA = new Date(a.timestamp || a.date);
-      const dateB = new Date(b.timestamp || b.date);
-      return dateB.getTime() - dateA.getTime();
-    });
-
-    return records.slice(0, limit);
+    return this.listByDateRange(startDate, endDate, limit);
   }
 
   /**
