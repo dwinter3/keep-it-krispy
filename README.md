@@ -1,5 +1,16 @@
 # Keep It Krispy
 
+**AI-Powered Meeting Memory** — Turn your Krisp transcripts into a searchable knowledge base for Claude.
+
+🌐 **Website:** [keepitkrispy-website.s3-website-us-east-1.amazonaws.com](http://keepitkrispy-website.s3-website-us-east-1.amazonaws.com)
+
+```bash
+# One-line install (deploys to your AWS account)
+curl -fsSL http://keepitkrispy-website.s3-website-us-east-1.amazonaws.com/install.sh | bash
+```
+
+---
+
 ## The Brag
 
 So I built a thing over the weekend. You know how Krisp has that webhook feature for transcripts? I wired it up so every meeting I have automatically flows into Claude's memory.
