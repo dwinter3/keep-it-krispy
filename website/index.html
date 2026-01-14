@@ -317,6 +317,54 @@
       height: 20px;
       fill: currentColor;
     }
+
+    .conversation {
+      margin: 25px 0;
+      padding: 20px;
+      background: rgba(0, 0, 0, 0.2);
+      border-radius: 12px;
+    }
+
+    .chat-bubble {
+      padding: 15px 18px;
+      border-radius: 12px;
+      margin-bottom: 12px;
+      position: relative;
+      line-height: 1.5;
+    }
+
+    .chat-bubble:last-child {
+      margin-bottom: 0;
+    }
+
+    .chat-bubble.user {
+      background: rgba(167, 139, 250, 0.15);
+      border: 1px solid rgba(167, 139, 250, 0.3);
+      margin-left: 30px;
+    }
+
+    .chat-bubble.claude {
+      background: rgba(0, 212, 170, 0.1);
+      border: 1px solid rgba(0, 212, 170, 0.25);
+      margin-right: 30px;
+    }
+
+    .chat-label {
+      display: block;
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 8px;
+    }
+
+    .chat-bubble.user .chat-label {
+      color: #a78bfa;
+    }
+
+    .chat-bubble.claude .chat-label {
+      color: #00d4aa;
+    }
   </style>
 </head>
 <body>
@@ -346,6 +394,63 @@
           <h4>"Find meetings about Q1 roadmap"</h4>
           <p>Semantic search finds context even without exact keywords</p>
         </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Real World Usage: After a Business Call</h2>
+      <p>Here's what it actually looks like to use Keep It Krispy in your daily workflow:</p>
+
+      <div class="conversation">
+        <div class="chat-bubble user">
+          <span class="chat-label">You</span>
+          Just got off a call with the legal team about the partnership agreement. Can you find what Caroline said about the timeline for the legal review?
+        </div>
+        <div class="chat-bubble claude">
+          <span class="chat-label">Claude</span>
+          From your call with Legal today at 2:30 PM, Caroline mentioned: "We need at least three weeks for the full legal review, but I can get you preliminary feedback by Friday if you need to start drafting the technical specs."
+          <br><br>
+          She also flagged that the indemnification clause will need extra review because of the data processing components.
+        </div>
+      </div>
+
+      <div class="conversation">
+        <div class="chat-bubble user">
+          <span class="chat-label">You</span>
+          I need to write a summary doc for the exec team. Can you pull together everything from my calls this week about the Q1 roadmap, combine it with the slide deck I shared in our Monday standup, and draft something?
+        </div>
+        <div class="chat-bubble claude">
+          <span class="chat-label">Claude</span>
+          I found 4 meetings this week that discussed Q1 roadmap: Monday standup, Wednesday product sync, Thursday eng review, and today's stakeholder call.
+          <br><br>
+          Key themes across all four:<br>
+          • Engineering wants to push the auth migration to Q2<br>
+          • Product is prioritizing the dashboard redesign<br>
+          • Brian raised concerns about the API deprecation timeline
+          <br><br>
+          Combined with your Monday slides, here's a draft exec summary...
+        </div>
+      </div>
+
+      <div class="conversation">
+        <div class="chat-bubble user">
+          <span class="chat-label">You</span>
+          Search for any meetings where we discussed budget concerns
+        </div>
+        <div class="chat-bubble claude">
+          <span class="chat-label">Claude</span>
+          Found 3 relevant meetings (semantic search — includes discussions about "cost overruns", "spending", and "resource constraints"):
+          <br><br>
+          • <strong>Nov 12 Finance Review</strong> — CFO flagged Q4 cloud spend 23% over budget<br>
+          • <strong>Nov 15 Product Planning</strong> — You mentioned needing to "find cheaper alternatives for the data pipeline"<br>
+          • <strong>Nov 18 Vendor Call</strong> — Discussed contract renegotiation for cost reduction
+        </div>
+      </div>
+
+      <div class="info-box">
+        <h4>The Workflow Unlock</h4>
+        <p>Standard AI summaries only know about one call. The real power is combining <strong>multiple transcripts</strong> with your own context — slide decks, email threads, PDFs, notes — and then asking Claude to synthesize something useful.</p>
+        <p style="margin-top: 10px;">That's what makes this different from clicking "summarize" in Krisp. You're building a <strong>knowledge layer</strong> across all your conversations.</p>
       </div>
     </section>
 
