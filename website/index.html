@@ -398,6 +398,40 @@
     </section>
 
     <section>
+      <h2>What is Krisp? (Required)</h2>
+      <p><a href="https://krisp.ai" style="color: #00d4aa;">Krisp</a> is a desktop app for Mac/Windows that provides <strong>AI noise cancellation</strong> and <strong>real-time transcription</strong> for any meeting — Zoom, Google Meet, Teams, phone calls, anything with audio.</p>
+
+      <div class="info-box">
+        <h4>Why Krisp Pro/Business?</h4>
+        <p>Krisp's free tier does transcription, but <strong>webhooks require Krisp Pro or Business</strong>. Webhooks are the unlock — they let Krisp automatically send transcripts to your infrastructure the moment a call ends.</p>
+        <p style="margin-top: 10px;"><a href="https://krisp.ai/pricing/" style="color: #a78bfa;">Krisp pricing →</a></p>
+      </div>
+
+      <h3>How Automatic Ingestion Works</h3>
+      <p><strong>Once configured, ingestion is 100% automatic.</strong> You don't do anything — just have your meetings. Here's what happens:</p>
+      <ol class="step-list">
+        <li><strong>You finish a call</strong> — Krisp detects the meeting ended</li>
+        <li><strong>Krisp sends the transcript</strong> — Via webhook to your AWS Lambda (within seconds)</li>
+        <li><strong>Lambda stores it in S3</strong> — Raw JSON preserved forever</li>
+        <li><strong>S3 triggers processing</strong> — Chunks transcript, generates embeddings</li>
+        <li><strong>Ready for Claude</strong> — Searchable in Claude within ~10 seconds of hanging up</li>
+      </ol>
+      <p>No manual export. No copy-paste. No "remember to save the transcript." Every conversation you have is automatically indexed and searchable.</p>
+
+      <h3>Setting Up the Krisp Webhook</h3>
+      <p>After running the install script, you'll get a webhook URL. Here's how to configure Krisp:</p>
+      <ol>
+        <li>Open <strong>Krisp app</strong> → Settings (gear icon)</li>
+        <li>Go to <strong>Integrations</strong> or <strong>Webhooks</strong> tab</li>
+        <li>Click <strong>"Add Webhook"</strong></li>
+        <li>Paste your webhook URL (provided by the install script)</li>
+        <li>Enable <strong>"Send transcript on call end"</strong></li>
+        <li>Save — that's it, you're done</li>
+      </ol>
+      <p>From now on, every call is automatically captured.</p>
+    </section>
+
+    <section>
       <h2>Real World Usage: After a Business Call</h2>
       <p>Here's what it actually looks like to use Keep It Krispy in your daily workflow:</p>
 

@@ -38,6 +38,39 @@ Basically turned Krisp into my external brain. Every conversation I have is now 
 
 ---
 
+## What is Krisp?
+
+[Krisp](https://krisp.ai) is a desktop app for Mac/Windows that provides **AI noise cancellation** and **real-time transcription** for any meeting — Zoom, Google Meet, Teams, phone calls, anything with audio.
+
+### Why Krisp Pro/Business?
+
+Krisp's free tier does transcription, but **webhooks require Krisp Pro or Business**. Webhooks are the unlock — they automatically send transcripts to your infrastructure the moment a call ends. [See Krisp pricing →](https://krisp.ai/pricing/)
+
+### Automatic Ingestion (Zero Effort)
+
+**Once configured, ingestion is 100% automatic.** You don't do anything — just have your meetings:
+
+1. You finish a call → Krisp detects the meeting ended
+2. Krisp sends the transcript → Via webhook to your AWS Lambda (within seconds)
+3. Lambda stores it in S3 → Raw JSON preserved forever
+4. S3 triggers processing → Chunks transcript, generates embeddings
+5. Ready for Claude → Searchable within ~10 seconds of hanging up
+
+No manual export. No copy-paste. No "remember to save." Every conversation is automatically indexed.
+
+### Setting Up the Krisp Webhook
+
+After running the install script, you'll get a webhook URL. Configure Krisp:
+
+1. Open **Krisp app** → Settings (gear icon)
+2. Go to **Integrations** or **Webhooks** tab
+3. Click **"Add Webhook"**
+4. Paste your webhook URL (provided by the install script)
+5. Enable **"Send transcript on call end"**
+6. Save — done. Every call is now automatically captured.
+
+---
+
 ## Architecture
 
 ```
