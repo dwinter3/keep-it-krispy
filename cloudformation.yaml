@@ -150,6 +150,8 @@ Resources:
       Role: !GetAtt WebhookLambdaRole.Arn
       Timeout: 30
       MemorySize: 128
+      SnapStart:
+        ApplyOn: PublishedVersions
       Environment:
         Variables:
           KRISP_S3_BUCKET: !Ref TranscriptsBucket
@@ -211,12 +213,27 @@ Resources:
                   'body': json.dumps({'message': 'Webhook received', 'event_type': event_type, 's3_key': s3_key})
               }
 
-  # Webhook Lambda URL
+  # Webhook Lambda Version (for SnapStart)
+  WebhookFunctionVersion:
+    Type: AWS::Lambda::Version
+    Properties:
+      FunctionName: !Ref WebhookFunction
+      Description: SnapStart enabled version
+
+  # Webhook Lambda Alias (for SnapStart with Function URL)
+  WebhookFunctionAlias:
+    Type: AWS::Lambda::Alias
+    Properties:
+      FunctionName: !Ref WebhookFunction
+      FunctionVersion: !GetAtt WebhookFunctionVersion.Version
+      Name: live
+
+  # Webhook Lambda URL (points to alias for SnapStart)
   WebhookFunctionUrl:
     Type: AWS::Lambda::Url
     Properties:
       AuthType: NONE
-      TargetFunctionArn: !GetAtt WebhookFunction.Arn
+      TargetFunctionArn: !Ref WebhookFunctionAlias
       Cors:
         AllowMethods:
           - POST
@@ -227,7 +244,7 @@ Resources:
   WebhookFunctionUrlPermission:
     Type: AWS::Lambda::Permission
     Properties:
-      FunctionName: !Ref WebhookFunction
+      FunctionName: !Ref WebhookFunctionAlias
       Action: lambda:InvokeFunctionUrl
       Principal: '*'
       FunctionUrlAuthType: NONE
@@ -242,6 +259,8 @@ Resources:
       Role: !GetAtt ProcessorLambdaRole.Arn
       Timeout: 120
       MemorySize: 512
+      SnapStart:
+        ApplyOn: PublishedVersions
       Environment:
         Variables:
           KRISP_S3_BUCKET: !Ref TranscriptsBucket
@@ -256,11 +275,26 @@ Resources:
               print("Processor triggered - deploy full code from repo")
               return {"status": "placeholder"}
 
-  # Permission for S3 to invoke Processor Lambda
+  # Processor Lambda Version (for SnapStart)
+  ProcessorFunctionVersion:
+    Type: AWS::Lambda::Version
+    Properties:
+      FunctionName: !Ref ProcessorFunction
+      Description: SnapStart enabled version
+
+  # Processor Lambda Alias (for SnapStart)
+  ProcessorFunctionAlias:
+    Type: AWS::Lambda::Alias
+    Properties:
+      FunctionName: !Ref ProcessorFunction
+      FunctionVersion: !GetAtt ProcessorFunctionVersion.Version
+      Name: live
+
+  # Permission for S3 to invoke Processor Lambda (via alias)
   ProcessorS3Permission:
     Type: AWS::Lambda::Permission
     Properties:
-      FunctionName: !Ref ProcessorFunction
+      FunctionName: !Ref ProcessorFunctionAlias
       Action: lambda:InvokeFunction
       Principal: s3.amazonaws.com
       SourceArn: !GetAtt TranscriptsBucket.Arn
