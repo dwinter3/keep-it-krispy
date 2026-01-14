@@ -1,0 +1,313 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Keep It Krispy - AI-Powered Meeting Memory Infrastructure
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: krisp-buddy
+    Description: Project name prefix for resources
+
+  KrispWebhookAuthKey:
+    Type: String
+    Default: ''
+    NoEcho: true
+    Description: Optional auth key for Krisp webhook validation
+
+Resources:
+  # S3 Bucket for Transcripts
+  TranscriptsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub 'krisp-transcripts-${AWS::AccountId}'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      NotificationConfiguration:
+        LambdaConfigurations:
+          - Event: 's3:ObjectCreated:*'
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: prefix
+                    Value: 'meetings/'
+                  - Name: suffix
+                    Value: '.json'
+            Function: !GetAtt ProcessorFunction.Arn
+
+  # S3 Vectors Bucket
+  VectorsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub 'krisp-vectors-${AWS::AccountId}'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  # DynamoDB Table for Metadata Index
+  TranscriptsIndex:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: krisp-transcripts-index
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: meeting_id
+          AttributeType: S
+        - AttributeName: date
+          AttributeType: S
+        - AttributeName: speaker_name
+          AttributeType: S
+      KeySchema:
+        - AttributeName: meeting_id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: date-index
+          KeySchema:
+            - AttributeName: date
+              KeyType: HASH
+            - AttributeName: meeting_id
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: speaker-index
+          KeySchema:
+            - AttributeName: speaker_name
+              KeyType: HASH
+            - AttributeName: date
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+
+  # IAM Role for Webhook Lambda
+  WebhookLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${ProjectName}-webhook-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: S3WriteAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                Resource: !Sub '${TranscriptsBucket.Arn}/*'
+
+  # IAM Role for Processor Lambda
+  ProcessorLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${ProjectName}-processor-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: ProcessorAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                Resource: !Sub '${TranscriptsBucket.Arn}/*'
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                  - dynamodb:GetItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:Query
+                Resource:
+                  - !GetAtt TranscriptsIndex.Arn
+                  - !Sub '${TranscriptsIndex.Arn}/index/*'
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                Resource: !Sub 'arn:aws:bedrock:${AWS::Region}::foundation-model/amazon.titan-embed-text-v2:0'
+              - Effect: Allow
+                Action:
+                  - s3vectors:PutVectors
+                  - s3vectors:GetVectors
+                  - s3vectors:QueryVectors
+                  - s3vectors:DeleteVectors
+                Resource:
+                  - !Sub 'arn:aws:s3vectors:${AWS::Region}:${AWS::AccountId}:bucket/krisp-vectors-${AWS::AccountId}'
+                  - !Sub 'arn:aws:s3vectors:${AWS::Region}:${AWS::AccountId}:bucket/krisp-vectors-${AWS::AccountId}/index/*'
+
+  # Webhook Lambda Function
+  WebhookFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${ProjectName}-webhook'
+      Runtime: python3.12
+      Handler: index.lambda_handler
+      Role: !GetAtt WebhookLambdaRole.Arn
+      Timeout: 30
+      MemorySize: 128
+      Environment:
+        Variables:
+          KRISP_S3_BUCKET: !Ref TranscriptsBucket
+          KRISP_WEBHOOK_AUTH_KEY: !Ref KrispWebhookAuthKey
+      Code:
+        ZipFile: |
+          import json
+          import os
+          import boto3
+          from datetime import datetime
+
+          s3 = boto3.client('s3')
+          BUCKET_NAME = os.environ.get('KRISP_S3_BUCKET', '')
+          WEBHOOK_AUTH_KEY = os.environ.get('KRISP_WEBHOOK_AUTH_KEY')
+
+          def lambda_handler(event, context):
+              headers = event.get('headers', {})
+              auth_header = headers.get('authorization', '')
+
+              if WEBHOOK_AUTH_KEY and auth_header != WEBHOOK_AUTH_KEY:
+                  return {'statusCode': 401, 'body': json.dumps({'error': 'Unauthorized'})}
+
+              body = event.get('body', '{}')
+              if event.get('isBase64Encoded', False):
+                  import base64
+                  body = base64.b64decode(body).decode('utf-8')
+
+              try:
+                  payload = json.loads(body)
+              except json.JSONDecodeError as e:
+                  return {'statusCode': 400, 'body': json.dumps({'error': 'Invalid JSON'})}
+
+              event_type = payload.get('event', 'unknown')
+              meeting_id = payload.get('meeting_id', payload.get('meetingId', 'unknown'))
+              meeting_title = payload.get('title', payload.get('meeting_title', 'Untitled'))
+
+              now = datetime.utcnow()
+              date_prefix = now.strftime('%Y/%m/%d')
+              timestamp = now.strftime('%Y%m%d_%H%M%S')
+
+              safe_title = "".join(c if c.isalnum() or c in (' ', '-', '_') else '_' for c in meeting_title)[:50]
+              s3_key = f"meetings/{date_prefix}/{timestamp}_{safe_title}_{meeting_id}.json"
+
+              enriched_payload = {
+                  'received_at': now.isoformat() + 'Z',
+                  'event_type': event_type,
+                  'raw_payload': payload
+              }
+
+              s3.put_object(
+                  Bucket=BUCKET_NAME,
+                  Key=s3_key,
+                  Body=json.dumps(enriched_payload, indent=2, default=str),
+                  ContentType='application/json'
+              )
+
+              return {
+                  'statusCode': 200,
+                  'body': json.dumps({'message': 'Webhook received', 'event_type': event_type, 's3_key': s3_key})
+              }
+
+  # Webhook Lambda URL
+  WebhookFunctionUrl:
+    Type: AWS::Lambda::Url
+    Properties:
+      AuthType: NONE
+      TargetFunctionArn: !GetAtt WebhookFunction.Arn
+      Cors:
+        AllowMethods:
+          - POST
+        AllowOrigins:
+          - '*'
+
+  # Permission for Lambda URL
+  WebhookFunctionUrlPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref WebhookFunction
+      Action: lambda:InvokeFunctionUrl
+      Principal: '*'
+      FunctionUrlAuthType: NONE
+
+  # Processor Lambda Function (placeholder - needs full code deployment)
+  ProcessorFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${ProjectName}-processor'
+      Runtime: python3.12
+      Handler: index.handler
+      Role: !GetAtt ProcessorLambdaRole.Arn
+      Timeout: 120
+      MemorySize: 512
+      Environment:
+        Variables:
+          KRISP_S3_BUCKET: !Ref TranscriptsBucket
+          DYNAMODB_TABLE: !Ref TranscriptsIndex
+          VECTOR_BUCKET: !Ref VectorsBucket
+          VECTOR_INDEX: transcript-chunks
+      Code:
+        ZipFile: |
+          # Placeholder - deploy full processor code separately
+          # This creates DynamoDB entries and vector embeddings
+          def handler(event, context):
+              print("Processor triggered - deploy full code from repo")
+              return {"status": "placeholder"}
+
+  # Permission for S3 to invoke Processor Lambda
+  ProcessorS3Permission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref ProcessorFunction
+      Action: lambda:InvokeFunction
+      Principal: s3.amazonaws.com
+      SourceArn: !GetAtt TranscriptsBucket.Arn
+      SourceAccount: !Ref AWS::AccountId
+
+Outputs:
+  WebhookUrl:
+    Description: Krisp Webhook URL - configure this in Krisp settings
+    Value: !GetAtt WebhookFunctionUrl.FunctionUrl
+
+  TranscriptsBucket:
+    Description: S3 bucket for raw transcripts
+    Value: !Ref TranscriptsBucket
+
+  VectorsBucket:
+    Description: S3 bucket for vector embeddings
+    Value: !Ref VectorsBucket
+
+  DynamoDBTable:
+    Description: DynamoDB table for transcript metadata
+    Value: !Ref TranscriptsIndex
+
+  MCPServerConfig:
+    Description: Environment variables for MCP server
+    Value: !Sub |
+      KRISP_S3_BUCKET=${TranscriptsBucket}
+      DYNAMODB_TABLE=${TranscriptsIndex}
+      VECTOR_BUCKET=${VectorsBucket}
+      VECTOR_INDEX=transcript-chunks
+      AWS_REGION=${AWS::Region}
+
+  NextSteps:
+    Description: Next steps after deployment
+    Value: |
+      1. Copy the WebhookUrl to Krisp webhook settings
+      2. Deploy full processor Lambda code from repo
+      3. Create S3 Vectors index: transcript-chunks
+      4. Configure MCP server with the environment variables above
+      5. Run backfill scripts if you have existing transcripts
