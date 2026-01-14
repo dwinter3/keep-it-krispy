@@ -172,16 +172,31 @@ Default output format: json</pre>
     <!-- Configure Krisp -->
     <section>
       <h2>Step 3: Configure Krisp Webhook</h2>
-      <p>After installation, you'll see a webhook URL. Add it to Krisp:</p>
+      <p>After installation, you'll see a webhook URL and an authentication key. Add them to Krisp:</p>
 
       <ol class="step-list">
         <li>Open Krisp desktop app</li>
         <li>Go to Settings &rarr; Integrations &rarr; Webhooks</li>
-        <li>Add your webhook URL (looks like <code>https://xxxxx.lambda-url.us-east-1.on.aws/</code>)</li>
-        <li>Enable the webhook</li>
+        <li><strong>Webhook URL:</strong> Paste your URL (looks like <code>https://xxxxx.lambda-url.us-east-1.on.aws/</code>)</li>
+        <li><strong>Request Headers:</strong> Click the <code>+</code> button to add a header:
+          <ul style="margin-top: 8px; margin-left: 20px;">
+            <li>Header Name: <code>Authorization</code></li>
+            <li>Header Value: Your auth key from the installer output</li>
+          </ul>
+        </li>
+        <li>Select "Transcript created" as the trigger event</li>
+        <li>Click "Update" to save</li>
       </ol>
 
-      <div class="info-box">
+      <div class="info-box" style="margin-top: 20px;">
+        <strong>Why the Authorization header?</strong> This prevents unauthorized access to your webhook. Only your Krisp app knows the secret key, so only your meetings get indexed.
+      </div>
+
+      <div class="info-box" style="margin-top: 15px;">
+        <strong>Lost your auth key?</strong> It's saved in <code>~/keep-it-krispy/.env.local</code>. You can also regenerate by running the installer again.
+      </div>
+
+      <div class="info-box" style="margin-top: 15px;">
         <strong>Test it:</strong> Have a quick meeting (even talking to yourself for 30 seconds works). Check your S3 bucket for new files.
       </div>
     </section>

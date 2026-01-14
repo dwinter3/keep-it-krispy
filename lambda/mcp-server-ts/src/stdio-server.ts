@@ -106,7 +106,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: 'get_transcripts',
-        description: 'Fetch full content of one or more transcripts by their S3 keys. Use keys from list_transcripts or search_transcripts.',
+        description: 'Fetch full content of one or more transcripts by their S3 keys. Use keys from list_transcripts or search_transcripts. Speaker corrections are automatically applied if available.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -117,6 +117,32 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
           },
           required: ['keys'],
+        },
+      },
+      {
+        name: 'update_speakers',
+        description: 'Correct or identify speakers in a meeting transcript. Map generic names like "Speaker 2" to real names, or correct misspelled names. Optionally include LinkedIn URLs for reference. Corrections are stored and automatically applied when fetching transcripts.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            meeting_id: {
+              type: 'string',
+              description: 'The meeting ID to update speaker information for',
+            },
+            speaker_mappings: {
+              type: 'object',
+              description: 'Object mapping original speaker names to corrected info. Keys are original names (e.g., "Speaker 2", "guy farber"), values are objects with "name" (required) and optional "linkedin" URL.',
+              additionalProperties: {
+                type: 'object',
+                properties: {
+                  name: { type: 'string', description: 'Corrected speaker name' },
+                  linkedin: { type: 'string', description: 'LinkedIn profile URL (optional)' },
+                },
+                required: ['name'],
+              },
+            },
+          },
+          required: ['meeting_id', 'speaker_mappings'],
         },
       },
     ],
@@ -225,23 +251,98 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const transcripts = await s3Client.getTranscripts(keys);
         debug(`get_transcripts: fetched ${transcripts.length} transcripts in ${Date.now() - startTime}ms`);
 
+        // Apply speaker corrections from DynamoDB
+        const transcriptsWithCorrections = await Promise.all(
+          transcripts.map(async (t) => {
+            if (t.error) {
+              return { key: t.key, error: t.error };
+            }
+
+            // Extract meeting_id from key (format: meetings/YYYY/MM/YYYYMMDD_HHMMSS_title_meetingId.json)
+            const keyParts = t.key.split('_');
+            const meetingId = keyParts[keyParts.length - 1]?.replace('.json', '');
+
+            let correctedSpeakers = t.speakers;
+            let speakerCorrections: Record<string, { name: string; linkedin?: string }> | null = null;
+
+            if (meetingId) {
+              speakerCorrections = await dynamoClient.getSpeakerCorrections(meetingId);
+              if (speakerCorrections) {
+                correctedSpeakers = t.speakers.map(speaker => {
+                  const correction = speakerCorrections![speaker.toLowerCase()];
+                  return correction ? correction.name : speaker;
+                });
+              }
+            }
+
+            // Also apply corrections to transcript text if available
+            let correctedTranscript = t.transcript;
+            if (speakerCorrections && t.transcript) {
+              for (const [original, correction] of Object.entries(speakerCorrections)) {
+                // Case-insensitive replace in transcript
+                const regex = new RegExp(original.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+                correctedTranscript = correctedTranscript.replace(regex, correction.name);
+              }
+            }
+
+            return {
+              key: t.key,
+              title: t.title,
+              summary: t.summary,
+              notes: t.notes,
+              transcript: correctedTranscript,
+              action_items: t.actionItems,
+              speakers: correctedSpeakers,
+              speaker_corrections: speakerCorrections,
+            };
+          })
+        );
+
+        debug(`get_transcripts: applied corrections in ${Date.now() - startTime}ms`);
+
         return {
           content: [{
             type: 'text',
             text: JSON.stringify({
-              count: transcripts.length,
-              transcripts: transcripts.map(t => t.error ? {
-                key: t.key,
-                error: t.error,
-              } : {
-                key: t.key,
-                title: t.title,
-                summary: t.summary,
-                notes: t.notes,
-                transcript: t.transcript,
-                action_items: t.actionItems,
-                speakers: t.speakers,
-              }),
+              count: transcriptsWithCorrections.length,
+              transcripts: transcriptsWithCorrections,
+            }, null, 2),
+          }],
+        };
+      }
+
+      case 'update_speakers': {
+        const meetingId = args?.meeting_id as string;
+        const mappings = args?.speaker_mappings as Record<string, { name: string; linkedin?: string }>;
+
+        debug('update_speakers: updating speaker mappings', { meetingId, mappings });
+
+        const updated = await dynamoClient.updateSpeakers(meetingId, mappings);
+
+        if (!updated) {
+          debug(`update_speakers: meeting not found: ${meetingId}`);
+          return {
+            content: [{
+              type: 'text',
+              text: JSON.stringify({
+                error: `Meeting not found: ${meetingId}`,
+                meeting_id: meetingId,
+              }, null, 2),
+            }],
+            isError: true,
+          };
+        }
+
+        debug(`update_speakers: updated successfully in ${Date.now() - startTime}ms`);
+
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              success: true,
+              meeting_id: meetingId,
+              speaker_corrections: updated.speaker_corrections,
+              message: 'Speaker corrections saved. They will be applied when fetching this transcript.',
             }, null, 2),
           }],
         };

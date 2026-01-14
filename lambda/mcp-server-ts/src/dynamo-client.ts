@@ -8,10 +8,16 @@ import {
   QueryCommand,
   ScanCommand,
   GetCommand,
+  UpdateCommand,
 } from '@aws-sdk/lib-dynamodb';
 
 const TABLE_NAME = process.env.DYNAMODB_TABLE || 'krisp-transcripts-index';
 const AWS_REGION = process.env.AWS_REGION || 'us-east-1';
+
+export interface SpeakerCorrection {
+  name: string;
+  linkedin?: string;
+}
 
 export interface TranscriptRecord {
   meeting_id: string;
@@ -21,6 +27,7 @@ export interface TranscriptRecord {
   duration: number;
   speakers?: string[];
   speaker_name?: string;
+  speaker_corrections?: Record<string, SpeakerCorrection>;
   s3_key: string;
   event_type: string;
   received_at: string;
@@ -142,5 +149,67 @@ export class DynamoTranscriptClient {
     }
 
     return dates;
+  }
+
+  /**
+   * Update speaker corrections for a meeting.
+   * Merges new corrections with existing ones.
+   */
+  async updateSpeakers(
+    meetingId: string,
+    corrections: Record<string, SpeakerCorrection>
+  ): Promise<TranscriptRecord | null> {
+    // Normalize keys to lowercase for consistent matching
+    const normalizedCorrections: Record<string, SpeakerCorrection> = {};
+    for (const [key, value] of Object.entries(corrections)) {
+      normalizedCorrections[key.toLowerCase()] = value;
+    }
+
+    const command = new UpdateCommand({
+      TableName: this.tableName,
+      Key: {
+        meeting_id: meetingId,
+      },
+      UpdateExpression: 'SET speaker_corrections = if_not_exists(speaker_corrections, :empty) , speaker_corrections = :corrections',
+      ExpressionAttributeValues: {
+        ':empty': {},
+        ':corrections': normalizedCorrections,
+      },
+      ReturnValues: 'ALL_NEW',
+    });
+
+    // First get existing corrections to merge
+    const existing = await this.getByMeetingId(meetingId);
+    if (!existing) {
+      return null;
+    }
+
+    const merged = {
+      ...(existing.speaker_corrections || {}),
+      ...normalizedCorrections,
+    };
+
+    const mergeCommand = new UpdateCommand({
+      TableName: this.tableName,
+      Key: {
+        meeting_id: meetingId,
+      },
+      UpdateExpression: 'SET speaker_corrections = :corrections',
+      ExpressionAttributeValues: {
+        ':corrections': merged,
+      },
+      ReturnValues: 'ALL_NEW',
+    });
+
+    const response = await this.client.send(mergeCommand);
+    return (response.Attributes as TranscriptRecord) || null;
+  }
+
+  /**
+   * Get speaker corrections for a meeting.
+   */
+  async getSpeakerCorrections(meetingId: string): Promise<Record<string, SpeakerCorrection> | null> {
+    const record = await this.getByMeetingId(meetingId);
+    return record?.speaker_corrections || null;
   }
 }

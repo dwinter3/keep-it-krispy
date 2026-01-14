@@ -10,6 +10,21 @@ INSTALL_DIR="${KRISP_INSTALL_DIR:-$HOME/keep-it-krispy}"
 STACK_NAME="${KRISP_STACK_NAME:-krisp-buddy}"
 AWS_REGION="${AWS_REGION:-us-east-1}"
 
+# Generate webhook auth key (32 hex chars) for security
+generate_auth_key() {
+    # Use /dev/urandom for secure random key, fallback to openssl
+    if [ -f /dev/urandom ]; then
+        head -c 16 /dev/urandom | xxd -p
+    elif command -v openssl >/dev/null 2>&1; then
+        openssl rand -hex 16
+    else
+        # Last resort: use $RANDOM (less secure but functional)
+        echo "$(printf '%08x%08x%08x%08x' $RANDOM$RANDOM $RANDOM$RANDOM $RANDOM$RANDOM $RANDOM$RANDOM)"
+    fi
+}
+
+WEBHOOK_AUTH_KEY=$(generate_auth_key)
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -450,12 +465,14 @@ deploy_infrastructure() {
 
     echo ""
     echo "→ Deploying CloudFormation stack: $STACK_NAME"
+    echo "  (with webhook authentication enabled)"
 
     aws cloudformation deploy \
         --template-file cloudformation.yaml \
         --stack-name "$STACK_NAME" \
         --capabilities CAPABILITY_NAMED_IAM \
         --region "$AWS_REGION" \
+        --parameter-overrides "KrispWebhookAuthKey=$WEBHOOK_AUTH_KEY" \
         --no-fail-on-empty-changeset
 
     echo -e "${GREEN}✓ Infrastructure deployed${NC}"
@@ -490,6 +507,7 @@ VECTOR_BUCKET=$VECTORS_BUCKET
 DYNAMODB_TABLE=krisp-transcripts-index
 VECTOR_INDEX=transcript-chunks
 KRISP_WEBHOOK_URL=$WEBHOOK_URL
+KRISP_WEBHOOK_AUTH_KEY=$WEBHOOK_AUTH_KEY
 EOF
 
     echo -e "${GREEN}✓ Configuration saved to .env.local${NC}"
@@ -707,20 +725,34 @@ print_completion() {
     echo -e "${GREEN}  ✓ Keep It Krispy Installed Successfully!${NC}"
     echo -e "${GREEN}════════════════════════════════════════════════════════════${NC}"
     echo ""
-    echo -e "${CYAN}WEBHOOK URL (add to Krisp settings):${NC}"
-    echo "  $WEBHOOK_URL"
+    echo -e "${CYAN}WEBHOOK CONFIGURATION (add to Krisp settings):${NC}"
+    echo ""
+    echo "  Webhook URL:"
+    echo "    $WEBHOOK_URL"
+    echo ""
+    echo "  Authorization Header (required):"
+    echo "    Header Name:  Authorization"
+    echo "    Header Value: $WEBHOOK_AUTH_KEY"
+    echo ""
+    echo -e "${YELLOW}  ⚠ Keep your auth key secret! Only your Krisp app should know it.${NC}"
     echo ""
     echo -e "${CYAN}NEXT STEPS:${NC}"
     echo ""
     echo "  1. Configure Krisp webhook:"
     echo "     Open Krisp → Settings → Integrations → Webhooks"
-    echo "     Paste URL: $WEBHOOK_URL"
+    echo "     • Webhook URL: paste the URL above"
+    echo "     • Request Headers: click '+' to add header"
+    echo "       - Name: Authorization"
+    echo "       - Value: paste the auth key above"
     echo ""
     echo "  2. Restart Claude Desktop (if configured above)"
     echo ""
     echo "  3. Have a meeting! Transcripts will auto-index."
     echo ""
     echo "  4. Ask Claude: \"What was my last meeting about?\""
+    echo ""
+    echo -e "${CYAN}SAVED CONFIG:${NC}"
+    echo "  Auth key and config saved to: $INSTALL_DIR/.env.local"
     echo ""
     echo -e "${CYAN}DOCUMENTATION:${NC}"
     echo "  https://krispy.alpha-pm.dev"
