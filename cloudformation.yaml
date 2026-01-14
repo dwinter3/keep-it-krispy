@@ -24,17 +24,6 @@ Resources:
         BlockPublicPolicy: true
         IgnorePublicAcls: true
         RestrictPublicBuckets: true
-      NotificationConfiguration:
-        LambdaConfigurations:
-          - Event: 's3:ObjectCreated:*'
-            Filter:
-              S3Key:
-                Rules:
-                  - Name: prefix
-                    Value: 'meetings/'
-                  - Name: suffix
-                    Value: '.json'
-            Function: !GetAtt ProcessorFunction.Arn
 
   # S3 Vectors Bucket
   VectorsBucket:

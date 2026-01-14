@@ -1,0 +1,32 @@
+{
+  "event": "transcript_created",
+  "meeting_id": "test-meeting-001",
+  "title": "Q1 Planning Discussion",
+  "data": {
+    "raw_content": "Sarah Chen: Good morning everyone. Thanks for joining this Q1 planning session. I wanted to start by reviewing our goals from last quarter.\n\nMike Rodriguez: Thanks Sarah. I think we made good progress on the customer acquisition front. We hit 85% of our target.\n\nSarah Chen: That's great to hear. What about the product roadmap? Where do we stand on the new dashboard features?\n\nMike Rodriguez: The dashboard redesign is about 60% complete. We ran into some technical debt issues that slowed us down. Brian's team has been working through those.\n\nBrian Walsh: Yeah, we found some legacy code in the authentication module that needed refactoring. It pushed our timeline back by about two weeks, but we're back on track now.\n\nSarah Chen: Good. What's the revised ETA for the dashboard launch?\n\nBrian Walsh: We're targeting end of February now. The core functionality is done, we're mostly doing polish and edge case testing.\n\nMike Rodriguez: From a business perspective, I think we should discuss the pricing changes. The competitors have been aggressive lately.\n\nSarah Chen: Agreed. Let's schedule a separate session for pricing strategy. I want to bring in Lisa from finance for that discussion.\n\nBrian Walsh: One more thing - we should talk about the API deprecation timeline. Some of our enterprise customers are still on v1.\n\nSarah Chen: Good point. What's our plan for migration support?\n\nBrian Walsh: We've drafted a migration guide and we're planning office hours for enterprise customers. Should take about 6 weeks to get everyone moved over.\n\nMike Rodriguez: I can have the customer success team reach out proactively. Better to get ahead of it than have people surprised.\n\nSarah Chen: Perfect. Let's sync up next week to review progress. Thanks everyone.",
+    "meeting": {
+      "id": "test-meeting-001",
+      "title": "Q1 Planning Discussion",
+      "start_date": "2025-01-14T10:00:00Z",
+      "duration": 1847,
+      "url": "https://krisp.ai/meetings/test-meeting-001",
+      "speakers": [
+        {
+          "index": 1,
+          "first_name": "Sarah",
+          "last_name": "Chen"
+        },
+        {
+          "index": 2,
+          "first_name": "Mike",
+          "last_name": "Rodriguez"
+        },
+        {
+          "index": 3,
+          "first_name": "Brian",
+          "last_name": "Walsh"
+        }
+      ]
+    }
+  }
+}

@@ -2,11 +2,12 @@
 S3 Vectors client for storing and querying vector embeddings.
 """
 
+import os
 import boto3
 from typing import List, Dict, Any, Optional
 
-VECTOR_BUCKET = 'krisp-vectors'
-INDEX_NAME = 'transcript-chunks'
+VECTOR_BUCKET = os.environ.get('VECTOR_BUCKET', 'krisp-vectors')
+INDEX_NAME = os.environ.get('VECTOR_INDEX', 'transcript-chunks')
 
 
 def get_vectors_client():

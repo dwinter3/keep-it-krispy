@@ -1,0 +1,20 @@
+{
+  "description": "Test configuration for Keep It Krispy install walkthrough",
+
+  "aws": {
+    "profile": "krisp-test",
+    "region": "us-east-1",
+    "account_name": "krisp-buddy-test"
+  },
+
+  "install": {
+    "stack_name": "krisp-buddy-test",
+    "install_dir": "~/krisp-buddy-test"
+  },
+
+  "notes": {
+    "account_setup": "Create linked account under aws-mgmt organization",
+    "profile_setup": "aws configure --profile krisp-test (use access keys from new account)",
+    "bedrock_access": "Request Titan Embeddings access in us-east-1 via AWS console"
+  }
+}
