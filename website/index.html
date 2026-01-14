@@ -365,6 +365,263 @@
     .chat-bubble.claude .chat-label {
       color: #00d4aa;
     }
+
+    /* Preview button */
+    .preview-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 15px;
+      padding: 10px 20px;
+      background: rgba(167, 139, 250, 0.15);
+      border: 1px solid rgba(167, 139, 250, 0.4);
+      border-radius: 6px;
+      color: #a78bfa;
+      font-size: 0.9rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .preview-btn:hover {
+      background: rgba(167, 139, 250, 0.25);
+      border-color: rgba(167, 139, 250, 0.6);
+    }
+
+    .preview-btn svg {
+      width: 14px;
+      height: 14px;
+    }
+
+    /* Modal styles */
+    .modal-overlay {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.85);
+      z-index: 1000;
+      overflow-y: auto;
+      padding: 40px 20px;
+    }
+
+    .modal-overlay.active {
+      display: flex;
+      justify-content: center;
+      align-items: flex-start;
+    }
+
+    .modal {
+      background: #0d0d1a;
+      border: 1px solid #333;
+      border-radius: 12px;
+      max-width: 800px;
+      width: 100%;
+      max-height: 90vh;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 20px 24px;
+      border-bottom: 1px solid #333;
+      background: #0a0a12;
+    }
+
+    .modal-header h3 {
+      color: #fff;
+      font-size: 1.1rem;
+      margin: 0;
+    }
+
+    .modal-close {
+      background: none;
+      border: none;
+      color: #666;
+      font-size: 24px;
+      cursor: pointer;
+      padding: 0;
+      line-height: 1;
+    }
+
+    .modal-close:hover {
+      color: #fff;
+    }
+
+    .modal-body {
+      padding: 24px;
+      overflow-y: auto;
+      flex: 1;
+    }
+
+    /* Terminal preview */
+    .terminal {
+      background: #000;
+      border-radius: 8px;
+      overflow: hidden;
+      font-family: 'SF Mono', Monaco, 'Courier New', monospace;
+      font-size: 0.85rem;
+      line-height: 1.5;
+    }
+
+    .terminal-header {
+      background: #1a1a1a;
+      padding: 8px 12px;
+      display: flex;
+      gap: 6px;
+    }
+
+    .terminal-dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+    }
+
+    .terminal-dot.red { background: #ff5f56; }
+    .terminal-dot.yellow { background: #ffbd2e; }
+    .terminal-dot.green { background: #27ca40; }
+
+    .terminal-content {
+      padding: 16px;
+      color: #ccc;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .terminal-step {
+      margin-bottom: 24px;
+      opacity: 0.4;
+      transition: opacity 0.3s;
+    }
+
+    .terminal-step.active {
+      opacity: 1;
+    }
+
+    .terminal-step.completed {
+      opacity: 0.7;
+    }
+
+    .step-label {
+      display: inline-block;
+      background: #333;
+      color: #888;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 0.75rem;
+      margin-bottom: 8px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .step-label.auto {
+      background: rgba(0, 212, 170, 0.2);
+      color: #00d4aa;
+    }
+
+    .step-label.input {
+      background: rgba(251, 191, 36, 0.3);
+      color: #fbbf24;
+    }
+
+    .step-label.output {
+      background: rgba(167, 139, 250, 0.2);
+      color: #a78bfa;
+    }
+
+    .user-input {
+      display: inline-block;
+      background: rgba(251, 191, 36, 0.2);
+      border: 2px solid #fbbf24;
+      border-radius: 4px;
+      padding: 2px 8px;
+      color: #fbbf24;
+      font-weight: bold;
+      animation: pulse-border 2s infinite;
+    }
+
+    @keyframes pulse-border {
+      0%, 100% { border-color: #fbbf24; }
+      50% { border-color: rgba(251, 191, 36, 0.4); }
+    }
+
+    .success { color: #00d4aa; }
+    .warning { color: #fbbf24; }
+    .muted { color: #666; }
+    .highlight-url { color: #a78bfa; }
+
+    .step-nav {
+      display: flex;
+      gap: 8px;
+      margin-top: 20px;
+      padding-top: 20px;
+      border-top: 1px solid #333;
+    }
+
+    .step-nav button {
+      flex: 1;
+      padding: 12px 20px;
+      border-radius: 6px;
+      font-size: 0.9rem;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .step-nav .prev-btn {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid #333;
+      color: #888;
+    }
+
+    .step-nav .prev-btn:hover:not(:disabled) {
+      background: rgba(255, 255, 255, 0.1);
+      color: #fff;
+    }
+
+    .step-nav .next-btn {
+      background: rgba(0, 212, 170, 0.2);
+      border: 1px solid #00d4aa;
+      color: #00d4aa;
+    }
+
+    .step-nav .next-btn:hover:not(:disabled) {
+      background: rgba(0, 212, 170, 0.3);
+    }
+
+    .step-nav button:disabled {
+      opacity: 0.3;
+      cursor: not-allowed;
+    }
+
+    .step-indicator {
+      display: flex;
+      justify-content: center;
+      gap: 8px;
+      margin-bottom: 20px;
+    }
+
+    .step-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #333;
+      transition: all 0.3s;
+    }
+
+    .step-dot.active {
+      background: #00d4aa;
+      transform: scale(1.3);
+    }
+
+    .step-dot.completed {
+      background: #00d4aa;
+    }
   </style>
 </head>
 <body>
@@ -495,6 +752,10 @@
       <p style="margin-top: 15px; font-size: 0.9rem; color: #b0b0c0;">
         This deploys infrastructure to <strong>your own AWS account</strong>. We don't host anything for you.
       </p>
+      <button class="preview-btn" onclick="openInstallPreview()">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+        Preview Install Process
+      </button>
     </div>
 
     <section>
@@ -650,7 +911,33 @@ Krisp App → Webhook Lambda → S3 (raw JSON)
     </footer>
   </div>
 
+  <!-- Install Preview Modal -->
+  <div class="modal-overlay" id="installModal">
+    <div class="modal">
+      <div class="modal-header">
+        <h3>Install Preview</h3>
+        <button class="modal-close" onclick="closeInstallPreview()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="step-indicator" id="stepIndicator"></div>
+        <div class="terminal">
+          <div class="terminal-header">
+            <span class="terminal-dot red"></span>
+            <span class="terminal-dot yellow"></span>
+            <span class="terminal-dot green"></span>
+          </div>
+          <div class="terminal-content" id="terminalContent"></div>
+        </div>
+        <div class="step-nav">
+          <button class="prev-btn" onclick="prevStep()" id="prevBtn">Previous</button>
+          <button class="next-btn" onclick="nextStep()" id="nextBtn">Next</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <script>
+    // Curl command copy
     document.querySelector('.curl-command')?.addEventListener('click', function() {
       const text = 'curl -fsSL http://keepitkrispy-website.s3-website-us-east-1.amazonaws.com/install.sh | bash';
       navigator.clipboard?.writeText(text).then(() => {
@@ -658,6 +945,200 @@ Krisp App → Webhook Lambda → S3 (raw JSON)
         this.style.borderColor = '#00d4aa';
         setTimeout(() => this.style.borderColor = original, 500);
       });
+    });
+
+    // Install preview modal
+    const installSteps = [
+      {
+        label: 'auto',
+        title: 'Downloading & Running',
+        content: `<span class="muted">$ curl -fsSL http://keepitkrispy-website.s3-website-us-east-1.amazonaws.com/install.sh | bash</span>
+
+<span class="success">Keep It Krispy - Installer</span>
+========================================
+
+Checking prerequisites...
+  <span class="success">✓</span> Git found
+  <span class="success">✓</span> Node.js 20.11.0 found
+  <span class="success">✓</span> Python 3.12.0 found
+  <span class="success">✓</span> AWS CLI found
+
+Checking AWS configuration...
+  <span class="success">✓</span> AWS credentials configured
+  <span class="success">✓</span> Region: us-east-1
+  <span class="success">✓</span> Account: 123456789012`
+      },
+      {
+        label: 'auto',
+        title: 'Cloning Repository',
+        content: `Cloning repository...
+  <span class="success">✓</span> Cloned to ~/keep-it-krispy
+
+Installing MCP server dependencies...
+  <span class="muted">npm install...</span>
+  <span class="success">✓</span> Dependencies installed
+
+Building MCP server...
+  <span class="muted">npm run build...</span>
+  <span class="success">✓</span> Built to dist/stdio-server.cjs`
+      },
+      {
+        label: 'input',
+        title: 'Confirmation Required',
+        content: `<span class="warning">AWS Resources to be created:</span>
+  • S3 Bucket: krisp-transcripts-123456789012
+  • S3 Bucket: krisp-vectors-123456789012
+  • DynamoDB Table: krisp-transcripts-index
+  • Lambda: krisp-webhook-handler
+  • Lambda: krisp-transcript-processor
+  • IAM Roles for Lambda execution
+
+Estimated monthly cost: <span class="success">&lt; $2/month</span>
+
+<span class="warning">Continue with deployment? [y/N]</span> <span class="user-input">y</span>
+
+<span class="muted">This is the only input required during install.</span>`
+      },
+      {
+        label: 'auto',
+        title: 'CloudFormation Deployment',
+        content: `Deploying CloudFormation stack...
+  <span class="muted">Creating krisp-buddy stack...</span>
+
+  <span class="success">✓</span> S3 bucket created: krisp-transcripts-123456789012
+  <span class="success">✓</span> S3 vectors bucket created: krisp-vectors-123456789012
+  <span class="success">✓</span> DynamoDB table created: krisp-transcripts-index
+  <span class="success">✓</span> Lambda function created: krisp-webhook-handler
+  <span class="success">✓</span> Lambda function created: krisp-transcript-processor
+  <span class="success">✓</span> IAM roles configured
+  <span class="success">✓</span> S3 event notification configured
+
+Stack Status: <span class="success">CREATE_COMPLETE</span>`
+      },
+      {
+        label: 'auto',
+        title: 'Vector Index Setup',
+        content: `Setting up S3 Vectors index...
+  <span class="muted">Creating vector bucket...</span>
+  <span class="success">✓</span> Vector bucket ready
+
+  <span class="muted">Creating transcript-chunks index...</span>
+  <span class="success">✓</span> Index created (1536 dimensions, cosine similarity)
+
+Deploying Lambda code...
+  <span class="muted">Packaging processor Lambda...</span>
+  <span class="success">✓</span> Processor Lambda deployed
+  <span class="muted">Packaging webhook Lambda...</span>
+  <span class="success">✓</span> Webhook Lambda deployed`
+      },
+      {
+        label: 'output',
+        title: 'Installation Complete',
+        content: `<span class="success">========================================
+Installation Complete!
+========================================</span>
+
+<span class="warning">Webhook URL (copy this to Krisp):</span>
+<span class="highlight-url">https://abc123xyz.lambda-url.us-east-1.on.aws/</span>
+
+<span class="warning">Next Steps:</span>
+
+1. <span class="warning">Configure Krisp Webhook:</span>
+   Open Krisp → Settings → Integrations → Add Webhook
+   Paste the URL above
+
+2. <span class="warning">Add MCP Server to Claude:</span>
+   The config has been printed below.`
+      },
+      {
+        label: 'output',
+        title: 'Claude Configuration',
+        content: `<span class="warning">For Claude Desktop</span> <span class="muted">(~/Library/Application Support/Claude/claude_desktop_config.json)</span>
+
+{
+  "mcpServers": {
+    "krisp": {
+      "command": "node",
+      "args": ["<span class="highlight-url">/Users/you/keep-it-krispy/lambda/mcp-server-ts/dist/stdio-server.cjs</span>"],
+      "env": {
+        "KRISP_S3_BUCKET": "krisp-transcripts-123456789012",
+        "AWS_REGION": "us-east-1"
+      }
+    }
+  }
+}
+
+<span class="warning">For Claude Code:</span>
+<span class="muted">$ claude mcp add krisp</span>
+
+<span class="success">You're all set! Start a meeting and watch the magic happen.</span>`
+      }
+    ];
+
+    let currentStep = 0;
+
+    function openInstallPreview() {
+      currentStep = 0;
+      document.getElementById('installModal').classList.add('active');
+      renderStep();
+      document.body.style.overflow = 'hidden';
+    }
+
+    function closeInstallPreview() {
+      document.getElementById('installModal').classList.remove('active');
+      document.body.style.overflow = '';
+    }
+
+    function renderStep() {
+      const step = installSteps[currentStep];
+      const content = document.getElementById('terminalContent');
+      const indicator = document.getElementById('stepIndicator');
+      const prevBtn = document.getElementById('prevBtn');
+      const nextBtn = document.getElementById('nextBtn');
+
+      // Render step indicator dots
+      indicator.innerHTML = installSteps.map((_, i) =>
+        `<span class="step-dot ${i < currentStep ? 'completed' : ''} ${i === currentStep ? 'active' : ''}"></span>`
+      ).join('');
+
+      // Render terminal content
+      content.innerHTML = `
+        <div class="terminal-step active">
+          <span class="step-label ${step.label}">${step.label === 'input' ? 'User Input' : step.label === 'output' ? 'Output' : 'Automatic'}</span>
+          <div style="margin-top: 8px; font-weight: bold; color: #fff; margin-bottom: 12px;">${step.title}</div>
+          <div>${step.content}</div>
+        </div>
+      `;
+
+      // Update nav buttons
+      prevBtn.disabled = currentStep === 0;
+      nextBtn.textContent = currentStep === installSteps.length - 1 ? 'Close' : 'Next';
+    }
+
+    function prevStep() {
+      if (currentStep > 0) {
+        currentStep--;
+        renderStep();
+      }
+    }
+
+    function nextStep() {
+      if (currentStep < installSteps.length - 1) {
+        currentStep++;
+        renderStep();
+      } else {
+        closeInstallPreview();
+      }
+    }
+
+    // Close modal on overlay click
+    document.getElementById('installModal')?.addEventListener('click', function(e) {
+      if (e.target === this) closeInstallPreview();
+    });
+
+    // Close modal on Escape key
+    document.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') closeInstallPreview();
     });
   </script>
 </body>
