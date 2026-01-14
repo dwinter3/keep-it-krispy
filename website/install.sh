@@ -718,6 +718,147 @@ configure_claude_code() {
     echo -e "${GREEN}✓ Claude Code configured${NC}"
 }
 
+# Deploy Admin Dashboard (Optional)
+deploy_admin_dashboard() {
+    local account_id=$(aws sts get-caller-identity --query Account --output text)
+
+    echo ""
+    echo "═══════════════════════════════════════════════════════════"
+    echo "  Optional: Admin Dashboard"
+    echo "═══════════════════════════════════════════════════════════"
+    echo ""
+    echo "The admin dashboard is a web UI for browsing transcripts,"
+    echo "searching meetings, and managing speakers."
+    echo ""
+    echo "Features:"
+    echo "  • Browse all transcripts with search"
+    echo "  • Semantic AI search across meetings"
+    echo "  • Speaker management"
+    echo "  • Password protected (SSL included)"
+    echo ""
+    echo "Requirements:"
+    echo "  • Docker (for building the image)"
+    echo "  • Adds ~\$5-10/month (AWS App Runner)"
+    echo ""
+
+    read -p "Deploy admin dashboard? [y/N] " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        echo "  Skipping admin dashboard."
+        ADMIN_DEPLOYED=false
+        return
+    fi
+
+    # Check for Docker
+    echo ""
+    echo "→ Checking for Docker..."
+    if ! command -v docker >/dev/null 2>&1; then
+        echo -e "${RED}❌ Docker not found${NC}"
+        echo ""
+        echo "Docker is required to build the admin dashboard."
+        echo "Install Docker from: https://docker.com/get-started"
+        echo ""
+        echo "Skipping admin dashboard deployment."
+        ADMIN_DEPLOYED=false
+        return
+    fi
+
+    # Check if Docker daemon is running
+    if ! docker info >/dev/null 2>&1; then
+        echo -e "${RED}❌ Docker daemon not running${NC}"
+        echo ""
+        echo "Please start Docker Desktop and try again."
+        echo ""
+        echo "Skipping admin dashboard deployment."
+        ADMIN_DEPLOYED=false
+        return
+    fi
+    echo -e "${GREEN}✓ Docker available${NC}"
+
+    # Generate admin password
+    ADMIN_PASSWORD=$(generate_auth_key)
+    echo ""
+    echo "→ Generated admin password"
+
+    # Create ECR repository
+    echo "→ Creating ECR repository..."
+    local ecr_repo="${STACK_NAME}-admin"
+
+    # Check if repo exists, create if not
+    if ! aws ecr describe-repositories --repository-names "$ecr_repo" --region "$AWS_REGION" >/dev/null 2>&1; then
+        aws ecr create-repository \
+            --repository-name "$ecr_repo" \
+            --region "$AWS_REGION" \
+            --image-scanning-configuration scanOnPush=true >/dev/null
+    fi
+
+    local ecr_uri="${account_id}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ecr_repo}"
+    echo -e "${GREEN}✓ ECR repository ready: $ecr_repo${NC}"
+
+    # Login to ECR
+    echo "→ Logging into ECR..."
+    aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "${account_id}.dkr.ecr.${AWS_REGION}.amazonaws.com" >/dev/null 2>&1
+    echo -e "${GREEN}✓ ECR login successful${NC}"
+
+    # Build Docker image
+    echo "→ Building admin dashboard (this may take a few minutes)..."
+    cd "$INSTALL_DIR"
+
+    docker build \
+        --build-arg SITE_PASSWORD="$ADMIN_PASSWORD" \
+        --build-arg KRISP_S3_BUCKET="krisp-transcripts-${account_id}" \
+        --build-arg DYNAMODB_TABLE="krisp-transcripts-index" \
+        --build-arg VECTOR_BUCKET="krisp-vectors-${account_id}" \
+        --build-arg VECTOR_INDEX="transcript-chunks" \
+        --build-arg APP_REGION="$AWS_REGION" \
+        -t "${ecr_uri}:latest" \
+        -f Dockerfile . \
+        --quiet
+
+    echo -e "${GREEN}✓ Docker image built${NC}"
+
+    # Push to ECR
+    echo "→ Pushing image to ECR..."
+    docker push "${ecr_uri}:latest" --quiet
+    echo -e "${GREEN}✓ Image pushed to ECR${NC}"
+
+    # Deploy CloudFormation for admin dashboard
+    echo "→ Deploying admin dashboard infrastructure..."
+    aws cloudformation deploy \
+        --template-file cloudformation-admin.yaml \
+        --stack-name "${STACK_NAME}-admin" \
+        --capabilities CAPABILITY_NAMED_IAM \
+        --region "$AWS_REGION" \
+        --parameter-overrides \
+            "ProjectName=$STACK_NAME" \
+            "SitePassword=$ADMIN_PASSWORD" \
+            "ImageUri=${ecr_uri}:latest" \
+            "TranscriptsBucket=krisp-transcripts-${account_id}" \
+            "DynamoDBTable=krisp-transcripts-index" \
+            "VectorBucket=krisp-vectors-${account_id}" \
+            "VectorIndex=transcript-chunks" \
+        --no-fail-on-empty-changeset
+
+    # Get admin dashboard URL
+    ADMIN_URL=$(aws cloudformation describe-stacks \
+        --stack-name "${STACK_NAME}-admin" \
+        --query "Stacks[0].Outputs[?OutputKey=='AdminDashboardUrl'].OutputValue" \
+        --output text \
+        --region "$AWS_REGION")
+
+    echo -e "${GREEN}✓ Admin dashboard deployed${NC}"
+
+    # Save admin config
+    cat >> .env.local << EOF
+
+# Admin Dashboard
+ADMIN_URL=$ADMIN_URL
+ADMIN_PASSWORD=$ADMIN_PASSWORD
+EOF
+
+    ADMIN_DEPLOYED=true
+}
+
 # Print completion message
 print_completion() {
     echo ""
@@ -751,8 +892,19 @@ print_completion() {
     echo ""
     echo "  4. Ask Claude: \"What was my last meeting about?\""
     echo ""
+    # Show admin dashboard info if deployed
+    if [ "$ADMIN_DEPLOYED" = true ]; then
+        echo -e "${CYAN}ADMIN DASHBOARD:${NC}"
+        echo ""
+        echo "  URL:      $ADMIN_URL"
+        echo "  Password: $ADMIN_PASSWORD"
+        echo ""
+        echo -e "${YELLOW}  ⚠ Save your admin password! It's also in .env.local${NC}"
+        echo ""
+    fi
+
     echo -e "${CYAN}SAVED CONFIG:${NC}"
-    echo "  Auth key and config saved to: $INSTALL_DIR/.env.local"
+    echo "  All credentials saved to: $INSTALL_DIR/.env.local"
     echo ""
     echo -e "${CYAN}DOCUMENTATION:${NC}"
     echo "  https://krispy.alpha-pm.dev"
@@ -772,6 +924,7 @@ main() {
     build_mcp_server
     configure_claude_desktop
     configure_claude_code
+    deploy_admin_dashboard
     print_completion
 }
 

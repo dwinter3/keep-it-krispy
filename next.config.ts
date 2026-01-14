@@ -1,6 +1,9 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // Enable standalone output for Docker deployment
+  output: 'standalone',
+
   env: {
     // All sensitive values must be set via environment variables - no defaults
     SITE_PASSWORD: process.env.SITE_PASSWORD || '',

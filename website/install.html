@@ -160,8 +160,15 @@ Default output format: json</pre>
         <li>Deploy CloudFormation stack (S3, DynamoDB, Lambda)</li>
         <li>Create S3 Vectors index for semantic search</li>
         <li>Build the MCP server locally</li>
-        <li>Print your webhook URL and MCP configuration</li>
+        <li>Configure Claude Desktop and/or Claude Code</li>
+        <li><strong>(Optional)</strong> Deploy admin dashboard web UI</li>
+        <li>Print your webhook URL, credentials, and dashboard URL</li>
       </ol>
+
+      <div class="info-box" style="margin-top: 20px;">
+        <strong>Optional: Admin Dashboard</strong><br>
+        The installer will ask if you want to deploy a web-based admin dashboard for browsing transcripts, semantic search, and speaker management. Requires Docker and adds ~$5-10/month (AWS App Runner).
+      </div>
 
       <div class="info-box" style="margin-top: 20px;">
         <strong>Using a specific AWS profile?</strong>

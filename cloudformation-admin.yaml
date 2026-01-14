@@ -1,0 +1,172 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Keep It Krispy - Admin Dashboard (Optional)
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: krisp-buddy
+    Description: Project name prefix for resources
+
+  SitePassword:
+    Type: String
+    NoEcho: true
+    Description: Password to access the admin dashboard
+
+  ImageUri:
+    Type: String
+    Description: ECR image URI for the admin dashboard
+
+  TranscriptsBucket:
+    Type: String
+    Description: S3 bucket name for transcripts
+
+  DynamoDBTable:
+    Type: String
+    Default: krisp-transcripts-index
+    Description: DynamoDB table name
+
+  VectorBucket:
+    Type: String
+    Description: S3 bucket name for vectors
+
+  VectorIndex:
+    Type: String
+    Default: transcript-chunks
+    Description: Vector index name
+
+Resources:
+  # ECR Repository for Admin Dashboard
+  AdminECRRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Sub '${ProjectName}-admin'
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {
+            "rules": [
+              {
+                "rulePriority": 1,
+                "description": "Keep only 3 images",
+                "selection": {
+                  "tagStatus": "any",
+                  "countType": "imageCountMoreThan",
+                  "countNumber": 3
+                },
+                "action": {
+                  "type": "expire"
+                }
+              }
+            ]
+          }
+
+  # IAM Role for App Runner to access ECR and AWS services
+  AppRunnerAccessRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${ProjectName}-apprunner-access'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: build.apprunner.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSAppRunnerServicePolicyForECRAccess
+
+  # IAM Role for App Runner instance (to access DynamoDB/S3)
+  AppRunnerInstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${ProjectName}-apprunner-instance'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: tasks.apprunner.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: AdminDashboardAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:ListBucket
+                Resource:
+                  - !Sub 'arn:aws:s3:::${TranscriptsBucket}'
+                  - !Sub 'arn:aws:s3:::${TranscriptsBucket}/*'
+                  - !Sub 'arn:aws:s3:::${VectorBucket}'
+                  - !Sub 'arn:aws:s3:::${VectorBucket}/*'
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                Resource:
+                  - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${DynamoDBTable}'
+                  - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${DynamoDBTable}/index/*'
+              - Effect: Allow
+                Action:
+                  - s3vectors:QueryVectors
+                  - s3vectors:GetVectors
+                Resource:
+                  - !Sub 'arn:aws:s3vectors:${AWS::Region}:${AWS::AccountId}:bucket/${VectorBucket}'
+                  - !Sub 'arn:aws:s3vectors:${AWS::Region}:${AWS::AccountId}:bucket/${VectorBucket}/index/*'
+
+  # App Runner Service
+  AdminDashboard:
+    Type: AWS::AppRunner::Service
+    DependsOn: AdminECRRepository
+    Properties:
+      ServiceName: !Sub '${ProjectName}-admin'
+      SourceConfiguration:
+        AuthenticationConfiguration:
+          AccessRoleArn: !GetAtt AppRunnerAccessRole.Arn
+        AutoDeploymentsEnabled: false
+        ImageRepository:
+          ImageIdentifier: !Ref ImageUri
+          ImageRepositoryType: ECR
+          ImageConfiguration:
+            Port: '3000'
+            RuntimeEnvironmentVariables:
+              - Name: SITE_PASSWORD
+                Value: !Ref SitePassword
+              - Name: KRISP_S3_BUCKET
+                Value: !Ref TranscriptsBucket
+              - Name: DYNAMODB_TABLE
+                Value: !Ref DynamoDBTable
+              - Name: VECTOR_BUCKET
+                Value: !Ref VectorBucket
+              - Name: VECTOR_INDEX
+                Value: !Ref VectorIndex
+              - Name: APP_REGION
+                Value: !Ref AWS::Region
+      InstanceConfiguration:
+        Cpu: '0.25 vCPU'
+        Memory: '0.5 GB'
+        InstanceRoleArn: !GetAtt AppRunnerInstanceRole.Arn
+      HealthCheckConfiguration:
+        Protocol: HTTP
+        Path: /login
+        Interval: 10
+        Timeout: 5
+        HealthyThreshold: 1
+        UnhealthyThreshold: 5
+
+Outputs:
+  AdminDashboardUrl:
+    Description: Admin Dashboard URL (HTTPS)
+    Value: !Sub 'https://${AdminDashboard.ServiceUrl}'
+
+  ECRRepository:
+    Description: ECR Repository URI
+    Value: !GetAtt AdminECRRepository.RepositoryUri
+
+  AdminPassword:
+    Description: Admin dashboard password (also in .env.local)
+    Value: '(see installer output)'
