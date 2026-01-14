@@ -2,11 +2,11 @@
 
 **AI-Powered Meeting Memory** — Turn your Krisp transcripts into a searchable knowledge base for Claude.
 
-🌐 **Website:** [keepitkrispy-website.s3-website-us-east-1.amazonaws.com](http://keepitkrispy-website.s3-website-us-east-1.amazonaws.com)
+🌐 **Website:** [krispy.alpha-pm.dev](https://krispy.alpha-pm.dev)
 
 ```bash
 # One-line install (deploys to your AWS account)
-curl -fsSL http://keepitkrispy-website.s3-website-us-east-1.amazonaws.com/install.sh | bash
+curl -fsSL https://krispy.alpha-pm.dev/install.sh | bash
 ```
 
 ---

@@ -748,7 +748,7 @@
 
     <div class="install-box">
       <h2>Install (Self-Hosted)</h2>
-      <div class="curl-command">curl -fsSL http://keepitkrispy-website.s3-website-us-east-1.amazonaws.com/install.sh | bash</div>
+      <div class="curl-command">curl -fsSL https://krispy.alpha-pm.dev/install.sh | bash</div>
       <p style="margin-top: 15px; font-size: 0.9rem; color: #b0b0c0;">
         This deploys infrastructure to <strong>your own AWS account</strong>. We don't host anything for you.
       </p>
@@ -939,7 +939,7 @@ Krisp App → Webhook Lambda → S3 (raw JSON)
   <script>
     // Curl command copy
     document.querySelector('.curl-command')?.addEventListener('click', function() {
-      const text = 'curl -fsSL http://keepitkrispy-website.s3-website-us-east-1.amazonaws.com/install.sh | bash';
+      const text = 'curl -fsSL https://krispy.alpha-pm.dev/install.sh | bash';
       navigator.clipboard?.writeText(text).then(() => {
         const original = this.style.borderColor;
         this.style.borderColor = '#00d4aa';
@@ -952,7 +952,7 @@ Krisp App → Webhook Lambda → S3 (raw JSON)
       {
         label: 'auto',
         title: 'Downloading & Running',
-        content: `<span class="muted">$ curl -fsSL http://keepitkrispy-website.s3-website-us-east-1.amazonaws.com/install.sh | bash</span>
+        content: `<span class="muted">$ curl -fsSL https://krispy.alpha-pm.dev/install.sh | bash</span>
 
 <span class="success">Keep It Krispy - Installer</span>
 ========================================
