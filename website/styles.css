@@ -711,3 +711,209 @@ footer a {
 .step-dot.completed {
   background: #00d4aa;
 }
+
+/* ===========================================
+   MOBILE RESPONSIVE STYLES
+   =========================================== */
+
+@media (max-width: 768px) {
+  .container {
+    padding: 20px 15px;
+  }
+
+  h1 {
+    font-size: 1.6rem;
+  }
+
+  h2 {
+    font-size: 1.3rem;
+  }
+
+  .tagline {
+    font-size: 1.1rem;
+  }
+
+  .logo {
+    max-width: 280px;
+  }
+
+  /* Install box */
+  .install-box {
+    padding: 20px;
+  }
+
+  .curl-command {
+    font-size: 0.8rem;
+    padding: 12px 15px;
+  }
+
+  /* Feature grid */
+  .feature-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .feature {
+    padding: 15px;
+  }
+
+  /* Chat bubbles */
+  .chat-bubble {
+    padding: 12px 15px;
+    margin-left: 0 !important;
+    margin-right: 0 !important;
+  }
+
+  /* Code blocks */
+  pre.architecture {
+    font-size: 0.75rem;
+    padding: 15px;
+  }
+
+  code {
+    font-size: 0.8em;
+    word-break: break-all;
+  }
+
+  /* Tables - horizontal scroll */
+  .cost-table {
+    display: block;
+    overflow-x: auto;
+    white-space: nowrap;
+  }
+
+  .cost-table th, .cost-table td {
+    padding: 10px 12px;
+    font-size: 0.9rem;
+  }
+
+  /* Buttons */
+  .btn {
+    padding: 10px 18px;
+    font-size: 0.9rem;
+  }
+
+  /* Step lists */
+  .step-list li {
+    padding: 12px 0 12px 45px;
+  }
+
+  /* Prereq grid */
+  .prereq-grid {
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+  }
+
+  .prereq {
+    padding: 10px;
+    font-size: 0.85rem;
+  }
+
+  .prereq-icon {
+    font-size: 1.2rem;
+  }
+
+  /* Setup steps */
+  .setup-step {
+    padding: 15px;
+  }
+
+  /* Tabs */
+  .tabs {
+    flex-wrap: wrap;
+  }
+
+  .tab {
+    padding: 10px 15px;
+    font-size: 0.85rem;
+  }
+
+  /* Card grid */
+  .card-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .card {
+    padding: 20px;
+  }
+
+  /* Modal */
+  .modal-overlay {
+    padding: 20px 10px;
+  }
+
+  .modal {
+    max-height: none;
+  }
+
+  .modal-header {
+    padding: 15px 18px;
+  }
+
+  .modal-body {
+    padding: 18px;
+  }
+
+  /* Terminal */
+  .terminal {
+    font-size: 0.75rem;
+  }
+
+  .terminal-content {
+    padding: 12px;
+  }
+
+  .step-nav {
+    flex-direction: column;
+  }
+
+  .step-nav button {
+    width: 100%;
+  }
+
+  /* Footer */
+  footer {
+    padding: 30px 15px;
+  }
+}
+
+/* Extra small screens */
+@media (max-width: 480px) {
+  h1 {
+    font-size: 1.4rem;
+  }
+
+  h2 {
+    font-size: 1.2rem;
+  }
+
+  .logo {
+    max-width: 220px;
+  }
+
+  .tagline {
+    font-size: 1rem;
+  }
+
+  .prereq-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .curl-command {
+    font-size: 0.7rem;
+  }
+
+  pre.architecture {
+    font-size: 0.65rem;
+  }
+
+  .btn {
+    width: 100%;
+    justify-content: center;
+  }
+
+  /* Stack buttons on small screens */
+  section[style*="text-align: center"] .btn {
+    display: block;
+    margin: 10px auto;
+  }
+}
