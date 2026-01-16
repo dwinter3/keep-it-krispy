@@ -12,6 +12,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Speakers API Endpoint** - New `/api/speakers` endpoint aggregates speaker statistics across all transcripts
 - **LinkedIn Links in Directory** - Speaker cards display clickable LinkedIn icons when profile URLs are available
 - **Speaker Statistics** - Meeting count, total duration, and "last seen" date for each speaker
+- **Speaker Profile Pages** - Individual speaker pages at `/speakers/[name]` with full meeting history
+- **Editable Speaker Profiles** - Add bio, role, company, and LinkedIn URL for any speaker
+- **Clickable Speaker Names** - Speaker names link to profile pages throughout the app
 
 ## [1.2.0] - 2025-01-14
 
