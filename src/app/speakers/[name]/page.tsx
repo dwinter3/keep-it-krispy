@@ -309,12 +309,13 @@ export default function SpeakerProfilePage({ params }: { params: Promise<{ name:
                       {profile.topics && profile.topics.length > 0 && (
                         <div className="flex flex-wrap gap-2">
                           {profile.topics.map((topic, i) => (
-                            <span
+                            <Link
                               key={i}
-                              className="px-2 py-1 bg-purple-500/20 text-purple-400 rounded text-xs"
+                              href={`/topics/${encodeURIComponent(topic)}`}
+                              className="px-2 py-1 bg-purple-500/20 text-purple-400 hover:bg-purple-500/30 rounded text-xs transition-colors"
                             >
                               {topic}
-                            </span>
+                            </Link>
                           ))}
                         </div>
                       )}
