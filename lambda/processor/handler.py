@@ -264,6 +264,7 @@ def index_to_dynamodb(metadata: dict) -> None:
     """
     # Prepare item for DynamoDB
     item = {
+        'pk': 'TRANSCRIPT',
         'meeting_id': metadata['meeting_id'],
         'title': metadata['title'],
         'date': metadata['date'],

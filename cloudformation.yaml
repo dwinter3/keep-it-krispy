@@ -49,6 +49,10 @@ Resources:
           AttributeType: S
         - AttributeName: speaker_name
           AttributeType: S
+        - AttributeName: pk
+          AttributeType: S
+        - AttributeName: timestamp
+          AttributeType: S
       KeySchema:
         - AttributeName: meeting_id
           KeyType: HASH
@@ -66,6 +70,14 @@ Resources:
             - AttributeName: speaker_name
               KeyType: HASH
             - AttributeName: date
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: all-transcripts-index
+          KeySchema:
+            - AttributeName: pk
+              KeyType: HASH
+            - AttributeName: timestamp
               KeyType: RANGE
           Projection:
             ProjectionType: ALL
@@ -236,6 +248,7 @@ Resources:
               # Write to DynamoDB immediately for fast queries
               table = dynamodb.Table(DYNAMODB_TABLE)
               dynamo_item = {
+                  'pk': 'TRANSCRIPT',
                   'meeting_id': meeting_id,
                   'title': meeting_title,
                   'date': date_str,

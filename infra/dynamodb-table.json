@@ -6,7 +6,9 @@
   "AttributeDefinitions": [
     { "AttributeName": "meeting_id", "AttributeType": "S" },
     { "AttributeName": "date", "AttributeType": "S" },
-    { "AttributeName": "speaker_name", "AttributeType": "S" }
+    { "AttributeName": "speaker_name", "AttributeType": "S" },
+    { "AttributeName": "pk", "AttributeType": "S" },
+    { "AttributeName": "timestamp", "AttributeType": "S" }
   ],
   "GlobalSecondaryIndexes": [
     {
@@ -22,6 +24,14 @@
       "KeySchema": [
         { "AttributeName": "speaker_name", "KeyType": "HASH" },
         { "AttributeName": "date", "KeyType": "RANGE" }
+      ],
+      "Projection": { "ProjectionType": "ALL" }
+    },
+    {
+      "IndexName": "all-transcripts-index",
+      "KeySchema": [
+        { "AttributeName": "pk", "KeyType": "HASH" },
+        { "AttributeName": "timestamp", "KeyType": "RANGE" }
       ],
       "Projection": { "ProjectionType": "ALL" }
     }

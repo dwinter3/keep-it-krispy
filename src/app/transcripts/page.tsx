@@ -36,21 +36,38 @@ export default function TranscriptsPage() {
   const [selectedTranscript, setSelectedTranscript] = useState<Transcript | null>(null)
   const [transcriptContent, setTranscriptContent] = useState<TranscriptContent | null>(null)
   const [loadingContent, setLoadingContent] = useState(false)
+  const [nextCursor, setNextCursor] = useState<string | null>(null)
+  const [loadingMore, setLoadingMore] = useState(false)
 
   useEffect(() => {
     fetchTranscripts()
   }, [])
 
-  async function fetchTranscripts() {
+  async function fetchTranscripts(cursor?: string) {
     try {
-      const res = await fetch('/api/transcripts')
+      if (cursor) {
+        setLoadingMore(true)
+      }
+      const url = cursor
+        ? `/api/transcripts?cursor=${encodeURIComponent(cursor)}`
+        : '/api/transcripts'
+      const res = await fetch(url)
       if (!res.ok) throw new Error('Failed to fetch')
       const data = await res.json()
-      setTranscripts(data.transcripts || [])
+
+      if (cursor) {
+        // Append to existing transcripts
+        setTranscripts(prev => [...prev, ...(data.transcripts || [])])
+      } else {
+        // Replace transcripts (initial load)
+        setTranscripts(data.transcripts || [])
+      }
+      setNextCursor(data.nextCursor || null)
     } catch (err) {
       setError(String(err))
     } finally {
       setLoading(false)
+      setLoadingMore(false)
     }
   }
 
@@ -196,6 +213,26 @@ export default function TranscriptsPage() {
                     ))}
                   </tbody>
                 </table>
+
+                {/* Load More Button */}
+                {nextCursor && (
+                  <div className="p-4 border-t border-zinc-800">
+                    <button
+                      onClick={() => fetchTranscripts(nextCursor)}
+                      disabled={loadingMore}
+                      className="w-full py-2 px-4 bg-zinc-800 hover:bg-zinc-700 disabled:bg-zinc-800 disabled:opacity-50 rounded-lg text-sm text-zinc-300 transition-colors flex items-center justify-center gap-2"
+                    >
+                      {loadingMore ? (
+                        <>
+                          <span className="animate-spin">&#8635;</span>
+                          Loading...
+                        </>
+                      ) : (
+                        'Load More Transcripts'
+                      )}
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
 

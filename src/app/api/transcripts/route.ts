@@ -67,21 +67,22 @@ export async function GET(request: NextRequest) {
       })
     }
 
-    // List all transcripts from DynamoDB (fast!)
-    const scanCommand = new ScanCommand({
+    // List transcripts with pagination using all-transcripts-index GSI
+    const cursor = searchParams.get('cursor')
+    const limit = Math.min(parseInt(searchParams.get('limit') || '25'), 100)
+
+    const queryCommand = new QueryCommand({
       TableName: TABLE_NAME,
-      Limit: 100,
+      IndexName: 'all-transcripts-index',
+      KeyConditionExpression: 'pk = :pk',
+      ExpressionAttributeValues: { ':pk': 'TRANSCRIPT' },
+      ScanIndexForward: false, // Newest first (descending by timestamp)
+      Limit: limit,
+      ...(cursor && { ExclusiveStartKey: JSON.parse(Buffer.from(cursor, 'base64').toString('utf-8')) }),
     })
 
-    const response = await dynamodb.send(scanCommand)
+    const response = await dynamodb.send(queryCommand)
     const items = response.Items || []
-
-    // Sort by timestamp descending
-    items.sort((a, b) => {
-      const dateA = new Date(a.timestamp || a.date)
-      const dateB = new Date(b.timestamp || b.date)
-      return dateB.getTime() - dateA.getTime()
-    })
 
     // Format for frontend
     const transcripts = items.map(item => ({
@@ -95,7 +96,12 @@ export async function GET(request: NextRequest) {
       eventType: item.event_type,
     }))
 
-    return NextResponse.json({ transcripts })
+    // Build next cursor if there are more results
+    const nextCursor = response.LastEvaluatedKey
+      ? Buffer.from(JSON.stringify(response.LastEvaluatedKey)).toString('base64')
+      : null
+
+    return NextResponse.json({ transcripts, nextCursor })
   } catch (error) {
     console.error('API error:', error)
     return NextResponse.json(
