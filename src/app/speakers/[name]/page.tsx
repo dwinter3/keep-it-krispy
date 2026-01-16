@@ -20,6 +20,9 @@ interface SpeakerProfile {
   linkedin?: string
   company?: string
   role?: string
+  aiSummary?: string
+  topics?: string[]
+  enrichedAt?: string
   stats: {
     meetingCount: number
     totalDuration: number
@@ -37,6 +40,7 @@ export default function SpeakerProfilePage({ params }: { params: Promise<{ name:
   const [error, setError] = useState<string | null>(null)
   const [editing, setEditing] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [enriching, setEnriching] = useState(false)
   const [editForm, setEditForm] = useState({
     bio: '',
     linkedin: '',
@@ -90,6 +94,30 @@ export default function SpeakerProfilePage({ params }: { params: Promise<{ name:
       console.error('Save error:', err)
     } finally {
       setSaving(false)
+    }
+  }
+
+  async function handleEnrich() {
+    if (!profile) return
+    setEnriching(true)
+    try {
+      const response = await fetch(`/api/speakers/${encodeURIComponent(name)}/enrich`, {
+        method: 'POST',
+      })
+      if (!response.ok) {
+        throw new Error('Failed to enrich')
+      }
+      const data = await response.json()
+      setProfile({
+        ...profile,
+        aiSummary: data.aiSummary,
+        topics: data.topics,
+        enrichedAt: data.enrichedAt,
+      })
+    } catch (err) {
+      console.error('Enrich error:', err)
+    } finally {
+      setEnriching(false)
     }
   }
 
@@ -229,16 +257,80 @@ export default function SpeakerProfilePage({ params }: { params: Promise<{ name:
                 </div>
 
                 {/* Edit button */}
-                <button
-                  onClick={() => setEditing(!editing)}
-                  className="text-zinc-400 hover:text-white transition-colors p-2"
-                  title="Edit profile"
-                >
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-                  </svg>
-                </button>
+                <div className="flex flex-col gap-2">
+                  <button
+                    onClick={() => setEditing(!editing)}
+                    className="text-zinc-400 hover:text-white transition-colors p-2"
+                    title="Edit profile"
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                    </svg>
+                  </button>
+                </div>
               </div>
+
+              {/* AI Summary Section */}
+              {!editing && (
+                <div className="mt-6 pt-6 border-t border-zinc-800">
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="text-sm font-medium text-zinc-300">AI Insights</h3>
+                    <button
+                      onClick={handleEnrich}
+                      disabled={enriching}
+                      className="text-xs px-3 py-1.5 bg-purple-600 hover:bg-purple-500 disabled:bg-purple-600/50 text-white rounded-lg transition-colors flex items-center gap-2"
+                    >
+                      {enriching ? (
+                        <>
+                          <span className="animate-spin">&#8635;</span>
+                          Analyzing...
+                        </>
+                      ) : profile.aiSummary ? (
+                        <>
+                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                          </svg>
+                          Refresh
+                        </>
+                      ) : (
+                        <>
+                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                          </svg>
+                          Generate Insights
+                        </>
+                      )}
+                    </button>
+                  </div>
+
+                  {profile.aiSummary ? (
+                    <div className="space-y-3">
+                      <p className="text-zinc-300 text-sm">{profile.aiSummary}</p>
+                      {profile.topics && profile.topics.length > 0 && (
+                        <div className="flex flex-wrap gap-2">
+                          {profile.topics.map((topic, i) => (
+                            <span
+                              key={i}
+                              className="px-2 py-1 bg-purple-500/20 text-purple-400 rounded text-xs"
+                            >
+                              {topic}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                      {profile.enrichedAt && (
+                        <p className="text-xs text-zinc-500">
+                          Last updated: {formatDate(profile.enrichedAt)}
+                        </p>
+                      )}
+                    </div>
+                  ) : (
+                    <p className="text-zinc-500 text-sm">
+                      Click &quot;Generate Insights&quot; to analyze meeting transcripts and discover what {profile.name} typically discusses.
+                    </p>
+                  )}
+                </div>
+              )}
 
               {/* Edit Form */}
               {editing && (

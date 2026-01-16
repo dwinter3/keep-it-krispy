@@ -36,6 +36,9 @@ interface SpeakerProfile {
   linkedin?: string
   company?: string
   role?: string
+  aiSummary?: string
+  topics?: string[]
+  enrichedAt?: string
 }
 
 // GET /api/speakers/[name] - Get speaker profile and meeting history
@@ -150,6 +153,9 @@ export async function GET(
       linkedin: linkedin || profile?.linkedin,
       company: profile?.company,
       role: profile?.role,
+      aiSummary: profile?.aiSummary,
+      topics: profile?.topics || [],
+      enrichedAt: profile?.enrichedAt,
       stats: {
         meetingCount: meetings.length,
         totalDuration,
