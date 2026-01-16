@@ -18,6 +18,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **AI-Powered Speaker Insights** - Generate professional summaries from meeting transcripts using Bedrock Claude
 - **Topic Discovery** - Automatically extract key topics from speaker conversations
 - **Cached Enrichment** - AI insights cached for 7 days with manual refresh option
+- **Topics Browser** - New `/topics` page showing all discovered topics with speaker counts
+- **Topic Detail Pages** - Click any topic to see all speakers who discuss it
+- **Clickable Topic Tags** - Topic tags throughout app link to topic detail pages
+- **Topics in Navigation** - Topics added to main navigation menu
 
 ## [1.2.0] - 2025-01-14
 
