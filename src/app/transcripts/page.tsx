@@ -3,6 +3,11 @@
 import { useEffect, useState } from 'react'
 import Shell from '@/components/Shell'
 
+interface SpeakerCorrection {
+  name: string
+  linkedin?: string
+}
+
 interface Transcript {
   key: string
   meetingId: string
@@ -12,6 +17,7 @@ interface Transcript {
   duration: number
   speakers: string[]
   eventType: string
+  speakerCorrections: Record<string, SpeakerCorrection> | null
 }
 
 interface TranscriptContent {
@@ -154,10 +160,39 @@ export default function TranscriptsPage() {
     })
   }
 
+  // Apply speaker corrections: returns { displayName, wasCorreted, linkedin? }
+  function applySpeakerCorrection(
+    originalName: string,
+    corrections: Record<string, SpeakerCorrection> | null
+  ): { displayName: string; wasCorrected: boolean; linkedin?: string } {
+    if (!corrections) {
+      return { displayName: originalName, wasCorrected: false }
+    }
+    // Try lowercase key match (corrections are stored with lowercase keys)
+    const key = originalName.toLowerCase()
+    const correction = corrections[key]
+    if (correction) {
+      return {
+        displayName: correction.name,
+        wasCorrected: true,
+        linkedin: correction.linkedin,
+      }
+    }
+    return { displayName: originalName, wasCorrected: false }
+  }
+
+  // Get corrected speakers list for display in title
+  function getCorrectedSpeakers(transcript: Transcript): string[] {
+    return getRealSpeakers(transcript.speakers).map(s => {
+      const { displayName } = applySpeakerCorrection(s, transcript.speakerCorrections)
+      return displayName
+    })
+  }
+
   // Build a rich title: "10:00 AM - Title with Speaker1, Speaker2 (29 min)"
   function buildRichTitle(transcript: Transcript) {
     const time = formatTime(transcript.timestamp || transcript.date)
-    const realSpeakers = getRealSpeakers(transcript.speakers)
+    const correctedSpeakers = getCorrectedSpeakers(transcript)
     const duration = formatDuration(transcript.duration)
 
     // Clean up the title - remove date suffix if present (e.g., "Google Chrome meeting January 16")
@@ -167,9 +202,9 @@ export default function TranscriptsPage() {
 
     let richTitle = time ? `${time} - ${title}` : title
 
-    if (realSpeakers.length > 0) {
-      const speakerNames = realSpeakers.slice(0, 2).join(', ')
-      const extra = realSpeakers.length > 2 ? ` +${realSpeakers.length - 2}` : ''
+    if (correctedSpeakers.length > 0) {
+      const speakerNames = correctedSpeakers.slice(0, 2).join(', ')
+      const extra = correctedSpeakers.length > 2 ? ` +${correctedSpeakers.length - 2}` : ''
       richTitle += ` with ${speakerNames}${extra}`
     }
 
@@ -305,14 +340,54 @@ export default function TranscriptsPage() {
                     <div className="mb-4">
                       <h3 className="text-sm font-medium text-zinc-300 mb-2">Speakers</h3>
                       <div className="flex flex-wrap gap-2">
-                        {selectedTranscript.speakers.map((speaker, i) => (
-                          <span
-                            key={i}
-                            className="px-2 py-1 bg-blue-500/20 text-blue-400 rounded text-sm"
-                          >
-                            {speaker}
-                          </span>
-                        ))}
+                        {selectedTranscript.speakers.map((speaker, i) => {
+                          const { displayName, wasCorrected, linkedin } = applySpeakerCorrection(
+                            speaker,
+                            selectedTranscript.speakerCorrections
+                          )
+                          const content = (
+                            <span
+                              key={i}
+                              className={`px-2 py-1 rounded text-sm inline-flex items-center gap-1.5 ${
+                                wasCorrected
+                                  ? 'bg-green-500/20 text-green-400'
+                                  : 'bg-blue-500/20 text-blue-400'
+                              }`}
+                              title={wasCorrected ? `Corrected from: ${speaker}` : undefined}
+                            >
+                              {displayName}
+                              {wasCorrected && (
+                                <svg
+                                  xmlns="http://www.w3.org/2000/svg"
+                                  viewBox="0 0 16 16"
+                                  fill="currentColor"
+                                  className="w-3 h-3 opacity-70"
+                                  aria-label="Corrected speaker name"
+                                >
+                                  <path
+                                    fillRule="evenodd"
+                                    d="M12.416 3.376a.75.75 0 0 1 .208 1.04l-5 7.5a.75.75 0 0 1-1.154.114l-3-3a.75.75 0 0 1 1.06-1.06l2.353 2.353 4.493-6.739a.75.75 0 0 1 1.04-.208Z"
+                                    clipRule="evenodd"
+                                  />
+                                </svg>
+                              )}
+                            </span>
+                          )
+                          if (linkedin) {
+                            return (
+                              <a
+                                key={i}
+                                href={linkedin}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="hover:opacity-80 transition-opacity"
+                              >
+                                {content}
+                              </a>
+                            )
+                          }
+                          return content
+                        })}
                       </div>
                     </div>
                   )}
