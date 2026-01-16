@@ -74,7 +74,7 @@ Speaker-related features are tracked in [GitHub Issue #12](https://github.com/dw
 - Phase 1: Speaker corrections sync (done - #13)
 - Phase 2: Dynamic speakers directory (done - #14)
 - Phase 3: Speaker profile pages (done - #15)
-- Phase 4: Intelligent bio discovery (#16)
+- Phase 4: Intelligent bio discovery (done - #16)
 - Phase 5: Topic analysis (#17)
 
 ## Build & Test

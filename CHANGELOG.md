@@ -15,6 +15,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Speaker Profile Pages** - Individual speaker pages at `/speakers/[name]` with full meeting history
 - **Editable Speaker Profiles** - Add bio, role, company, and LinkedIn URL for any speaker
 - **Clickable Speaker Names** - Speaker names link to profile pages throughout the app
+- **AI-Powered Speaker Insights** - Generate professional summaries from meeting transcripts using Bedrock Claude
+- **Topic Discovery** - Automatically extract key topics from speaker conversations
+- **Cached Enrichment** - AI insights cached for 7 days with manual refresh option
 
 ## [1.2.0] - 2025-01-14
 
