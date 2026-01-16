@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- **Speaker Corrections on Website** - Transcript list and detail views now display corrected speaker names with visual indicators
+- **Dynamic Speakers Directory** - Speakers page fetches real data from DynamoDB instead of hardcoded mock data
+- **Speakers API Endpoint** - New `/api/speakers` endpoint aggregates speaker statistics across all transcripts
+- **LinkedIn Links in Directory** - Speaker cards display clickable LinkedIn icons when profile URLs are available
+- **Speaker Statistics** - Meeting count, total duration, and "last seen" date for each speaker
+
 ## [1.2.0] - 2025-01-14
 
 ### Added
