@@ -109,7 +109,32 @@ export default function TranscriptsPage() {
     }
   }
 
+  function formatTime(dateStr: string) {
+    try {
+      const date = new Date(dateStr)
+      return date.toLocaleTimeString('en-US', {
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true,
+        timeZone: 'America/New_York',
+      })
+    } catch {
+      return ''
+    }
+  }
+
   function formatDuration(seconds: number) {
+    if (!seconds) return ''
+    const mins = Math.floor(seconds / 60)
+    if (mins >= 60) {
+      const hours = Math.floor(mins / 60)
+      const remainingMins = mins % 60
+      return `${hours}h ${remainingMins}m`
+    }
+    return `${mins} min`
+  }
+
+  function formatDurationLong(seconds: number) {
     if (!seconds) return '-'
     const mins = Math.floor(seconds / 60)
     const secs = seconds % 60
@@ -119,6 +144,40 @@ export default function TranscriptsPage() {
       return `${hours}h ${remainingMins}m`
     }
     return `${mins}m ${secs}s`
+  }
+
+  // Filter out generic speaker names like "Speaker 1", "Speaker 2"
+  function getRealSpeakers(speakers: string[]) {
+    return speakers.filter(s => {
+      const lower = s.toLowerCase()
+      return !lower.startsWith('speaker ') && lower !== 'unknown' && lower !== 'guest'
+    })
+  }
+
+  // Build a rich title: "10:00 AM - Title with Speaker1, Speaker2 (29 min)"
+  function buildRichTitle(transcript: Transcript) {
+    const time = formatTime(transcript.timestamp || transcript.date)
+    const realSpeakers = getRealSpeakers(transcript.speakers)
+    const duration = formatDuration(transcript.duration)
+
+    // Clean up the title - remove date suffix if present (e.g., "Google Chrome meeting January 16")
+    let title = transcript.title || 'Meeting'
+    const datePattern = /\s+(January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2}$/i
+    title = title.replace(datePattern, '')
+
+    let richTitle = time ? `${time} - ${title}` : title
+
+    if (realSpeakers.length > 0) {
+      const speakerNames = realSpeakers.slice(0, 2).join(', ')
+      const extra = realSpeakers.length > 2 ? ` +${realSpeakers.length - 2}` : ''
+      richTitle += ` with ${speakerNames}${extra}`
+    }
+
+    if (duration) {
+      richTitle += ` (${duration})`
+    }
+
+    return richTitle
   }
 
   return (
@@ -154,65 +213,45 @@ export default function TranscriptsPage() {
 
         {!loading && transcripts.length > 0 && (
           <div className="flex gap-6">
-            {/* Transcript table */}
+            {/* Transcript list */}
             <div className={`${selectedTranscript ? 'w-1/2' : 'w-full'} transition-all`}>
               <div className="bg-zinc-900 rounded-xl border border-zinc-800 overflow-hidden">
-                <table className="w-full">
-                  <thead>
-                    <tr className="border-b border-zinc-800 text-left text-sm text-zinc-400">
-                      <th className="px-4 py-3 font-medium">Title / Topic</th>
-                      <th className="px-4 py-3 font-medium">Date</th>
-                      <th className="px-4 py-3 font-medium">Duration</th>
-                      <th className="px-4 py-3 font-medium">Speakers</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-zinc-800">
-                    {transcripts.map((transcript) => (
-                      <tr
-                        key={transcript.key}
-                        onClick={() => viewTranscript(transcript)}
-                        className={`cursor-pointer transition-colors ${
-                          selectedTranscript?.key === transcript.key
-                            ? 'bg-zinc-800'
-                            : 'hover:bg-zinc-800/50'
-                        }`}
-                      >
-                        <td className="px-4 py-3">
-                          <div className="font-medium text-white">
-                            {transcript.title || 'Untitled Meeting'}
+                {/* Group transcripts by date */}
+                {(() => {
+                  const grouped = transcripts.reduce((acc, t) => {
+                    const dateKey = formatDate(t.date || t.timestamp)
+                    if (!acc[dateKey]) acc[dateKey] = []
+                    acc[dateKey].push(t)
+                    return acc
+                  }, {} as Record<string, Transcript[]>)
+
+                  return Object.entries(grouped).map(([date, items], groupIndex) => (
+                    <div key={date}>
+                      {/* Date header */}
+                      <div className={`px-4 py-2 bg-zinc-800/50 text-sm font-medium text-zinc-400 ${groupIndex > 0 ? 'border-t border-zinc-700' : ''}`}>
+                        {date}
+                      </div>
+                      {/* Transcript items for this date */}
+                      <div className="divide-y divide-zinc-800">
+                        {items.map((transcript) => (
+                          <div
+                            key={transcript.key}
+                            onClick={() => viewTranscript(transcript)}
+                            className={`px-4 py-3 cursor-pointer transition-colors ${
+                              selectedTranscript?.key === transcript.key
+                                ? 'bg-zinc-800'
+                                : 'hover:bg-zinc-800/50'
+                            }`}
+                          >
+                            <div className="font-medium text-white">
+                              {buildRichTitle(transcript)}
+                            </div>
                           </div>
-                        </td>
-                        <td className="px-4 py-3 text-sm text-zinc-400">
-                          {formatDate(transcript.date || transcript.timestamp)}
-                        </td>
-                        <td className="px-4 py-3 text-sm text-zinc-400">
-                          {formatDuration(transcript.duration)}
-                        </td>
-                        <td className="px-4 py-3">
-                          <div className="flex flex-wrap gap-1">
-                            {transcript.speakers.length > 0 ? (
-                              transcript.speakers.slice(0, 2).map((speaker, i) => (
-                                <span
-                                  key={i}
-                                  className="px-2 py-0.5 bg-zinc-800 rounded text-xs text-zinc-300"
-                                >
-                                  {speaker}
-                                </span>
-                              ))
-                            ) : (
-                              <span className="text-zinc-500 text-sm">-</span>
-                            )}
-                            {transcript.speakers.length > 2 && (
-                              <span className="px-2 py-0.5 bg-zinc-800 rounded text-xs text-zinc-400">
-                                +{transcript.speakers.length - 2}
-                              </span>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                        ))}
+                      </div>
+                    </div>
+                  ))
+                })()}
 
                 {/* Load More Button */}
                 {nextCursor && (
@@ -255,7 +294,7 @@ export default function TranscriptsPage() {
                       {formatDate(selectedTranscript.timestamp || selectedTranscript.date, true)}
                     </span>
                     <span className="px-2 py-1 bg-zinc-800 rounded text-zinc-400">
-                      {formatDuration(selectedTranscript.duration)}
+                      {formatDurationLong(selectedTranscript.duration)}
                     </span>
                     <span className="px-2 py-1 bg-purple-500/20 text-purple-400 rounded">
                       {selectedTranscript.eventType?.replace(/_/g, ' ') || 'Krisp'}
