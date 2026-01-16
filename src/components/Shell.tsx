@@ -7,6 +7,7 @@ const navigation = [
   { name: 'Dashboard', href: '/' },
   { name: 'Transcripts', href: '/transcripts' },
   { name: 'Speakers', href: '/speakers' },
+  { name: 'Topics', href: '/topics' },
   { name: 'Documents', href: '/documents' },
   { name: 'Search', href: '/search' },
   { name: 'Upload', href: '/upload' },
