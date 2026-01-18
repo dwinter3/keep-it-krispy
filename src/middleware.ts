@@ -1,28 +1,66 @@
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
+import { auth } from '@/lib/auth'
 
-const SITE_PASSWORD = process.env.SITE_PASSWORD || 'krispy123'
-const AUTH_COOKIE = 'krisp-auth'
+// Routes that require authentication
+const protectedRoutes = [
+  '/transcripts',
+  '/speakers',
+  '/companies',
+  '/topics',
+  '/search',
+  '/upload',
+  '/documents',
+  '/settings',
+]
 
-export function middleware(request: NextRequest) {
+// Routes that are always public
+const publicRoutes = [
+  '/',
+  '/login',
+  '/api/auth',
+]
+
+export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
 
-  // Allow login page and API routes
-  if (pathname === '/login' || pathname.startsWith('/api/')) {
+  // Allow static files and Next.js internals
+  if (
+    pathname.startsWith('/_next') ||
+    pathname.startsWith('/favicon') ||
+    pathname.match(/\.(svg|png|jpg|jpeg|gif|webp|ico)$/)
+  ) {
     return NextResponse.next()
   }
 
-  // Check for auth cookie
-  const authCookie = request.cookies.get(AUTH_COOKIE)
-
-  if (authCookie?.value === SITE_PASSWORD) {
+  // Always allow public routes
+  if (publicRoutes.some(route => pathname === route || pathname.startsWith(`${route}/`))) {
     return NextResponse.next()
   }
 
-  // Redirect to login
-  const loginUrl = new URL('/login', request.url)
-  loginUrl.searchParams.set('redirect', pathname)
-  return NextResponse.redirect(loginUrl)
+  // Allow all /api/auth/* routes (NextAuth routes)
+  if (pathname.startsWith('/api/auth')) {
+    return NextResponse.next()
+  }
+
+  // Check if route is protected
+  const isProtectedRoute = protectedRoutes.some(
+    route => pathname === route || pathname.startsWith(`${route}/`)
+  )
+
+  if (isProtectedRoute) {
+    // Get session using NextAuth
+    const session = await auth()
+
+    if (!session) {
+      // Redirect to NextAuth sign-in page
+      const signInUrl = new URL('/api/auth/signin', request.url)
+      signInUrl.searchParams.set('callbackUrl', pathname)
+      return NextResponse.redirect(signInUrl)
+    }
+  }
+
+  return NextResponse.next()
 }
 
 export const config = {
