@@ -32,6 +32,24 @@ interface Transcript {
   topic?: string
 }
 
+interface DriveFile {
+  id: string
+  name: string
+  mimeType: string
+  isFolder: boolean
+  isGoogleFormat: boolean
+  extension: string | null
+  size?: number
+  modifiedTime?: string
+  webViewLink?: string
+  iconLink?: string
+}
+
+interface DrivePath {
+  id: string
+  name: string
+}
+
 export default function DocumentsPage() {
   const [documents, setDocuments] = useState<Document[]>([])
   const [loading, setLoading] = useState(true)
@@ -54,8 +72,20 @@ export default function DocumentsPage() {
   // Filter state
   const [sourceFilter, setSourceFilter] = useState<'all' | 'upload' | 'url' | 'drive' | 'notion'>('all')
 
+  // Google Drive states
+  const [driveConnected, setDriveConnected] = useState<boolean | null>(null)
+  const [driveConnectionMessage, setDriveConnectionMessage] = useState<string | null>(null)
+  const [showDriveModal, setShowDriveModal] = useState(false)
+  const [driveFiles, setDriveFiles] = useState<DriveFile[]>([])
+  const [drivePath, setDrivePath] = useState<DrivePath[]>([])
+  const [currentFolderId, setCurrentFolderId] = useState<string | undefined>(undefined)
+  const [loadingDrive, setLoadingDrive] = useState(false)
+  const [driveSearch, setDriveSearch] = useState('')
+  const [importingFiles, setImportingFiles] = useState<Set<string>>(new Set())
+
   useEffect(() => {
     fetchDocuments()
+    checkDriveConnection()
   }, [])
 
   async function fetchDocuments() {
@@ -68,6 +98,20 @@ export default function DocumentsPage() {
       setError(String(err))
     } finally {
       setLoading(false)
+    }
+  }
+
+  async function checkDriveConnection() {
+    try {
+      const res = await fetch('/api/auth/google/status')
+      const data = await res.json()
+      setDriveConnected(data.connected === true)
+      if (!data.connected && data.message) {
+        setDriveConnectionMessage(data.message)
+      }
+    } catch (err) {
+      console.error('Failed to check Drive connection:', err)
+      setDriveConnected(false)
     }
   }
 
@@ -271,6 +315,107 @@ export default function DocumentsPage() {
     }
   }
 
+  // Google Drive functions
+  async function openDriveModal() {
+    if (!driveConnected) {
+      setError(driveConnectionMessage || 'Please sign in again to connect to Google Drive')
+      return
+    }
+
+    setShowDriveModal(true)
+    setCurrentFolderId(undefined)
+    setDrivePath([])
+    setDriveSearch('')
+    await loadDriveFiles()
+  }
+
+  async function loadDriveFiles(folderId?: string, search?: string) {
+    setLoadingDrive(true)
+    try {
+      const params = new URLSearchParams()
+      if (folderId) params.append('folderId', folderId)
+      if (search) params.append('search', search)
+
+      const res = await fetch(`/api/drive?${params.toString()}`)
+      if (!res.ok) {
+        const data = await res.json()
+        if (data.code === 'TOKEN_EXPIRED' || data.code === 'NO_TOKEN') {
+          setDriveConnected(false)
+          setDriveConnectionMessage(data.message)
+          setShowDriveModal(false)
+          setError(data.message)
+          return
+        }
+        throw new Error(data.error || 'Failed to load Drive files')
+      }
+
+      const data = await res.json()
+      setDriveFiles(data.files || [])
+      if (!search) {
+        setDrivePath(data.path || [])
+      }
+    } catch (err) {
+      console.error('Error loading Drive files:', err)
+      setError(String(err))
+    } finally {
+      setLoadingDrive(false)
+    }
+  }
+
+  async function navigateToFolder(folderId: string | undefined) {
+    setCurrentFolderId(folderId)
+    setDriveSearch('')
+    await loadDriveFiles(folderId)
+  }
+
+  async function handleDriveSearch(query: string) {
+    setDriveSearch(query)
+    if (query.trim()) {
+      await loadDriveFiles(undefined, query)
+    } else {
+      await loadDriveFiles(currentFolderId)
+    }
+  }
+
+  async function importDriveFile(file: DriveFile) {
+    if (file.isFolder) {
+      navigateToFolder(file.id)
+      return
+    }
+
+    setImportingFiles(prev => new Set(prev).add(file.id))
+    try {
+      const res = await fetch('/api/drive/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fileId: file.id }),
+      })
+
+      if (!res.ok) {
+        const data = await res.json()
+        throw new Error(data.error || 'Failed to import file')
+      }
+
+      const data = await res.json()
+      if (data.duplicate) {
+        setUploadProgress(`"${file.name}" already exists in your library`)
+      } else {
+        setUploadProgress(`"${file.name}" imported successfully`)
+      }
+
+      // Refresh documents list
+      fetchDocuments()
+    } catch (err) {
+      setError(`Failed to import "${file.name}": ${String(err)}`)
+    } finally {
+      setImportingFiles(prev => {
+        const next = new Set(prev)
+        next.delete(file.id)
+        return next
+      })
+    }
+  }
+
   function formatDate(dateStr: string) {
     try {
       const date = new Date(dateStr)
@@ -357,6 +502,53 @@ export default function DocumentsPage() {
     }
   }
 
+  // Google Drive icon component
+  function GoogleDriveIcon({ className = 'w-5 h-5' }: { className?: string }) {
+    return (
+      <svg className={className} viewBox="0 0 87.3 78" xmlns="http://www.w3.org/2000/svg">
+        <path d="m6.6 66.85 3.85 6.65c.8 1.4 1.95 2.5 3.3 3.3l13.75-23.8h-27.5c0 1.55.4 3.1 1.2 4.5z" fill="#0066da"/>
+        <path d="m43.65 25-13.75-23.8c-1.35.8-2.5 1.9-3.3 3.3l-25.4 44a9.06 9.06 0 0 0 -1.2 4.5h27.5z" fill="#00ac47"/>
+        <path d="m73.55 76.8c1.35-.8 2.5-1.9 3.3-3.3l1.6-2.75 7.65-13.25c.8-1.4 1.2-2.95 1.2-4.5h-27.502l5.852 11.5z" fill="#ea4335"/>
+        <path d="m43.65 25 13.75-23.8c-1.35-.8-2.9-1.2-4.5-1.2h-18.5c-1.6 0-3.15.45-4.5 1.2z" fill="#00832d"/>
+        <path d="m59.8 53h-32.3l-13.75 23.8c1.35.8 2.9 1.2 4.5 1.2h50.8c1.6 0 3.15-.45 4.5-1.2z" fill="#2684fc"/>
+        <path d="m73.4 26.5-12.7-22c-.8-1.4-1.95-2.5-3.3-3.3l-13.75 23.8 16.15 28h27.45c0-1.55-.4-3.1-1.2-4.5z" fill="#ffba00"/>
+      </svg>
+    )
+  }
+
+  // File type icon for Drive files
+  function DriveFileIcon({ file }: { file: DriveFile }) {
+    if (file.isFolder) {
+      return (
+        <svg className="w-5 h-5 text-yellow-500" fill="currentColor" viewBox="0 0 20 20">
+          <path d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" />
+        </svg>
+      )
+    }
+
+    if (file.isGoogleFormat) {
+      // Google Docs icon
+      return (
+        <svg className="w-5 h-5 text-blue-500" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6zm-1 9H7v-2h6v2zm4 4H7v-2h10v2zm0 4H7v-2h10v2zm-3-12V3.5L18.5 8H14z"/>
+        </svg>
+      )
+    }
+
+    // Generic document icon
+    const ext = file.extension?.toLowerCase()
+    let color = 'text-gray-500'
+    if (ext === 'pdf') color = 'text-red-500'
+    else if (ext === 'docx' || ext === 'doc') color = 'text-blue-500'
+    else if (ext === 'txt' || ext === 'md') color = 'text-gray-600'
+
+    return (
+      <svg className={`w-5 h-5 ${color}`} fill="currentColor" viewBox="0 0 20 20">
+        <path fillRule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4zm2 6a1 1 0 011-1h6a1 1 0 110 2H7a1 1 0 01-1-1zm1 3a1 1 0 100 2h6a1 1 0 100-2H7z" clipRule="evenodd" />
+      </svg>
+    )
+  }
+
   return (
     <Shell>
       <div className="max-w-6xl">
@@ -372,6 +564,23 @@ export default function DocumentsPage() {
             <span className="text-sm text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-700 px-3 py-1 rounded-full">
               {documents.length} document{documents.length !== 1 ? 's' : ''}
             </span>
+            {/* Import from Drive button */}
+            <button
+              onClick={openDriveModal}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 ${
+                driveConnected
+                  ? 'bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200'
+                  : 'bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-400 dark:text-gray-500 cursor-not-allowed'
+              }`}
+              disabled={driveConnected === false}
+              title={driveConnected ? 'Import from Google Drive' : driveConnectionMessage || 'Sign in to connect Google Drive'}
+            >
+              <GoogleDriveIcon className="w-4 h-4" />
+              Import from Drive
+              {driveConnected === null && (
+                <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-current"></div>
+              )}
+            </button>
             <label className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg text-sm font-medium text-white transition-colors flex items-center gap-2 cursor-pointer">
               <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
                 <path fillRule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clipRule="evenodd" />
@@ -430,6 +639,14 @@ export default function DocumentsPage() {
               <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600"></div>
             )}
             {uploadProgress}
+            {!uploading && (
+              <button
+                onClick={() => setUploadProgress(null)}
+                className="ml-auto text-blue-500 hover:text-blue-700"
+              >
+                Dismiss
+              </button>
+            )}
           </div>
         )}
 
@@ -470,7 +687,7 @@ export default function DocumentsPage() {
             <p className="text-sm text-gray-500 dark:text-gray-400 mb-6 max-w-sm mx-auto">
               Drag and drop files here, or click to upload. Supported formats: PDF, DOCX, TXT, MD
             </p>
-            <div className="flex justify-center gap-3">
+            <div className="flex justify-center gap-3 flex-wrap">
               <label className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg text-sm font-medium text-white transition-colors cursor-pointer">
                 Upload Files
                 <input
@@ -482,6 +699,15 @@ export default function DocumentsPage() {
                   disabled={uploading}
                 />
               </label>
+              {driveConnected && (
+                <button
+                  onClick={openDriveModal}
+                  className="px-4 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600 rounded-lg text-sm font-medium text-gray-700 dark:text-gray-200 transition-colors flex items-center gap-2"
+                >
+                  <GoogleDriveIcon className="w-4 h-4" />
+                  Import from Drive
+                </button>
+              )}
               <Link
                 href="/upload?tab=link"
                 className="px-4 py-2 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 rounded-lg text-sm font-medium text-gray-700 dark:text-gray-200 transition-colors"
@@ -785,6 +1011,145 @@ export default function DocumentsPage() {
                       ))}
                   </div>
                 )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Google Drive Browser Modal */}
+        {showDriveModal && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+            <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full max-w-2xl mx-4 max-h-[85vh] flex flex-col">
+              {/* Header */}
+              <div className="p-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <GoogleDriveIcon className="w-6 h-6" />
+                  <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Import from Google Drive</h3>
+                </div>
+                <button
+                  onClick={() => setShowDriveModal(false)}
+                  className="text-gray-400 hover:text-gray-600 dark:hover:text-white p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+
+              {/* Search and breadcrumbs */}
+              <div className="p-4 border-b border-gray-200 dark:border-gray-700 space-y-3">
+                {/* Search */}
+                <div className="relative">
+                  <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                  </svg>
+                  <input
+                    type="text"
+                    placeholder="Search files..."
+                    value={driveSearch}
+                    onChange={(e) => handleDriveSearch(e.target.value)}
+                    className="w-full pl-10 pr-4 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg text-sm text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  />
+                </div>
+
+                {/* Breadcrumbs */}
+                {!driveSearch && (
+                  <div className="flex items-center gap-1 text-sm overflow-x-auto">
+                    <button
+                      onClick={() => navigateToFolder(undefined)}
+                      className={`px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 ${
+                        !currentFolderId ? 'text-blue-600 dark:text-blue-400 font-medium' : 'text-gray-600 dark:text-gray-400'
+                      }`}
+                    >
+                      My Drive
+                    </button>
+                    {drivePath.map((folder, index) => (
+                      <div key={folder.id} className="flex items-center">
+                        <svg className="w-4 h-4 text-gray-400" fill="currentColor" viewBox="0 0 20 20">
+                          <path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clipRule="evenodd" />
+                        </svg>
+                        <button
+                          onClick={() => navigateToFolder(folder.id)}
+                          className={`px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 truncate max-w-[150px] ${
+                            index === drivePath.length - 1 ? 'text-blue-600 dark:text-blue-400 font-medium' : 'text-gray-600 dark:text-gray-400'
+                          }`}
+                        >
+                          {folder.name}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* File list */}
+              <div className="flex-1 overflow-y-auto">
+                {loadingDrive ? (
+                  <div className="flex items-center justify-center py-12">
+                    <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
+                    <span className="ml-3 text-gray-500 dark:text-gray-400">Loading files...</span>
+                  </div>
+                ) : driveFiles.length === 0 ? (
+                  <div className="text-center py-12 text-gray-500 dark:text-gray-400">
+                    <svg className="w-12 h-12 mx-auto mb-4 text-gray-300 dark:text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                    </svg>
+                    <p>{driveSearch ? 'No files found matching your search' : 'This folder is empty'}</p>
+                  </div>
+                ) : (
+                  <div className="divide-y divide-gray-100 dark:divide-gray-700">
+                    {driveFiles.map((file) => (
+                      <button
+                        key={file.id}
+                        onClick={() => importDriveFile(file)}
+                        disabled={importingFiles.has(file.id)}
+                        className="w-full p-3 flex items-center gap-3 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors text-left disabled:opacity-50"
+                      >
+                        <DriveFileIcon file={file} />
+                        <div className="flex-1 min-w-0">
+                          <div className="font-medium text-gray-900 dark:text-white truncate">
+                            {file.name}
+                          </div>
+                          <div className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-2">
+                            {file.isGoogleFormat && (
+                              <span className="text-blue-600 dark:text-blue-400">Google Doc</span>
+                            )}
+                            {file.extension && !file.isGoogleFormat && (
+                              <span className="uppercase">{file.extension}</span>
+                            )}
+                            {file.size && <span>{formatFileSize(file.size)}</span>}
+                            {file.modifiedTime && (
+                              <span>Modified {formatRelativeTime(file.modifiedTime)}</span>
+                            )}
+                          </div>
+                        </div>
+                        {importingFiles.has(file.id) ? (
+                          <div className="flex items-center gap-2 text-blue-600 dark:text-blue-400">
+                            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-current"></div>
+                            <span className="text-sm">Importing...</span>
+                          </div>
+                        ) : file.isFolder ? (
+                          <svg className="w-5 h-5 text-gray-400" fill="currentColor" viewBox="0 0 20 20">
+                            <path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clipRule="evenodd" />
+                          </svg>
+                        ) : (
+                          <span className="text-xs text-gray-400 dark:text-gray-500">Click to import</span>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Footer */}
+              <div className="p-4 border-t border-gray-200 dark:border-gray-700 flex items-center justify-between text-sm text-gray-500 dark:text-gray-400">
+                <span>Supported: Google Docs, PDF, DOCX, TXT, Markdown</span>
+                <button
+                  onClick={() => setShowDriveModal(false)}
+                  className="px-4 py-2 bg-gray-200 dark:bg-gray-600 hover:bg-gray-300 dark:hover:bg-gray-500 rounded-lg text-gray-700 dark:text-gray-200 transition-colors"
+                >
+                  Done
+                </button>
               </div>
             </div>
           </div>
