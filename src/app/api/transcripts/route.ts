@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3'
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb'
-import { DynamoDBDocumentClient, ScanCommand, QueryCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb'
+import { DynamoDBDocumentClient, ScanCommand, QueryCommand, UpdateCommand, GetCommand } from '@aws-sdk/lib-dynamodb'
+import { auth } from '@/lib/auth'
+import { getUserByEmail } from '@/lib/users'
 
 const BUCKET_NAME = process.env.KRISP_S3_BUCKET || ''  // Required: set via environment variable
 const TABLE_NAME = process.env.DYNAMODB_TABLE || 'krisp-transcripts-index'
@@ -22,9 +24,36 @@ export async function GET(request: NextRequest) {
   const key = searchParams.get('key')
   const action = searchParams.get('action')
 
+  // Get authenticated user
+  const session = await auth()
+  if (!session?.user?.email) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
+  // Get user's ID for tenant isolation
+  const user = await getUserByEmail(session.user.email)
+  if (!user) {
+    return NextResponse.json({ error: 'User not found' }, { status: 404 })
+  }
+  const userId = user.user_id
+
   try {
-    // If key provided, fetch specific transcript from S3
+    // If key provided, fetch specific transcript from S3 (with ownership check)
     if (key) {
+      // First check ownership in DynamoDB
+      const meetingId = key.split('/').pop()?.replace('.json', '')
+      if (meetingId) {
+        const getCommand = new GetCommand({
+          TableName: TABLE_NAME,
+          Key: { meeting_id: meetingId },
+          ProjectionExpression: 'user_id',
+        })
+        const ownerCheck = await dynamodb.send(getCommand)
+        if (ownerCheck.Item?.user_id && ownerCheck.Item.user_id !== userId) {
+          return NextResponse.json({ error: 'Access denied' }, { status: 403 })
+        }
+      }
+
       const command = new GetObjectCommand({
         Bucket: BUCKET_NAME,
         Key: key,
@@ -39,17 +68,23 @@ export async function GET(request: NextRequest) {
       return NextResponse.json(JSON.parse(body))
     }
 
-    // Get stats for dashboard
+    // Get stats for dashboard (scoped to user)
     if (action === 'stats') {
-      const scanCommand = new ScanCommand({
+      const queryCommand = new QueryCommand({
         TableName: TABLE_NAME,
+        IndexName: 'user-index',
+        KeyConditionExpression: 'user_id = :userId',
+        ExpressionAttributeValues: { ':userId': userId },
         Select: 'COUNT',
       })
-      const countResult = await dynamodb.send(scanCommand)
+      const countResult = await dynamodb.send(queryCommand)
 
-      // Get unique speakers
-      const speakersCommand = new ScanCommand({
+      // Get unique speakers for this user
+      const speakersCommand = new QueryCommand({
         TableName: TABLE_NAME,
+        IndexName: 'user-index',
+        KeyConditionExpression: 'user_id = :userId',
+        ExpressionAttributeValues: { ':userId': userId },
         ProjectionExpression: 'speakers',
       })
       const speakersResult = await dynamodb.send(speakersCommand)
@@ -67,7 +102,7 @@ export async function GET(request: NextRequest) {
       })
     }
 
-    // List transcripts with pagination using all-transcripts-index GSI
+    // List transcripts with pagination using user-index GSI
     const cursor = searchParams.get('cursor')
     const limit = Math.min(parseInt(searchParams.get('limit') || '25'), 100)
     const includePrivate = searchParams.get('includePrivate') === 'true'
@@ -75,7 +110,7 @@ export async function GET(request: NextRequest) {
 
     // Build filter expression for privacy
     let filterExpression: string | undefined
-    const expressionAttrValues: Record<string, unknown> = { ':pk': 'TRANSCRIPT' }
+    const expressionAttrValues: Record<string, unknown> = { ':userId': userId }
 
     if (onlyPrivate) {
       filterExpression = 'isPrivate = :isPrivate'
@@ -88,8 +123,8 @@ export async function GET(request: NextRequest) {
 
     const queryCommand = new QueryCommand({
       TableName: TABLE_NAME,
-      IndexName: 'all-transcripts-index',
-      KeyConditionExpression: 'pk = :pk',
+      IndexName: 'user-index',
+      KeyConditionExpression: 'user_id = :userId',
       ExpressionAttributeValues: expressionAttrValues,
       ...(filterExpression && { FilterExpression: filterExpression }),
       ScanIndexForward: false, // Newest first (descending by timestamp)
@@ -140,6 +175,18 @@ export async function GET(request: NextRequest) {
  * PATCH - Update speaker corrections for a transcript
  */
 export async function PATCH(request: NextRequest) {
+  // Get authenticated user
+  const session = await auth()
+  if (!session?.user?.email) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
+  const user = await getUserByEmail(session.user.email)
+  if (!user) {
+    return NextResponse.json({ error: 'User not found' }, { status: 404 })
+  }
+  const userId = user.user_id
+
   try {
     const body = await request.json()
     const { meetingId, speakerCorrection } = body
@@ -149,6 +196,17 @@ export async function PATCH(request: NextRequest) {
         { error: 'Missing required fields: meetingId and speakerCorrection' },
         { status: 400 }
       )
+    }
+
+    // Verify ownership before update
+    const getCommand = new GetCommand({
+      TableName: TABLE_NAME,
+      Key: { meeting_id: meetingId },
+      ProjectionExpression: 'user_id',
+    })
+    const ownerCheck = await dynamodb.send(getCommand)
+    if (ownerCheck.Item?.user_id && ownerCheck.Item.user_id !== userId) {
+      return NextResponse.json({ error: 'Access denied' }, { status: 403 })
     }
 
     const { originalName, correctedName } = speakerCorrection

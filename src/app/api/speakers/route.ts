@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server'
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb'
-import { DynamoDBDocumentClient, ScanCommand } from '@aws-sdk/lib-dynamodb'
+import { DynamoDBDocumentClient, QueryCommand } from '@aws-sdk/lib-dynamodb'
+import { auth } from '@/lib/auth'
+import { getUserByEmail } from '@/lib/users'
 
 const TABLE_NAME = process.env.DYNAMODB_TABLE || 'krisp-transcripts-index'
 const AWS_REGION = process.env.APP_REGION || 'us-east-1'
@@ -50,14 +52,29 @@ interface SpeakerStats {
 }
 
 export async function GET() {
+  // Get authenticated user
+  const session = await auth()
+  if (!session?.user?.email) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
+  const user = await getUserByEmail(session.user.email)
+  if (!user) {
+    return NextResponse.json({ error: 'User not found' }, { status: 404 })
+  }
+  const userId = user.user_id
+
   try {
-    // Scan all transcripts to aggregate speaker data
+    // Query user's transcripts to aggregate speaker data
     const allItems: TranscriptItem[] = []
     let lastKey: Record<string, unknown> | undefined
 
     do {
-      const scanCommand = new ScanCommand({
+      const queryCommand = new QueryCommand({
         TableName: TABLE_NAME,
+        IndexName: 'user-index',
+        KeyConditionExpression: 'user_id = :userId',
+        ExpressionAttributeValues: { ':userId': userId },
         ProjectionExpression: 'meeting_id, #date, #timestamp, #duration, speakers, speaker_corrections',
         ExpressionAttributeNames: {
           '#date': 'date',
@@ -67,7 +84,7 @@ export async function GET() {
         ...(lastKey && { ExclusiveStartKey: lastKey }),
       })
 
-      const response = await dynamodb.send(scanCommand)
+      const response = await dynamodb.send(queryCommand)
       if (response.Items) {
         allItems.push(...(response.Items as TranscriptItem[]))
       }

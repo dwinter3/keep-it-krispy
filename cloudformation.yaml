@@ -53,6 +53,8 @@ Resources:
           AttributeType: S
         - AttributeName: timestamp
           AttributeType: S
+        - AttributeName: user_id
+          AttributeType: S
       KeySchema:
         - AttributeName: meeting_id
           KeyType: HASH
@@ -76,6 +78,14 @@ Resources:
         - IndexName: all-transcripts-index
           KeySchema:
             - AttributeName: pk
+              KeyType: HASH
+            - AttributeName: timestamp
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: user-index
+          KeySchema:
+            - AttributeName: user_id
               KeyType: HASH
             - AttributeName: timestamp
               KeyType: RANGE
