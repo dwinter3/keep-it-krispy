@@ -1675,13 +1675,23 @@ function TranscriptDetail({
                   <ul className="space-y-1.5">
                     {detailedSummary.keyDiscussionPoints.map((point, i) => {
                       // Handle both string and object formats (AI may return {topic, context} objects)
-                      const displayText = typeof point === 'string'
-                        ? point
-                        : (point as { topic?: string; context?: string }).topic || (point as { topic?: string; context?: string }).context || JSON.stringify(point)
+                      let topic: string
+                      let context: string | undefined
+                      if (typeof point === 'string') {
+                        topic = point
+                      } else {
+                        const obj = point as { topic?: string; context?: string; point?: string }
+                        const firstVal = Object.values(point)[0]
+                        topic = obj.topic || obj.point || (typeof firstVal === 'string' ? firstVal : '') || ''
+                        context = obj.context
+                      }
                       return (
                         <li key={i} className="text-xs text-gray-600 dark:text-gray-400 flex items-start gap-2">
                           <span className="text-blue-500 mt-0.5">-</span>
-                          <span>{displayText}</span>
+                          <span>
+                            <span className="font-medium text-gray-700 dark:text-gray-300">{topic}</span>
+                            {context && <span className="text-gray-500 dark:text-gray-400"> — {context}</span>}
+                          </span>
                         </li>
                       )
                     })}
@@ -1700,7 +1710,15 @@ function TranscriptDetail({
                   </h4>
                   <ul className="space-y-1.5">
                     {detailedSummary.decisions.map((decision, i) => {
-                      const displayText = typeof decision === 'string' ? decision : JSON.stringify(decision)
+                      // Handle {decision: "..."} object format from AI
+                      let displayText: string
+                      if (typeof decision === 'string') {
+                        displayText = decision
+                      } else {
+                        const obj = decision as { decision?: string }
+                        const firstVal = Object.values(decision)[0]
+                        displayText = obj.decision || (typeof firstVal === 'string' ? firstVal : '') || ''
+                      }
                       return (
                         <li key={i} className="text-xs text-gray-600 dark:text-gray-400 flex items-start gap-2">
                           <span className="text-green-500 mt-0.5">-</span>
@@ -1723,11 +1741,28 @@ function TranscriptDetail({
                   </h4>
                   <ul className="space-y-1.5">
                     {detailedSummary.actionItems.map((item, i) => {
-                      const displayText = typeof item === 'string' ? item : JSON.stringify(item)
+                      // Handle {action: "...", responsible: "..."} object format from AI
+                      let displayText: string
+                      let responsible: string | undefined
+                      if (typeof item === 'string') {
+                        displayText = item
+                      } else {
+                        const obj = item as { action?: string; responsible?: string; item?: string }
+                        const firstVal = Object.values(item)[0]
+                        displayText = obj.action || obj.item || (typeof firstVal === 'string' ? firstVal : '') || ''
+                        responsible = obj.responsible
+                      }
                       return (
                         <li key={i} className="text-xs text-gray-600 dark:text-gray-400 flex items-start gap-2">
                           <span className="text-amber-500 mt-0.5">-</span>
-                          <span>{displayText}</span>
+                          <span>
+                            {displayText}
+                            {responsible && (
+                              <span className="ml-1 text-amber-600 dark:text-amber-400 font-medium">
+                                ({responsible})
+                              </span>
+                            )}
+                          </span>
                         </li>
                       )
                     })}
