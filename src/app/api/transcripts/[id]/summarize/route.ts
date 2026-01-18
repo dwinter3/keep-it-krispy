@@ -151,25 +151,29 @@ Please provide a detailed analysis in the following JSON format. Be thorough and
 Return ONLY valid JSON. Be specific and extract actual details from the transcript rather than generic descriptions.`
 
     const invokeCommand = new InvokeModelCommand({
-      modelId: 'anthropic.claude-3-haiku-20240307-v1:0',
+      modelId: 'amazon.nova-lite-v1:0',
       contentType: 'application/json',
       accept: 'application/json',
       body: JSON.stringify({
-        anthropic_version: 'bedrock-2023-05-31',
-        max_tokens: 2000,
-        temperature: 0.3,
         messages: [
           {
             role: 'user',
-            content: prompt,
+            content: [{ text: prompt }],
           },
         ],
+        inferenceConfig: {
+          maxTokens: 2000,
+          temperature: 0.3,
+        },
       }),
     })
 
     const bedrockResponse = await bedrock.send(invokeCommand)
     const responseBody = JSON.parse(new TextDecoder().decode(bedrockResponse.body))
-    const assistantMessage = responseBody.content?.[0]?.text || ''
+    // Nova uses output.message.content[0].text, Claude uses content[0].text
+    const assistantMessage = responseBody.output?.message?.content?.[0]?.text
+      || responseBody.content?.[0]?.text
+      || ''
 
     // Parse the JSON response
     let parsedSummary: Omit<DetailedSummary, 'generatedAt'>
