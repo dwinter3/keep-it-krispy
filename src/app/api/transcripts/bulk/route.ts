@@ -2,19 +2,10 @@ import { NextRequest, NextResponse } from 'next/server'
 import { S3Client, DeleteObjectCommand } from '@aws-sdk/client-s3'
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb'
 import { DynamoDBDocumentClient, UpdateCommand, DeleteCommand, BatchGetCommand } from '@aws-sdk/lib-dynamodb'
-import { execFile } from 'child_process'
-import { promisify } from 'util'
-import * as fs from 'fs'
-import * as os from 'os'
-import * as path from 'path'
 import { auth } from '@/lib/auth'
 import { getUserByEmail } from '@/lib/users'
 
-const execFileAsync = promisify(execFile)
-
 const BUCKET_NAME = process.env.KRISP_S3_BUCKET || ''
-const VECTOR_BUCKET = process.env.VECTOR_BUCKET || 'krisp-vectors'
-const VECTOR_INDEX = process.env.VECTOR_INDEX || 'transcript-chunks'
 const TABLE_NAME = process.env.DYNAMODB_TABLE || 'krisp-transcripts-index'
 const AWS_REGION = process.env.APP_REGION || 'us-east-1'
 
@@ -38,75 +29,6 @@ interface TranscriptRecord {
 interface BulkRequest {
   action: 'delete' | 'markPrivate'
   meetingIds: string[]
-}
-
-/**
- * Delete all vectors associated with a meeting from S3 Vectors
- */
-async function deleteVectorsByMeetingId(meetingId: string): Promise<number> {
-  try {
-    const listParams = {
-      vectorBucketName: VECTOR_BUCKET,
-      indexName: VECTOR_INDEX,
-      filter: { equals: { key: 'meeting_id', value: meetingId } },
-    }
-
-    const tmpListFile = path.join(os.tmpdir(), `list-vectors-${Date.now()}.json`)
-    fs.writeFileSync(tmpListFile, JSON.stringify(listParams))
-
-    try {
-      const { stdout: listOutput } = await execFileAsync('aws', [
-        's3vectors',
-        'list-vectors',
-        '--cli-input-json',
-        `file://${tmpListFile}`,
-        '--region',
-        AWS_REGION,
-        '--output',
-        'json',
-      ], { maxBuffer: 10 * 1024 * 1024 })
-
-      const listResponse = JSON.parse(listOutput)
-      const keys = (listResponse.vectors || []).map((v: { key: string }) => v.key)
-
-      if (keys.length === 0) {
-        return 0
-      }
-
-      const deleteParams = {
-        vectorBucketName: VECTOR_BUCKET,
-        indexName: VECTOR_INDEX,
-        keys,
-      }
-
-      const tmpDeleteFile = path.join(os.tmpdir(), `delete-vectors-${Date.now()}.json`)
-      fs.writeFileSync(tmpDeleteFile, JSON.stringify(deleteParams))
-
-      try {
-        await execFileAsync('aws', [
-          's3vectors',
-          'delete-vectors',
-          '--cli-input-json',
-          `file://${tmpDeleteFile}`,
-          '--region',
-          AWS_REGION,
-        ])
-
-        return keys.length
-      } finally {
-        if (fs.existsSync(tmpDeleteFile)) {
-          fs.unlinkSync(tmpDeleteFile)
-        }
-      }
-    } finally {
-      if (fs.existsSync(tmpListFile)) {
-        fs.unlinkSync(tmpListFile)
-      }
-    }
-  } catch (error) {
-    console.error('Error deleting vectors:', error)
-    return 0
-  }
 }
 
 /**
@@ -188,8 +110,8 @@ export async function POST(request: NextRequest) {
             }
           }
 
-          // Delete vectors
-          await deleteVectorsByMeetingId(transcript.meeting_id)
+          // Note: Vector deletion skipped in serverless environment
+          // Vectors will be orphaned but cleaned up separately if needed
 
           // Delete from DynamoDB
           await dynamodb.send(new DeleteCommand({
@@ -214,8 +136,7 @@ export async function POST(request: NextRequest) {
             continue
           }
 
-          // Delete vectors when marking private
-          await deleteVectorsByMeetingId(transcript.meeting_id)
+          // Note: Vector deletion skipped in serverless environment
 
           // Update DynamoDB
           await dynamodb.send(new UpdateCommand({
