@@ -1221,6 +1221,17 @@ interface DetailedSummary {
   generatedAt: string
 }
 
+interface LinkedDocument {
+  documentId: string
+  title: string
+  filename?: string
+  fileType?: string
+  fileSize?: number
+  format: string
+  importedAt: string
+  wordCount: number
+}
+
 function TranscriptDetail({
   data,
   transcript,
@@ -1232,6 +1243,14 @@ function TranscriptDetail({
   const [isGeneratingSummary, setIsGeneratingSummary] = useState(false)
   const [summaryError, setSummaryError] = useState<string | null>(null)
   const [isSummaryExpanded, setIsSummaryExpanded] = useState(true)
+
+  // Linked documents state
+  const [linkedDocuments, setLinkedDocuments] = useState<LinkedDocument[]>([])
+  const [loadingDocuments, setLoadingDocuments] = useState(false)
+  const [showLinkDocumentModal, setShowLinkDocumentModal] = useState(false)
+  const [availableDocuments, setAvailableDocuments] = useState<LinkedDocument[]>([])
+  const [loadingAvailableDocuments, setLoadingAvailableDocuments] = useState(false)
+  const [linkingDocumentId, setLinkingDocumentId] = useState<string | null>(null)
 
   const rawPayload = data.raw_payload
   const transcriptData = rawPayload?.data
@@ -1267,6 +1286,101 @@ function TranscriptDetail({
     }
     checkCachedSummary()
   }, [transcript.meetingId])
+
+  // Fetch linked documents
+  useEffect(() => {
+    async function fetchLinkedDocuments() {
+      setLoadingDocuments(true)
+      try {
+        const res = await fetch(`/api/transcripts/${transcript.meetingId}/documents`)
+        if (res.ok) {
+          const data = await res.json()
+          setLinkedDocuments(data.documents || [])
+        }
+      } catch (err) {
+        console.error('Error fetching linked documents:', err)
+      } finally {
+        setLoadingDocuments(false)
+      }
+    }
+    fetchLinkedDocuments()
+  }, [transcript.meetingId])
+
+  // Open link document modal and fetch available documents
+  async function openLinkDocumentModal() {
+    setShowLinkDocumentModal(true)
+    setLoadingAvailableDocuments(true)
+    try {
+      const res = await fetch('/api/documents')
+      if (res.ok) {
+        const data = await res.json()
+        setAvailableDocuments(data.documents || [])
+      }
+    } catch (err) {
+      console.error('Error fetching available documents:', err)
+    } finally {
+      setLoadingAvailableDocuments(false)
+    }
+  }
+
+  // Link a document to this transcript
+  async function linkDocument(documentId: string) {
+    setLinkingDocumentId(documentId)
+    try {
+      const res = await fetch(`/api/transcripts/${transcript.meetingId}/documents`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ documentId }),
+      })
+      if (res.ok) {
+        // Refresh linked documents
+        const docsRes = await fetch(`/api/transcripts/${transcript.meetingId}/documents`)
+        if (docsRes.ok) {
+          const data = await docsRes.json()
+          setLinkedDocuments(data.documents || [])
+        }
+        setShowLinkDocumentModal(false)
+      }
+    } catch (err) {
+      console.error('Error linking document:', err)
+    } finally {
+      setLinkingDocumentId(null)
+    }
+  }
+
+  // Unlink a document from this transcript
+  async function unlinkDocument(documentId: string) {
+    try {
+      const res = await fetch(`/api/transcripts/${transcript.meetingId}/documents?documentId=${documentId}`, {
+        method: 'DELETE',
+      })
+      if (res.ok) {
+        setLinkedDocuments(prev => prev.filter(d => d.documentId !== documentId))
+      }
+    } catch (err) {
+      console.error('Error unlinking document:', err)
+    }
+  }
+
+  function formatFileSize(bytes?: number) {
+    if (!bytes) return ''
+    if (bytes < 1024) return `${bytes} B`
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+  }
+
+  function formatDocDate(dateStr: string) {
+    try {
+      const date = new Date(dateStr)
+      return date.toLocaleDateString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+      })
+    } catch {
+      return dateStr
+    }
+  }
 
   async function generateDetailedSummary(forceRefresh = false) {
     setIsGeneratingSummary(true)
@@ -1496,6 +1610,141 @@ function TranscriptDetail({
           onSpeakerClick={onSpeakerClick}
         />
       )}
+
+      {/* Linked Documents Section */}
+      <div>
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="text-gray-700 dark:text-gray-300 font-medium flex items-center gap-2">
+            <svg className="w-4 h-4 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+            Linked Documents ({linkedDocuments.length})
+          </h3>
+          <button
+            onClick={openLinkDocumentModal}
+            className="text-xs text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 flex items-center gap-1"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+            </svg>
+            Link Document
+          </button>
+        </div>
+
+        {loadingDocuments ? (
+          <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3 border border-gray-100 dark:border-gray-600 flex items-center justify-center">
+            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+            <span className="ml-2 text-xs text-gray-500 dark:text-gray-400">Loading documents...</span>
+          </div>
+        ) : linkedDocuments.length === 0 ? (
+          <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3 border border-gray-100 dark:border-gray-600 text-center">
+            <p className="text-xs text-gray-500 dark:text-gray-400">
+              No documents linked to this transcript. Click "Link Document" to associate relevant documents.
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {linkedDocuments.map((doc) => (
+              <div
+                key={doc.documentId}
+                className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3 border border-gray-100 dark:border-gray-600 flex items-center justify-between"
+              >
+                <div className="flex-1 min-w-0">
+                  <Link
+                    href={`/documents?id=${doc.documentId}`}
+                    className="text-sm font-medium text-blue-600 dark:text-blue-400 hover:underline truncate block"
+                  >
+                    {doc.title}
+                  </Link>
+                  <div className="flex items-center gap-2 mt-1 text-xs text-gray-500 dark:text-gray-400">
+                    <span className="uppercase font-medium px-1.5 py-0.5 bg-gray-200 dark:bg-gray-600 rounded text-gray-600 dark:text-gray-300">
+                      {doc.format}
+                    </span>
+                    <span>{doc.wordCount.toLocaleString()} words</span>
+                    {doc.fileSize && <span>{formatFileSize(doc.fileSize)}</span>}
+                    <span>{formatDocDate(doc.importedAt)}</span>
+                  </div>
+                </div>
+                <button
+                  onClick={() => unlinkDocument(doc.documentId)}
+                  className="ml-2 text-gray-400 hover:text-red-500 dark:hover:text-red-400 p-1"
+                  title="Unlink document"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Link Document Modal */}
+        {showLinkDocumentModal && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+            <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full max-w-lg mx-4 max-h-[80vh] flex flex-col">
+              <div className="p-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Link Document</h3>
+                <button
+                  onClick={() => setShowLinkDocumentModal(false)}
+                  className="text-gray-400 hover:text-gray-600 dark:hover:text-white"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+
+              <div className="p-4 overflow-y-auto flex-1">
+                {loadingAvailableDocuments ? (
+                  <div className="flex items-center justify-center py-8">
+                    <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
+                    <span className="ml-3 text-gray-500 dark:text-gray-400">Loading documents...</span>
+                  </div>
+                ) : availableDocuments.length === 0 ? (
+                  <div className="text-center py-8">
+                    <p className="text-gray-500 dark:text-gray-400 mb-4">No documents available to link</p>
+                    <Link
+                      href="/documents"
+                      className="text-blue-600 dark:text-blue-400 hover:underline text-sm"
+                    >
+                      Upload a document first
+                    </Link>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {availableDocuments
+                      .filter(d => !linkedDocuments.some(ld => ld.documentId === d.documentId))
+                      .map((doc) => (
+                        <button
+                          key={doc.documentId}
+                          onClick={() => linkDocument(doc.documentId)}
+                          disabled={linkingDocumentId === doc.documentId}
+                          className="w-full text-left p-3 bg-gray-50 dark:bg-gray-700/50 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg border border-gray-200 dark:border-gray-600 transition-colors disabled:opacity-50"
+                        >
+                          <div className="font-medium text-gray-900 dark:text-white">
+                            {doc.title}
+                          </div>
+                          <div className="flex items-center gap-2 mt-1 text-xs text-gray-500 dark:text-gray-400">
+                            <span className="uppercase font-medium">{doc.format}</span>
+                            <span>{doc.wordCount.toLocaleString()} words</span>
+                            <span>{formatDocDate(doc.importedAt)}</span>
+                          </div>
+                          {linkingDocumentId === doc.documentId && (
+                            <div className="mt-2 flex items-center gap-2 text-blue-600 dark:text-blue-400">
+                              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-current"></div>
+                              Linking...
+                            </div>
+                          )}
+                        </button>
+                      ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
 
       {/* Transcript with view toggle */}
       {rawContent && (
