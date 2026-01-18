@@ -1673,12 +1673,18 @@ function TranscriptDetail({
                     Key Discussion Points
                   </h4>
                   <ul className="space-y-1.5">
-                    {detailedSummary.keyDiscussionPoints.map((point, i) => (
-                      <li key={i} className="text-xs text-gray-600 dark:text-gray-400 flex items-start gap-2">
-                        <span className="text-blue-500 mt-0.5">-</span>
-                        <span>{point}</span>
-                      </li>
-                    ))}
+                    {detailedSummary.keyDiscussionPoints.map((point, i) => {
+                      // Handle both string and object formats (AI may return {topic, context} objects)
+                      const displayText = typeof point === 'string'
+                        ? point
+                        : (point as { topic?: string; context?: string }).topic || (point as { topic?: string; context?: string }).context || JSON.stringify(point)
+                      return (
+                        <li key={i} className="text-xs text-gray-600 dark:text-gray-400 flex items-start gap-2">
+                          <span className="text-blue-500 mt-0.5">-</span>
+                          <span>{displayText}</span>
+                        </li>
+                      )
+                    })}
                   </ul>
                 </div>
               )}
@@ -1693,12 +1699,15 @@ function TranscriptDetail({
                     Decisions Made
                   </h4>
                   <ul className="space-y-1.5">
-                    {detailedSummary.decisions.map((decision, i) => (
-                      <li key={i} className="text-xs text-gray-600 dark:text-gray-400 flex items-start gap-2">
-                        <span className="text-green-500 mt-0.5">-</span>
-                        <span>{decision}</span>
-                      </li>
-                    ))}
+                    {detailedSummary.decisions.map((decision, i) => {
+                      const displayText = typeof decision === 'string' ? decision : JSON.stringify(decision)
+                      return (
+                        <li key={i} className="text-xs text-gray-600 dark:text-gray-400 flex items-start gap-2">
+                          <span className="text-green-500 mt-0.5">-</span>
+                          <span>{displayText}</span>
+                        </li>
+                      )
+                    })}
                   </ul>
                 </div>
               )}
@@ -1713,12 +1722,15 @@ function TranscriptDetail({
                     Action Items
                   </h4>
                   <ul className="space-y-1.5">
-                    {detailedSummary.actionItems.map((item, i) => (
-                      <li key={i} className="text-xs text-gray-600 dark:text-gray-400 flex items-start gap-2">
-                        <span className="text-amber-500 mt-0.5">-</span>
-                        <span>{item}</span>
-                      </li>
-                    ))}
+                    {detailedSummary.actionItems.map((item, i) => {
+                      const displayText = typeof item === 'string' ? item : JSON.stringify(item)
+                      return (
+                        <li key={i} className="text-xs text-gray-600 dark:text-gray-400 flex items-start gap-2">
+                          <span className="text-amber-500 mt-0.5">-</span>
+                          <span>{displayText}</span>
+                        </li>
+                      )
+                    })}
                   </ul>
                 </div>
               )}
@@ -1733,14 +1745,17 @@ function TranscriptDetail({
                     Topics Covered
                   </h4>
                   <div className="flex flex-wrap gap-1.5">
-                    {detailedSummary.importantTopics.map((topic, i) => (
-                      <span
-                        key={i}
-                        className="px-2 py-0.5 text-xs bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 rounded-full"
-                      >
-                        {topic}
-                      </span>
-                    ))}
+                    {detailedSummary.importantTopics.map((topic, i) => {
+                      const displayText = typeof topic === 'string' ? topic : JSON.stringify(topic)
+                      return (
+                        <span
+                          key={i}
+                          className="px-2 py-0.5 text-xs bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 rounded-full"
+                        >
+                          {displayText}
+                        </span>
+                      )
+                    })}
                   </div>
                 </div>
               )}
