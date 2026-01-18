@@ -30,6 +30,14 @@ interface TranscriptItem {
   speaker_corrections?: Record<string, SpeakerCorrection>
 }
 
+interface EnrichedData {
+  title?: string
+  company?: string
+  summary?: string
+  linkedinUrl?: string
+  photoUrl?: string
+}
+
 interface SpeakerProfile {
   name: string
   bio?: string
@@ -39,6 +47,12 @@ interface SpeakerProfile {
   aiSummary?: string
   topics?: string[]
   enrichedAt?: string
+  // Web enrichment fields
+  enrichedData?: EnrichedData
+  enrichedConfidence?: number
+  enrichedReasoning?: string
+  enrichedSources?: string[]
+  webEnrichedAt?: string
 }
 
 // GET /api/speakers/[name] - Get speaker profile and meeting history
@@ -156,6 +170,12 @@ export async function GET(
       aiSummary: profile?.aiSummary,
       topics: profile?.topics || [],
       enrichedAt: profile?.enrichedAt,
+      // Web enrichment fields
+      enrichedData: profile?.enrichedData,
+      enrichedConfidence: profile?.enrichedConfidence,
+      enrichedReasoning: profile?.enrichedReasoning,
+      enrichedSources: profile?.enrichedSources,
+      webEnrichedAt: profile?.webEnrichedAt,
       stats: {
         meetingCount: meetings.length,
         totalDuration,
