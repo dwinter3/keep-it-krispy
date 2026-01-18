@@ -6,6 +6,18 @@ frontend:
         - npm ci
     build:
       commands:
+        - echo "AUTH_SECRET=$AUTH_SECRET" >> .env.production
+        - echo "AUTH_URL=$AUTH_URL" >> .env.production
+        - echo "NEXTAUTH_SECRET=$NEXTAUTH_SECRET" >> .env.production
+        - echo "NEXTAUTH_URL=$NEXTAUTH_URL" >> .env.production
+        - echo "GOOGLE_CLIENT_ID=$GOOGLE_CLIENT_ID" >> .env.production
+        - echo "GOOGLE_CLIENT_SECRET=$GOOGLE_CLIENT_SECRET" >> .env.production
+        - echo "ALLOWED_EMAILS=$ALLOWED_EMAILS" >> .env.production
+        - echo "DYNAMODB_TABLE=$DYNAMODB_TABLE" >> .env.production
+        - echo "KRISP_S3_BUCKET=$KRISP_S3_BUCKET" >> .env.production
+        - echo "VECTOR_BUCKET=$VECTOR_BUCKET" >> .env.production
+        - echo "VECTOR_INDEX=$VECTOR_INDEX" >> .env.production
+        - echo "APP_REGION=$APP_REGION" >> .env.production
         - npm run build
   artifacts:
     baseDirectory: .next
