@@ -70,12 +70,28 @@ export async function GET(request: NextRequest) {
     // List transcripts with pagination using all-transcripts-index GSI
     const cursor = searchParams.get('cursor')
     const limit = Math.min(parseInt(searchParams.get('limit') || '25'), 100)
+    const includePrivate = searchParams.get('includePrivate') === 'true'
+    const onlyPrivate = searchParams.get('onlyPrivate') === 'true'
+
+    // Build filter expression for privacy
+    let filterExpression: string | undefined
+    const expressionAttrValues: Record<string, unknown> = { ':pk': 'TRANSCRIPT' }
+
+    if (onlyPrivate) {
+      filterExpression = 'isPrivate = :isPrivate'
+      expressionAttrValues[':isPrivate'] = true
+    } else if (!includePrivate) {
+      // By default, exclude private transcripts
+      filterExpression = 'attribute_not_exists(isPrivate) OR isPrivate = :isPrivate'
+      expressionAttrValues[':isPrivate'] = false
+    }
 
     const queryCommand = new QueryCommand({
       TableName: TABLE_NAME,
       IndexName: 'all-transcripts-index',
       KeyConditionExpression: 'pk = :pk',
-      ExpressionAttributeValues: { ':pk': 'TRANSCRIPT' },
+      ExpressionAttributeValues: expressionAttrValues,
+      ...(filterExpression && { FilterExpression: filterExpression }),
       ScanIndexForward: false, // Newest first (descending by timestamp)
       Limit: limit,
       ...(cursor && { ExclusiveStartKey: JSON.parse(Buffer.from(cursor, 'base64').toString('utf-8')) }),
@@ -96,6 +112,13 @@ export async function GET(request: NextRequest) {
       eventType: item.event_type,
       speakerCorrections: item.speaker_corrections || null,
       topic: item.topic || null,
+      isPrivate: item.isPrivate || false,
+      privacyLevel: item.privacy_level || null,
+      privacyReason: item.privacy_reason || null,
+      privacyTopics: item.privacy_topics || [],
+      privacyConfidence: item.privacy_confidence || null,
+      privacyWorkPercent: item.privacy_work_percent || null,
+      privacyDismissed: item.privacy_dismissed || false,
     }))
 
     // Build next cursor if there are more results

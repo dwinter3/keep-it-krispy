@@ -24,6 +24,13 @@ interface Transcript {
   eventType: string
   speakerCorrections: Record<string, SpeakerCorrection> | null
   topic?: string | null
+  isPrivate?: boolean
+  privacyLevel?: 'work' | 'work_with_private' | 'likely_private' | null
+  privacyReason?: string | null
+  privacyTopics?: string[]
+  privacyConfidence?: number | null
+  privacyWorkPercent?: number | null
+  privacyDismissed?: boolean
 }
 
 type DateFilter = 'all' | 'today' | 'week' | 'month'
@@ -54,6 +61,9 @@ export default function TranscriptsPage() {
   const [loadingContent, setLoadingContent] = useState(false)
   const [nextCursor, setNextCursor] = useState<string | null>(null)
   const [loadingMore, setLoadingMore] = useState(false)
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  const [isDeleting, setIsDeleting] = useState(false)
+  const [isUpdatingPrivacy, setIsUpdatingPrivacy] = useState(false)
 
   // Filter and sort state
   const [dateFilter, setDateFilter] = useState<DateFilter>('all')
@@ -103,6 +113,7 @@ export default function TranscriptsPage() {
     setSelectedTranscript(transcript)
     setLoadingContent(true)
     setTranscriptContent(null)
+    setShowDeleteConfirm(false)
 
     try {
       const res = await fetch(`/api/transcripts?key=${encodeURIComponent(transcript.key)}`)
@@ -116,7 +127,7 @@ export default function TranscriptsPage() {
     }
   }
 
-  // Handle speaker name save
+// Handle speaker name save
   async function handleSpeakerSave(newName: string) {
     if (!editingSpeaker || !selectedTranscript) return
 
@@ -193,6 +204,81 @@ export default function TranscriptsPage() {
       original: originalSpeaker,
       current: displayName
     })
+  }
+
+  async function handleDelete() {
+    if (!selectedTranscript) return
+    setIsDeleting(true)
+    try {
+      const res = await fetch(`/api/transcripts/${selectedTranscript.meetingId}`, {
+        method: 'DELETE',
+      })
+      if (!res.ok) throw new Error('Failed to delete transcript')
+
+      // Remove from local state
+      setTranscripts(prev => prev.filter(t => t.meetingId !== selectedTranscript.meetingId))
+      setSelectedTranscript(null)
+      setShowDeleteConfirm(false)
+    } catch (err) {
+      console.error('Error deleting transcript:', err)
+      alert('Failed to delete transcript. Please try again.')
+    } finally {
+      setIsDeleting(false)
+    }
+  }
+
+  async function handlePrivacyToggle(isPrivate: boolean) {
+    if (!selectedTranscript) return
+    setIsUpdatingPrivacy(true)
+    try {
+      const res = await fetch(`/api/transcripts/${selectedTranscript.meetingId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ isPrivate }),
+      })
+      if (!res.ok) throw new Error('Failed to update privacy')
+
+      // Update local state
+      setTranscripts(prev => prev.map(t =>
+        t.meetingId === selectedTranscript.meetingId
+          ? { ...t, isPrivate }
+          : t
+      ))
+      setSelectedTranscript(prev => prev ? { ...prev, isPrivate } : null)
+
+      // If marking as private, remove from main view
+      if (isPrivate) {
+        setTranscripts(prev => prev.filter(t => t.meetingId !== selectedTranscript.meetingId))
+        setSelectedTranscript(null)
+      }
+    } catch (err) {
+      console.error('Error updating privacy:', err)
+      alert('Failed to update privacy setting. Please try again.')
+    } finally {
+      setIsUpdatingPrivacy(false)
+    }
+  }
+
+  async function handleDismissPrivacyWarning() {
+    if (!selectedTranscript) return
+    try {
+      const res = await fetch(`/api/transcripts/${selectedTranscript.meetingId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ privacyDismissed: true }),
+      })
+      if (!res.ok) throw new Error('Failed to dismiss warning')
+
+      // Update local state
+      setTranscripts(prev => prev.map(t =>
+        t.meetingId === selectedTranscript.meetingId
+          ? { ...t, privacyDismissed: true }
+          : t
+      ))
+      setSelectedTranscript(prev => prev ? { ...prev, privacyDismissed: true } : null)
+    } catch (err) {
+      console.error('Error dismissing warning:', err)
+    }
   }
 
   function formatDate(dateStr: string, includeTime = false) {
@@ -728,6 +814,120 @@ export default function TranscriptsPage() {
                       </div>
                     </div>
                   )}
+
+                  {/* Privacy Warning Banner */}
+                  {selectedTranscript.privacyLevel &&
+                   selectedTranscript.privacyLevel !== 'work' &&
+                   !selectedTranscript.privacyDismissed && (
+                    <div className={`mb-4 p-3 rounded-lg border ${
+                      selectedTranscript.privacyLevel === 'likely_private'
+                        ? 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800'
+                        : 'bg-yellow-50 dark:bg-yellow-900/20 border-yellow-200 dark:border-yellow-800'
+                    }`}>
+                      <div className="flex items-start gap-3">
+                        <svg className={`w-5 h-5 mt-0.5 flex-shrink-0 ${
+                          selectedTranscript.privacyLevel === 'likely_private'
+                            ? 'text-red-600 dark:text-red-400'
+                            : 'text-yellow-600 dark:text-yellow-400'
+                        }`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                        </svg>
+                        <div className="flex-1 min-w-0">
+                          <p className={`text-sm font-medium ${
+                            selectedTranscript.privacyLevel === 'likely_private'
+                              ? 'text-red-800 dark:text-red-300'
+                              : 'text-yellow-800 dark:text-yellow-300'
+                          }`}>
+                            {selectedTranscript.privacyLevel === 'likely_private'
+                              ? 'This appears to be a private meeting'
+                              : 'This meeting may contain private content'}
+                          </p>
+                          {selectedTranscript.privacyReason && (
+                            <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">
+                              {selectedTranscript.privacyReason}
+                            </p>
+                          )}
+                          {selectedTranscript.privacyTopics && selectedTranscript.privacyTopics.length > 0 && (
+                            <div className="flex flex-wrap gap-1 mt-2">
+                              {selectedTranscript.privacyTopics.map((topic, i) => (
+                                <span key={i} className="text-xs px-2 py-0.5 bg-white/50 dark:bg-black/20 rounded">
+                                  {topic}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                          <div className="flex gap-2 mt-3">
+                            <button
+                              onClick={() => handlePrivacyToggle(true)}
+                              disabled={isUpdatingPrivacy}
+                              className="text-xs px-3 py-1.5 bg-gray-800 dark:bg-gray-700 text-white rounded hover:bg-gray-700 dark:hover:bg-gray-600 disabled:opacity-50"
+                            >
+                              Mark as Private
+                            </button>
+                            <button
+                              onClick={handleDismissPrivacyWarning}
+                              className="text-xs px-3 py-1.5 text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200"
+                            >
+                              Dismiss
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Privacy & Delete Actions */}
+                  <div className="mb-4 flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg border border-gray-100 dark:border-gray-600">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-gray-500 dark:text-gray-400">Privacy:</span>
+                      <button
+                        onClick={() => handlePrivacyToggle(!selectedTranscript.isPrivate)}
+                        disabled={isUpdatingPrivacy}
+                        className={`px-2.5 py-1 text-xs rounded-full flex items-center gap-1.5 transition-colors disabled:opacity-50 ${
+                          selectedTranscript.isPrivate
+                            ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400'
+                            : 'bg-gray-100 dark:bg-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-500'
+                        }`}
+                      >
+                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          {selectedTranscript.isPrivate ? (
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                          ) : (
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 11V7a4 4 0 118 0m-4 8v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z" />
+                          )}
+                        </svg>
+                        {selectedTranscript.isPrivate ? 'Private' : 'Public'}
+                      </button>
+                    </div>
+                    {!showDeleteConfirm ? (
+                      <button
+                        onClick={() => setShowDeleteConfirm(true)}
+                        className="text-xs text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 flex items-center gap-1"
+                      >
+                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                        </svg>
+                        Delete
+                      </button>
+                    ) : (
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-red-600 dark:text-red-400">Delete permanently?</span>
+                        <button
+                          onClick={handleDelete}
+                          disabled={isDeleting}
+                          className="text-xs px-2 py-1 bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50"
+                        >
+                          {isDeleting ? 'Deleting...' : 'Yes'}
+                        </button>
+                        <button
+                          onClick={() => setShowDeleteConfirm(false)}
+                          className="text-xs px-2 py-1 text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200"
+                        >
+                          No
+                        </button>
+                      </div>
+                    )}
+                  </div>
 
                   {loadingContent && (
                     <div className="flex items-center justify-center py-8">
