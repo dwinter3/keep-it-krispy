@@ -294,7 +294,16 @@ export default function SpeakerProfilePage({ params }: { params: Promise<{ name:
 
                   {(effectiveRole || effectiveCompany) && (
                     <p className="text-zinc-400 mb-2">
-                      {effectiveRole}{effectiveRole && effectiveCompany && ' at '}{effectiveCompany}
+                      {effectiveRole}
+                      {effectiveRole && effectiveCompany && ' at '}
+                      {effectiveCompany && (
+                        <Link
+                          href={`/companies?search=${encodeURIComponent(effectiveCompany)}`}
+                          className="text-blue-400 hover:text-blue-300 hover:underline transition-colors"
+                        >
+                          {effectiveCompany}
+                        </Link>
+                      )}
                     </p>
                   )}
 
