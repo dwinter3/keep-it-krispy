@@ -62,6 +62,18 @@ The MCP server provides three tools to Claude:
 
 ---
 
+## Web Dashboard
+
+A companion web dashboard is available at **[main.dh65gpsgmkx3x.amplifyapp.com](https://main.dh65gpsgmkx3x.amplifyapp.com)**:
+
+- **Transcripts Browser** (`/transcripts`) — Browse all your meetings with pagination and search
+- **Speakers Directory** (`/speakers`) — See everyone you've met with, ranked by meeting frequency
+- **Speaker Profiles** — View meeting history, AI-generated bios, and topic analysis for each person
+
+The dashboard runs on AWS Amplify and reads from the same DynamoDB/S3 backend as the MCP server.
+
+---
+
 ## Quick Start
 
 ### Prerequisites
