@@ -219,31 +219,39 @@ export default function TranscriptsPage() {
   return (
     <Shell>
       <div className="max-w-6xl">
+        {/* Page header */}
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h1 className="text-3xl font-bold mb-2">Transcripts</h1>
-            <p className="text-zinc-400">All your meeting transcripts</p>
+            <h1 className="text-2xl font-semibold text-gray-900 dark:text-white">Transcripts</h1>
+            <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">All your meeting transcripts</p>
           </div>
-          <div className="text-sm text-zinc-500">
+          <span className="text-sm text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-700 px-3 py-1 rounded-full">
             {transcripts.length} transcripts
-          </div>
+          </span>
         </div>
 
         {loading && (
-          <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-8 text-center">
-            <div className="animate-pulse text-zinc-400">Loading transcripts...</div>
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-8 text-center">
+            <div className="flex items-center justify-center">
+              <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary-600"></div>
+              <span className="ml-3 text-gray-500 dark:text-gray-400">Loading transcripts...</span>
+            </div>
           </div>
         )}
 
         {error && (
-          <div className="bg-red-900/20 border border-red-800 rounded-xl p-4 text-red-400">
+          <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4 text-red-600 dark:text-red-400">
             Error: {error}
           </div>
         )}
 
         {!loading && !error && transcripts.length === 0 && (
-          <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-8 text-center text-zinc-400">
-            No transcripts found. Transcripts will appear here when Krisp sends webhook data.
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-8 text-center">
+            <svg className="mx-auto h-12 w-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+            <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">No transcripts found</p>
+            <p className="text-xs text-gray-400 dark:text-gray-500">Transcripts will appear here when Krisp sends webhook data</p>
           </div>
         )}
 
@@ -251,7 +259,7 @@ export default function TranscriptsPage() {
           <div className="flex gap-6">
             {/* Transcript list */}
             <div className={`${selectedTranscript ? 'w-1/2' : 'w-full'} transition-all`}>
-              <div className="bg-zinc-900 rounded-xl border border-zinc-800 overflow-hidden">
+              <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden">
                 {/* Group transcripts by date */}
                 {(() => {
                   const grouped = transcripts.reduce((acc, t) => {
@@ -264,22 +272,22 @@ export default function TranscriptsPage() {
                   return Object.entries(grouped).map(([date, items], groupIndex) => (
                     <div key={date}>
                       {/* Date header */}
-                      <div className={`px-4 py-2 bg-zinc-800/50 text-sm font-medium text-zinc-400 ${groupIndex > 0 ? 'border-t border-zinc-700' : ''}`}>
+                      <div className={`px-4 py-2 bg-gray-50 dark:bg-gray-700/50 text-sm font-medium text-gray-600 dark:text-gray-300 ${groupIndex > 0 ? 'border-t border-gray-200 dark:border-gray-700' : ''}`}>
                         {date}
                       </div>
                       {/* Transcript items for this date */}
-                      <div className="divide-y divide-zinc-800">
+                      <div className="divide-y divide-gray-100 dark:divide-gray-700">
                         {items.map((transcript) => (
                           <div
                             key={transcript.key}
                             onClick={() => viewTranscript(transcript)}
                             className={`px-4 py-3 cursor-pointer transition-colors ${
                               selectedTranscript?.key === transcript.key
-                                ? 'bg-zinc-800'
-                                : 'hover:bg-zinc-800/50'
+                                ? 'bg-primary-50 dark:bg-primary-900/20'
+                                : 'hover:bg-gray-50 dark:hover:bg-gray-700/50'
                             }`}
                           >
-                            <div className="font-medium text-white">
+                            <div className="font-medium text-gray-900 dark:text-white">
                               {buildRichTitle(transcript)}
                             </div>
                           </div>
@@ -291,15 +299,15 @@ export default function TranscriptsPage() {
 
                 {/* Load More Button */}
                 {nextCursor && (
-                  <div className="p-4 border-t border-zinc-800">
+                  <div className="p-4 border-t border-gray-200 dark:border-gray-700">
                     <button
                       onClick={() => fetchTranscripts(nextCursor)}
                       disabled={loadingMore}
-                      className="w-full py-2 px-4 bg-zinc-800 hover:bg-zinc-700 disabled:bg-zinc-800 disabled:opacity-50 rounded-lg text-sm text-zinc-300 transition-colors flex items-center justify-center gap-2"
+                      className="w-full py-2 px-4 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 disabled:bg-gray-100 dark:disabled:bg-gray-700 disabled:opacity-50 rounded-lg text-sm text-gray-700 dark:text-gray-300 transition-colors flex items-center justify-center gap-2"
                     >
                       {loadingMore ? (
                         <>
-                          <span className="animate-spin">&#8635;</span>
+                          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-gray-600 dark:border-gray-300"></div>
                           Loading...
                         </>
                       ) : (
@@ -314,32 +322,34 @@ export default function TranscriptsPage() {
             {/* Transcript detail panel */}
             {selectedTranscript && (
               <div className="w-1/2">
-                <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-4 sticky top-4">
+                <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-4 sticky top-4">
                   <div className="flex items-center justify-between mb-4">
-                    <h2 className="text-lg font-semibold">{selectedTranscript.title}</h2>
+                    <h2 className="text-lg font-semibold text-gray-900 dark:text-white">{selectedTranscript.title}</h2>
                     <button
                       onClick={() => setSelectedTranscript(null)}
-                      className="text-zinc-400 hover:text-white text-xl"
+                      className="text-gray-400 hover:text-gray-600 dark:hover:text-white text-xl p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded"
                     >
-                      &times;
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                      </svg>
                     </button>
                   </div>
 
                   <div className="flex flex-wrap gap-2 mb-4 text-sm">
-                    <span className="px-2 py-1 bg-zinc-800 rounded text-zinc-400">
+                    <span className="px-2.5 py-1 bg-gray-100 dark:bg-gray-700 rounded-full text-gray-600 dark:text-gray-300">
                       {formatDate(selectedTranscript.timestamp || selectedTranscript.date, true)}
                     </span>
-                    <span className="px-2 py-1 bg-zinc-800 rounded text-zinc-400">
+                    <span className="px-2.5 py-1 bg-gray-100 dark:bg-gray-700 rounded-full text-gray-600 dark:text-gray-300">
                       {formatDurationLong(selectedTranscript.duration)}
                     </span>
-                    <span className="px-2 py-1 bg-purple-500/20 text-purple-400 rounded">
+                    <span className="px-2.5 py-1 bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 rounded-full">
                       {selectedTranscript.eventType?.replace(/_/g, ' ') || 'Krisp'}
                     </span>
                   </div>
 
                   {selectedTranscript.speakers.length > 0 && (
                     <div className="mb-4">
-                      <h3 className="text-sm font-medium text-zinc-300 mb-2">Speakers</h3>
+                      <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Speakers</h3>
                       <div className="flex flex-wrap gap-2">
                         {selectedTranscript.speakers.map((speaker, i) => {
                           const { displayName, wasCorrected, linkedin } = applySpeakerCorrection(
@@ -350,10 +360,10 @@ export default function TranscriptsPage() {
                             <Link
                               key={i}
                               href={`/speakers/${encodeURIComponent(displayName)}`}
-                              className={`px-2 py-1 rounded text-sm inline-flex items-center gap-1.5 hover:opacity-80 transition-opacity ${
+                              className={`px-2.5 py-1 rounded-full text-sm inline-flex items-center gap-1.5 hover:opacity-80 transition-opacity ${
                                 wasCorrected
-                                  ? 'bg-green-500/20 text-green-400'
-                                  : 'bg-blue-500/20 text-blue-400'
+                                  ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400'
+                                  : 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-400'
                               }`}
                               title={wasCorrected ? `Corrected from: ${speaker}` : `View ${displayName}'s profile`}
                             >
@@ -386,8 +396,9 @@ export default function TranscriptsPage() {
                   )}
 
                   {loadingContent && (
-                    <div className="animate-pulse text-zinc-400 py-8 text-center">
-                      Loading content...
+                    <div className="flex items-center justify-center py-8">
+                      <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary-600"></div>
+                      <span className="ml-3 text-gray-500 dark:text-gray-400">Loading content...</span>
                     </div>
                   )}
 
@@ -416,9 +427,9 @@ function TranscriptDetail({ data }: { data: TranscriptContent }) {
       {/* Summary */}
       {summary && (
         <div>
-          <h3 className="text-zinc-300 font-medium mb-2">Summary</h3>
-          <div className="bg-zinc-800 rounded p-3 max-h-32 overflow-y-auto">
-            <p className="text-zinc-400 whitespace-pre-wrap text-xs">{summary}</p>
+          <h3 className="text-gray-700 dark:text-gray-300 font-medium mb-2">Summary</h3>
+          <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3 max-h-32 overflow-y-auto border border-gray-100 dark:border-gray-600">
+            <p className="text-gray-600 dark:text-gray-400 whitespace-pre-wrap text-xs">{summary}</p>
           </div>
         </div>
       )}
@@ -426,9 +437,9 @@ function TranscriptDetail({ data }: { data: TranscriptContent }) {
       {/* Transcript */}
       {transcript && (
         <div>
-          <h3 className="text-zinc-300 font-medium mb-2">Full Transcript</h3>
-          <div className="bg-zinc-800 rounded p-3 max-h-64 overflow-y-auto">
-            <p className="text-zinc-400 whitespace-pre-wrap text-xs">{transcript}</p>
+          <h3 className="text-gray-700 dark:text-gray-300 font-medium mb-2">Full Transcript</h3>
+          <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3 max-h-64 overflow-y-auto border border-gray-100 dark:border-gray-600">
+            <p className="text-gray-600 dark:text-gray-400 whitespace-pre-wrap text-xs">{transcript}</p>
           </div>
         </div>
       )}
@@ -436,8 +447,8 @@ function TranscriptDetail({ data }: { data: TranscriptContent }) {
       {/* Raw JSON fallback */}
       {!summary && !transcript && (
         <div>
-          <h3 className="text-zinc-300 font-medium mb-2">Raw Data</h3>
-          <pre className="bg-zinc-800 rounded p-3 overflow-auto max-h-64 text-xs text-zinc-400">
+          <h3 className="text-gray-700 dark:text-gray-300 font-medium mb-2">Raw Data</h3>
+          <pre className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3 overflow-auto max-h-64 text-xs text-gray-600 dark:text-gray-400 border border-gray-100 dark:border-gray-600">
             {JSON.stringify(data, null, 2)}
           </pre>
         </div>
