@@ -76,6 +76,60 @@ function SearchPageContent() {
   const [speakers, setSpeakers] = useState<Speaker[]>([])
   const [activeFilters, setActiveFilters] = useState<SearchFilters>({ speaker: null, from: null, to: null })
 
+  // Multi-select state
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [isBulkDeleting, setIsBulkDeleting] = useState(false)
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+
+  function toggleSelection(meetingId: string) {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      if (next.has(meetingId)) {
+        next.delete(meetingId)
+      } else {
+        next.add(meetingId)
+      }
+      return next
+    })
+  }
+
+  function toggleSelectAll() {
+    if (selectedIds.size === results.length) {
+      setSelectedIds(new Set())
+    } else {
+      setSelectedIds(new Set(results.map(r => r.meetingId)))
+    }
+  }
+
+  function clearSelection() {
+    setSelectedIds(new Set())
+  }
+
+  async function handleBulkDelete() {
+    if (selectedIds.size === 0) return
+    setIsBulkDeleting(true)
+    try {
+      const res = await fetch('/api/transcripts/bulk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'delete',
+          meetingIds: Array.from(selectedIds),
+        }),
+      })
+      if (!res.ok) throw new Error('Failed to delete')
+      // Remove deleted items from results
+      setResults(prev => prev.filter(r => !selectedIds.has(r.meetingId)))
+      clearSelection()
+      setShowDeleteConfirm(false)
+    } catch (err) {
+      alert('Failed to delete transcripts. Please try again.')
+      console.error(err)
+    } finally {
+      setIsBulkDeleting(false)
+    }
+  }
+
   // Auto-focus search input on page load
   useEffect(() => {
     if (searchInputRef.current) {
@@ -369,6 +423,69 @@ function SearchPageContent() {
           </div>
         )}
 
+        {/* Bulk action bar */}
+        {selectedIds.size > 0 && (
+          <div className="mb-4 p-3 bg-zinc-800 border border-zinc-700 rounded-xl flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <button
+                onClick={toggleSelectAll}
+                className="w-5 h-5 rounded border-2 border-zinc-500 flex items-center justify-center bg-blue-600"
+              >
+                {selectedIds.size === results.length ? (
+                  <svg className="w-3 h-3 text-white" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                  </svg>
+                ) : (
+                  <svg className="w-3 h-3 text-white" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M3 10a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z" clipRule="evenodd" />
+                  </svg>
+                )}
+              </button>
+              <span className="text-sm text-zinc-300">{selectedIds.size} selected</span>
+            </div>
+            <div className="flex items-center gap-2">
+              {showDeleteConfirm ? (
+                <>
+                  <span className="text-sm text-red-400 mr-2">Delete {selectedIds.size} permanently?</span>
+                  <button
+                    onClick={handleBulkDelete}
+                    disabled={isBulkDeleting}
+                    className="px-3 py-1.5 bg-red-600 hover:bg-red-700 disabled:bg-red-800 text-white text-sm rounded-lg"
+                  >
+                    {isBulkDeleting ? 'Deleting...' : 'Yes, Delete'}
+                  </button>
+                  <button
+                    onClick={() => setShowDeleteConfirm(false)}
+                    className="px-3 py-1.5 bg-zinc-700 hover:bg-zinc-600 text-white text-sm rounded-lg"
+                  >
+                    No
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    onClick={() => setShowDeleteConfirm(true)}
+                    className="px-3 py-1.5 bg-red-600/20 hover:bg-red-600/30 text-red-400 text-sm rounded-lg flex items-center gap-1"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                    </svg>
+                    Delete
+                  </button>
+                  <button
+                    onClick={clearSelection}
+                    className="p-1.5 text-zinc-400 hover:text-white"
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Results */}
         {!loading && searched && (
           <div>
@@ -388,7 +505,15 @@ function SearchPageContent() {
             ) : (
               <div className="space-y-4">
                 {results.map((result) => (
-                  <SearchResultCard key={result.meetingId} result={result} formatDate={formatDate} formatDuration={formatDuration} query={query} />
+                  <SearchResultCard
+                    key={result.meetingId}
+                    result={result}
+                    formatDate={formatDate}
+                    formatDuration={formatDuration}
+                    query={query}
+                    isSelected={selectedIds.has(result.meetingId)}
+                    onToggleSelect={() => toggleSelection(result.meetingId)}
+                  />
                 ))}
               </div>
             )}
@@ -431,11 +556,15 @@ function SearchResultCard({
   formatDate,
   formatDuration,
   query,
+  isSelected,
+  onToggleSelect,
 }: {
   result: SearchResult
   formatDate: (s: string) => string
   formatDuration: (n: number) => string
   query?: string
+  isSelected?: boolean
+  onToggleSelect?: () => void
 }) {
   const [expanded, setExpanded] = useState(false)
 
@@ -458,85 +587,100 @@ function SearchResultCard({
   }
 
   return (
-    <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-4 hover:border-zinc-700 transition-colors">
-      <div className="flex items-start justify-between mb-2">
-        <div className="flex-1">
-          <h3 className="font-medium text-white mb-1">{result.topic || result.title}</h3>
-          <div className="flex flex-wrap items-center gap-2 text-sm text-zinc-500 mb-1">
-            <span>{result.title}</span>
-          </div>
-          <div className="flex flex-wrap items-center gap-2 text-sm text-zinc-500">
-            <span>{formatDate(result.date)}</span>
-            {result.duration > 0 && (
-              <>
-                <span className="text-zinc-600">|</span>
-                <span>{formatDuration(result.duration)}</span>
-              </>
-            )}
-            <span className="text-zinc-600">|</span>
-            <span>{result.matchingChunks} matching section{result.matchingChunks !== 1 ? 's' : ''}</span>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className={`px-2 py-1 rounded text-xs font-medium ${
-            result.relevanceScore >= 80 ? 'bg-green-500/20 text-green-400' :
-            result.relevanceScore >= 50 ? 'bg-yellow-500/20 text-yellow-400' :
-            'bg-zinc-700 text-zinc-400'
-          }`}>
-            {result.relevanceScore}% match
-          </span>
-        </div>
-      </div>
-
-      {/* Speakers */}
-      {result.speakers.length > 0 && (
-        <div className="flex flex-wrap gap-1 mb-3">
-          {result.speakers.map((speaker, i) => (
-            <span key={i} className="px-2 py-0.5 bg-blue-500/20 text-blue-400 rounded text-xs">
-              {speaker}
-            </span>
-          ))}
-        </div>
-      )}
-
-      {/* Snippets */}
-      {result.snippets.length > 0 && (
-        <div className="mt-3">
-          <button
-            onClick={() => setExpanded(!expanded)}
-            className="text-xs text-zinc-500 hover:text-zinc-300 mb-2 flex items-center gap-1"
-          >
-            <svg
-              className={`w-3 h-3 transition-transform ${expanded ? 'rotate-90' : ''}`}
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+    <div className={`bg-zinc-900 rounded-xl border p-4 hover:border-zinc-700 transition-colors ${isSelected ? 'border-blue-500 bg-blue-900/10' : 'border-zinc-800'}`}>
+      <div className="flex items-start gap-3">
+        {/* Checkbox */}
+        <button
+          onClick={(e) => { e.stopPropagation(); onToggleSelect?.() }}
+          className={`mt-1 w-5 h-5 rounded border-2 flex-shrink-0 flex items-center justify-center transition-colors ${
+            isSelected ? 'bg-blue-600 border-blue-600' : 'border-zinc-600 hover:border-zinc-400'
+          }`}
+        >
+          {isSelected && (
+            <svg className="w-3 h-3 text-white" fill="currentColor" viewBox="0 0 20 20">
+              <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
             </svg>
-            {expanded ? 'Hide' : 'Show'} matching excerpts
-          </button>
+          )}
+        </button>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-start justify-between mb-2">
+            <div>
+              <h3 className="font-medium text-white mb-1">{result.topic || result.title}</h3>
+              <div className="flex flex-wrap items-center gap-2 text-sm text-zinc-500 mb-1">
+                <span>{result.title}</span>
+              </div>
+              <div className="flex flex-wrap items-center gap-2 text-sm text-zinc-500">
+                <span>{formatDate(result.date)}</span>
+                {result.duration > 0 && (
+                  <>
+                    <span className="text-zinc-600">|</span>
+                    <span>{formatDuration(result.duration)}</span>
+                  </>
+                )}
+                <span className="text-zinc-600">|</span>
+                <span>{result.matchingChunks} matching section{result.matchingChunks !== 1 ? 's' : ''}</span>
+              </div>
+            </div>
+            <span className={`px-2 py-1 rounded text-xs font-medium flex-shrink-0 ${
+              result.relevanceScore >= 80 ? 'bg-green-500/20 text-green-400' :
+              result.relevanceScore >= 50 ? 'bg-yellow-500/20 text-yellow-400' :
+              'bg-zinc-700 text-zinc-400'
+            }`}>
+              {result.relevanceScore}% match
+            </span>
+          </div>
 
-          {expanded && (
-            <div className="space-y-2">
-              {result.snippets.map((snippet, i) => (
-                <div key={i} className="bg-zinc-800 rounded p-3 text-xs text-zinc-400 border-l-2 border-blue-500">
-                  &quot;{highlightText(snippet.slice(0, 300), query || '')}{snippet.length > 300 ? '...' : ''}&quot;
-                </div>
+          {/* Speakers */}
+          {result.speakers.length > 0 && (
+            <div className="flex flex-wrap gap-1 mb-3">
+              {result.speakers.map((speaker, i) => (
+                <span key={i} className="px-2 py-0.5 bg-blue-500/20 text-blue-400 rounded text-xs">
+                  {speaker}
+                </span>
               ))}
             </div>
           )}
-        </div>
-      )}
 
-      {/* View transcript link */}
-      <div className="mt-3 pt-3 border-t border-zinc-800">
-        <a
-          href={`/transcripts?view=${result.meetingId}`}
-          className="text-sm text-blue-400 hover:text-blue-300"
-        >
-          View full transcript →
-        </a>
+          {/* Snippets */}
+          {result.snippets.length > 0 && (
+            <div className="mt-3">
+              <button
+                onClick={() => setExpanded(!expanded)}
+                className="text-xs text-zinc-500 hover:text-zinc-300 mb-2 flex items-center gap-1"
+              >
+                <svg
+                  className={`w-3 h-3 transition-transform ${expanded ? 'rotate-90' : ''}`}
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                </svg>
+                {expanded ? 'Hide' : 'Show'} matching excerpts
+              </button>
+
+              {expanded && (
+                <div className="space-y-2">
+                  {result.snippets.map((snippet, i) => (
+                    <div key={i} className="bg-zinc-800 rounded p-3 text-xs text-zinc-400 border-l-2 border-blue-500">
+                      &quot;{highlightText(snippet.slice(0, 300), query || '')}{snippet.length > 300 ? '...' : ''}&quot;
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* View transcript link */}
+          <div className="mt-3 pt-3 border-t border-zinc-800">
+            <a
+              href={`/transcripts?view=${result.meetingId}`}
+              className="text-sm text-blue-400 hover:text-blue-300"
+            >
+              View full transcript →
+            </a>
+          </div>
+        </div>
       </div>
     </div>
   )

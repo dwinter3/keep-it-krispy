@@ -26,6 +26,64 @@ export default function DashboardPage() {
   const [recentTranscripts, setRecentTranscripts] = useState<Transcript[]>([])
   const [loading, setLoading] = useState(true)
 
+  // Multi-select state
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [isBulkDeleting, setIsBulkDeleting] = useState(false)
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+
+  function toggleSelection(meetingId: string) {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      if (next.has(meetingId)) {
+        next.delete(meetingId)
+      } else {
+        next.add(meetingId)
+      }
+      return next
+    })
+  }
+
+  function toggleSelectAll() {
+    if (selectedIds.size === recentTranscripts.length) {
+      setSelectedIds(new Set())
+    } else {
+      setSelectedIds(new Set(recentTranscripts.map(t => t.meetingId)))
+    }
+  }
+
+  function clearSelection() {
+    setSelectedIds(new Set())
+  }
+
+  async function handleBulkDelete() {
+    if (selectedIds.size === 0) return
+    setIsBulkDeleting(true)
+    try {
+      const res = await fetch('/api/transcripts/bulk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'delete',
+          meetingIds: Array.from(selectedIds),
+        }),
+      })
+      if (!res.ok) throw new Error('Failed to delete')
+      // Remove deleted items from transcripts
+      setRecentTranscripts(prev => prev.filter(t => !selectedIds.has(t.meetingId)))
+      // Update stats count
+      if (stats) {
+        setStats(prev => prev ? { ...prev, totalTranscripts: prev.totalTranscripts - selectedIds.size } : null)
+      }
+      clearSelection()
+      setShowDeleteConfirm(false)
+    } catch (err) {
+      alert('Failed to delete transcripts. Please try again.')
+      console.error(err)
+    } finally {
+      setIsBulkDeleting(false)
+    }
+  }
+
   useEffect(() => {
     async function fetchData() {
       try {
@@ -151,6 +209,69 @@ export default function DashboardPage() {
           />
         </div>
 
+        {/* Bulk action bar */}
+        {selectedIds.size > 0 && (
+          <div className="mb-4 p-3 bg-gray-100 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <button
+                onClick={toggleSelectAll}
+                className="w-5 h-5 rounded border-2 border-gray-400 dark:border-gray-500 flex items-center justify-center bg-primary-600"
+              >
+                {selectedIds.size === recentTranscripts.length ? (
+                  <svg className="w-3 h-3 text-white" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                  </svg>
+                ) : (
+                  <svg className="w-3 h-3 text-white" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M3 10a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z" clipRule="evenodd" />
+                  </svg>
+                )}
+              </button>
+              <span className="text-sm text-gray-700 dark:text-gray-300">{selectedIds.size} selected</span>
+            </div>
+            <div className="flex items-center gap-2">
+              {showDeleteConfirm ? (
+                <>
+                  <span className="text-sm text-red-600 dark:text-red-400 mr-2">Delete {selectedIds.size} permanently?</span>
+                  <button
+                    onClick={handleBulkDelete}
+                    disabled={isBulkDeleting}
+                    className="px-3 py-1.5 bg-red-600 hover:bg-red-700 disabled:bg-red-800 text-white text-sm rounded-lg"
+                  >
+                    {isBulkDeleting ? 'Deleting...' : 'Yes, Delete'}
+                  </button>
+                  <button
+                    onClick={() => setShowDeleteConfirm(false)}
+                    className="px-3 py-1.5 bg-gray-200 hover:bg-gray-300 dark:bg-gray-600 dark:hover:bg-gray-500 text-gray-700 dark:text-white text-sm rounded-lg"
+                  >
+                    No
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    onClick={() => setShowDeleteConfirm(true)}
+                    className="px-3 py-1.5 bg-red-100 hover:bg-red-200 dark:bg-red-900/30 dark:hover:bg-red-900/50 text-red-600 dark:text-red-400 text-sm rounded-lg flex items-center gap-1"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                    </svg>
+                    Delete
+                  </button>
+                  <button
+                    onClick={clearSelection}
+                    className="p-1.5 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-white"
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Recent transcripts */}
         <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700">
           <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-gray-700">
@@ -178,12 +299,25 @@ export default function DashboardPage() {
               <div className="flow-root">
                 <ul className="-my-3 divide-y divide-gray-200 dark:divide-gray-700">
                   {recentTranscripts.map((transcript) => (
-                    <li key={transcript.key}>
-                      <Link
-                        href={`/transcripts?view=${transcript.meetingId}`}
-                        className="block py-3 hover:bg-gray-50 dark:hover:bg-gray-700/50 -mx-2 px-2 rounded-lg transition-colors"
-                      >
-                        <div className="flex-1 min-w-0">
+                    <li key={transcript.key} className="relative">
+                      <div className={`flex items-start gap-3 py-3 -mx-2 px-2 rounded-lg transition-colors ${selectedIds.has(transcript.meetingId) ? 'bg-primary-50 dark:bg-primary-900/20' : 'hover:bg-gray-50 dark:hover:bg-gray-700/50'}`}>
+                        {/* Checkbox */}
+                        <button
+                          onClick={(e) => { e.stopPropagation(); toggleSelection(transcript.meetingId) }}
+                          className={`mt-1 w-5 h-5 rounded border-2 flex-shrink-0 flex items-center justify-center transition-colors ${
+                            selectedIds.has(transcript.meetingId) ? 'bg-primary-600 border-primary-600' : 'border-gray-300 dark:border-gray-600 hover:border-gray-400 dark:hover:border-gray-500'
+                          }`}
+                        >
+                          {selectedIds.has(transcript.meetingId) && (
+                            <svg className="w-3 h-3 text-white" fill="currentColor" viewBox="0 0 20 20">
+                              <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                            </svg>
+                          )}
+                        </button>
+                        <Link
+                          href={`/transcripts?view=${transcript.meetingId}`}
+                          className="flex-1 min-w-0"
+                        >
                           {/* Topic as main title if available, otherwise use meeting title */}
                           <p className="text-sm font-medium text-gray-900 dark:text-white truncate">
                             {transcript.topic || transcript.title || 'Untitled Meeting'}
@@ -216,8 +350,8 @@ export default function DashboardPage() {
                               </>
                             )}
                           </div>
-                        </div>
-                      </Link>
+                        </Link>
+                      </div>
                     </li>
                   ))}
                 </ul>
