@@ -23,6 +23,12 @@ export default function SpeakersPage() {
   const [speakers, setSpeakers] = useState<Speaker[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [searchQuery, setSearchQuery] = useState('')
+
+  // Filter speakers by search query
+  const filteredSpeakers = speakers.filter(speaker =>
+    speaker.name.toLowerCase().includes(searchQuery.toLowerCase())
+  )
 
   useEffect(() => {
     async function fetchSpeakers() {
@@ -52,6 +58,36 @@ export default function SpeakersPage() {
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Your contacts from meeting transcripts</p>
         </div>
 
+        {/* Search input */}
+        {!loading && speakers.length > 0 && (
+          <div className="mb-6">
+            <div className="relative max-w-md">
+              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                <svg className="h-5 w-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                </svg>
+              </div>
+              <input
+                type="text"
+                placeholder="Search speakers..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="block w-full pl-10 pr-10 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+              />
+              {searchQuery && (
+                <button
+                  onClick={() => setSearchQuery('')}
+                  className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                >
+                  <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
         {loading && (
           <div className="flex items-center justify-center py-12">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>
@@ -78,12 +114,28 @@ export default function SpeakersPage() {
 
         {!loading && !error && speakers.length > 0 && (
           <>
-            <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">{speakers.length} speakers found</p>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {speakers.map((speaker) => (
-                <SpeakerCard key={speaker.name} speaker={speaker} />
-              ))}
-            </div>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+              {searchQuery
+                ? `${filteredSpeakers.length} of ${speakers.length} speakers`
+                : `${speakers.length} speakers found`}
+            </p>
+            {filteredSpeakers.length === 0 ? (
+              <div className="text-center py-8 bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700">
+                <p className="text-gray-500 dark:text-gray-400">No speakers match &quot;{searchQuery}&quot;</p>
+                <button
+                  onClick={() => setSearchQuery('')}
+                  className="mt-2 text-sm text-primary-600 hover:text-primary-700"
+                >
+                  Clear search
+                </button>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {filteredSpeakers.map((speaker) => (
+                  <SpeakerCard key={speaker.name} speaker={speaker} />
+                ))}
+              </div>
+            )}
           </>
         )}
       </div>
