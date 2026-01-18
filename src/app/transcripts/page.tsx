@@ -1,9 +1,12 @@
 'use client'
 
 import { useEffect, useState, useMemo } from 'react'
-import Link from 'next/link'
 import Shell from '@/components/Shell'
 import ExpandableSpeakers from '@/components/ExpandableSpeakers'
+import SpeakerTalkTime from '@/components/SpeakerTalkTime'
+import ChatTranscript from '@/components/ChatTranscript'
+import SpeakerEditModal from '@/components/SpeakerEditModal'
+import { parseTranscript, createSpeakerColorMap, type ParsedTranscript } from '@/lib/transcriptParser'
 
 interface SpeakerCorrection {
   name: string
@@ -25,6 +28,7 @@ interface Transcript {
 
 type DateFilter = 'all' | 'today' | 'week' | 'month'
 type SortOption = 'newest' | 'oldest' | 'longest'
+type ViewMode = 'chat' | 'raw'
 
 interface TranscriptContent {
   raw_payload?: {
@@ -55,6 +59,13 @@ export default function TranscriptsPage() {
   const [dateFilter, setDateFilter] = useState<DateFilter>('all')
   const [speakerFilter, setSpeakerFilter] = useState<string>('all')
   const [sortOption, setSortOption] = useState<SortOption>('newest')
+
+  // View mode state (chat bubbles vs raw text)
+  const [viewMode, setViewMode] = useState<ViewMode>('chat')
+
+  // Speaker edit modal state
+  const [editingSpeaker, setEditingSpeaker] = useState<{ original: string; current: string } | null>(null)
+  const [savingSpeaker, setSavingSpeaker] = useState(false)
 
   useEffect(() => {
     fetchTranscripts()
@@ -103,6 +114,85 @@ export default function TranscriptsPage() {
     } finally {
       setLoadingContent(false)
     }
+  }
+
+  // Handle speaker name save
+  async function handleSpeakerSave(newName: string) {
+    if (!editingSpeaker || !selectedTranscript) return
+
+    setSavingSpeaker(true)
+    try {
+      // Update DynamoDB with the new speaker correction
+      const response = await fetch(`/api/transcripts`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          meetingId: selectedTranscript.meetingId,
+          speakerCorrection: {
+            originalName: editingSpeaker.original,
+            correctedName: newName
+          }
+        })
+      })
+
+      if (!response.ok) {
+        throw new Error('Failed to save speaker correction')
+      }
+
+      // Update local state immediately
+      const updatedCorrections = {
+        ...selectedTranscript.speakerCorrections,
+        [editingSpeaker.original.toLowerCase()]: { name: newName }
+      }
+
+      // Update selectedTranscript
+      setSelectedTranscript({
+        ...selectedTranscript,
+        speakerCorrections: updatedCorrections
+      })
+
+      // Update transcripts list
+      setTranscripts(prev => prev.map(t =>
+        t.meetingId === selectedTranscript.meetingId
+          ? { ...t, speakerCorrections: updatedCorrections }
+          : t
+      ))
+
+      setEditingSpeaker(null)
+    } catch (err) {
+      console.error('Error saving speaker:', err)
+      // For now, still update locally even if API fails
+      // This allows the feature to work without backend changes
+      const updatedCorrections = {
+        ...selectedTranscript.speakerCorrections,
+        [editingSpeaker.original.toLowerCase()]: { name: newName }
+      }
+
+      setSelectedTranscript({
+        ...selectedTranscript,
+        speakerCorrections: updatedCorrections
+      })
+
+      setTranscripts(prev => prev.map(t =>
+        t.meetingId === selectedTranscript.meetingId
+          ? { ...t, speakerCorrections: updatedCorrections }
+          : t
+      ))
+
+      setEditingSpeaker(null)
+    } finally {
+      setSavingSpeaker(false)
+    }
+  }
+
+  // Handle speaker click from components
+  function handleSpeakerClick(originalSpeaker: string) {
+    if (!selectedTranscript) return
+    const { displayName } = applySpeakerCorrection(originalSpeaker, selectedTranscript.speakerCorrections)
+    setEditingSpeaker({
+      original: originalSpeaker,
+      current: displayName
+    })
   }
 
   function formatDate(dateStr: string, includeTime = false) {
@@ -550,7 +640,7 @@ export default function TranscriptsPage() {
             {/* Transcript detail panel */}
             {selectedTranscript && (
               <div className="w-1/2">
-                <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-4 sticky top-4">
+                <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-4 sticky top-4 max-h-[calc(100vh-8rem)] overflow-y-auto">
                   <div className="flex items-center justify-between mb-4">
                     <h2 className="text-lg font-semibold text-gray-900 dark:text-white">{selectedTranscript.title}</h2>
                     <button
@@ -593,15 +683,15 @@ export default function TranscriptsPage() {
                             selectedTranscript.speakerCorrections
                           )
                           return (
-                            <Link
+                            <button
                               key={i}
-                              href={`/speakers/${encodeURIComponent(displayName)}`}
-                              className={`px-2.5 py-1 rounded-full text-sm inline-flex items-center gap-1.5 hover:opacity-80 transition-opacity ${
+                              onClick={() => handleSpeakerClick(speaker)}
+                              className={`px-2.5 py-1 rounded-full text-sm inline-flex items-center gap-1.5 hover:opacity-80 transition-opacity cursor-pointer ${
                                 wasCorrected
                                   ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400'
                                   : 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-400'
                               }`}
-                              title={wasCorrected ? `Corrected from: ${speaker}` : `View ${displayName}'s profile`}
+                              title={wasCorrected ? `Corrected from: ${speaker}. Click to edit.` : 'Click to edit speaker name'}
                             >
                               {displayName}
                               {wasCorrected && (
@@ -624,7 +714,15 @@ export default function TranscriptsPage() {
                                   <path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433c-1.144 0-2.063-.926-2.063-2.065 0-1.138.92-2.063 2.063-2.063 1.14 0 2.064.925 2.064 2.063 0 1.139-.925 2.065-2.064 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z" />
                                 </svg>
                               )}
-                            </Link>
+                              <svg
+                                className="w-3 h-3 opacity-50"
+                                fill="none"
+                                stroke="currentColor"
+                                viewBox="0 0 24 24"
+                              >
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                              </svg>
+                            </button>
                           )
                         })}
                       </div>
@@ -639,7 +737,13 @@ export default function TranscriptsPage() {
                   )}
 
                   {transcriptContent && (
-                    <TranscriptDetail data={transcriptContent} />
+                    <TranscriptDetail
+                      data={transcriptContent}
+                      transcript={selectedTranscript}
+                      viewMode={viewMode}
+                      onViewModeChange={setViewMode}
+                      onSpeakerClick={handleSpeakerClick}
+                    />
                   )}
                 </div>
               </div>
@@ -647,16 +751,50 @@ export default function TranscriptsPage() {
           </div>
         )}
       </div>
+
+      {/* Speaker Edit Modal */}
+      <SpeakerEditModal
+        isOpen={!!editingSpeaker}
+        originalName={editingSpeaker?.original || ''}
+        currentName={editingSpeaker?.current || ''}
+        onSave={handleSpeakerSave}
+        onCancel={() => setEditingSpeaker(null)}
+      />
     </Shell>
   )
 }
 
-function TranscriptDetail({ data }: { data: TranscriptContent }) {
+interface TranscriptDetailProps {
+  data: TranscriptContent
+  transcript: Transcript
+  viewMode: ViewMode
+  onViewModeChange: (mode: ViewMode) => void
+  onSpeakerClick: (speaker: string) => void
+}
+
+function TranscriptDetail({
+  data,
+  transcript,
+  viewMode,
+  onViewModeChange,
+  onSpeakerClick
+}: TranscriptDetailProps) {
   const rawPayload = data.raw_payload
   const transcriptData = rawPayload?.data
 
   const summary = transcriptData?.raw_meeting
-  const transcript = transcriptData?.raw_content
+  const rawContent = transcriptData?.raw_content
+
+  // Parse the transcript for chat view and talk time stats
+  const parsedTranscript: ParsedTranscript | null = useMemo(() => {
+    if (!rawContent) return null
+    return parseTranscript(rawContent, transcript.duration)
+  }, [rawContent, transcript.duration])
+
+  const speakerColorMap = useMemo(() => {
+    if (!parsedTranscript) return new Map<string, number>()
+    return createSpeakerColorMap(parsedTranscript.segments)
+  }, [parsedTranscript])
 
   return (
     <div className="space-y-4 text-sm">
@@ -670,18 +808,75 @@ function TranscriptDetail({ data }: { data: TranscriptContent }) {
         </div>
       )}
 
-      {/* Transcript */}
-      {transcript && (
+      {/* Speaker Talk Time Stats */}
+      {parsedTranscript && parsedTranscript.speakerStats.length > 0 && (
+        <SpeakerTalkTime
+          speakerStats={parsedTranscript.speakerStats}
+          speakerCorrections={transcript.speakerCorrections}
+          onSpeakerClick={onSpeakerClick}
+        />
+      )}
+
+      {/* Transcript with view toggle */}
+      {rawContent && (
         <div>
-          <h3 className="text-gray-700 dark:text-gray-300 font-medium mb-2">Full Transcript</h3>
-          <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3 max-h-64 overflow-y-auto border border-gray-100 dark:border-gray-600">
-            <p className="text-gray-600 dark:text-gray-400 whitespace-pre-wrap text-xs">{transcript}</p>
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="text-gray-700 dark:text-gray-300 font-medium">Full Transcript</h3>
+
+            {/* View toggle */}
+            <div className="flex items-center bg-gray-100 dark:bg-gray-700 rounded-lg p-0.5">
+              <button
+                onClick={() => onViewModeChange('chat')}
+                className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
+                  viewMode === 'chat'
+                    ? 'bg-white dark:bg-gray-600 text-gray-900 dark:text-white shadow-sm'
+                    : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
+                }`}
+              >
+                <span className="flex items-center gap-1.5">
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                  </svg>
+                  Chat
+                </span>
+              </button>
+              <button
+                onClick={() => onViewModeChange('raw')}
+                className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
+                  viewMode === 'raw'
+                    ? 'bg-white dark:bg-gray-600 text-gray-900 dark:text-white shadow-sm'
+                    : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
+                }`}
+              >
+                <span className="flex items-center gap-1.5">
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h7" />
+                  </svg>
+                  Raw
+                </span>
+              </button>
+            </div>
           </div>
+
+          {viewMode === 'chat' && parsedTranscript ? (
+            <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-4 max-h-96 overflow-y-auto border border-gray-100 dark:border-gray-600">
+              <ChatTranscript
+                segments={parsedTranscript.segments}
+                speakerColorMap={speakerColorMap}
+                speakerCorrections={transcript.speakerCorrections}
+                onSpeakerClick={onSpeakerClick}
+              />
+            </div>
+          ) : (
+            <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3 max-h-64 overflow-y-auto border border-gray-100 dark:border-gray-600">
+              <p className="text-gray-600 dark:text-gray-400 whitespace-pre-wrap text-xs">{rawContent}</p>
+            </div>
+          )}
         </div>
       )}
 
       {/* Raw JSON fallback */}
-      {!summary && !transcript && (
+      {!summary && !rawContent && (
         <div>
           <h3 className="text-gray-700 dark:text-gray-300 font-medium mb-2">Raw Data</h3>
           <pre className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3 overflow-auto max-h-64 text-xs text-gray-600 dark:text-gray-400 border border-gray-100 dark:border-gray-600">

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3'
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb'
-import { DynamoDBDocumentClient, ScanCommand, QueryCommand } from '@aws-sdk/lib-dynamodb'
+import { DynamoDBDocumentClient, ScanCommand, QueryCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb'
 
 const BUCKET_NAME = process.env.KRISP_S3_BUCKET || ''  // Required: set via environment variable
 const TABLE_NAME = process.env.DYNAMODB_TABLE || 'krisp-transcripts-index'
@@ -108,6 +108,95 @@ export async function GET(request: NextRequest) {
     console.error('API error:', error)
     return NextResponse.json(
       { error: 'Failed to fetch transcripts', details: String(error) },
+      { status: 500 }
+    )
+  }
+}
+
+/**
+ * PATCH - Update speaker corrections for a transcript
+ */
+export async function PATCH(request: NextRequest) {
+  try {
+    const body = await request.json()
+    const { meetingId, speakerCorrection } = body
+
+    if (!meetingId || !speakerCorrection) {
+      return NextResponse.json(
+        { error: 'Missing required fields: meetingId and speakerCorrection' },
+        { status: 400 }
+      )
+    }
+
+    const { originalName, correctedName } = speakerCorrection
+
+    if (!originalName || !correctedName) {
+      return NextResponse.json(
+        { error: 'speakerCorrection must have originalName and correctedName' },
+        { status: 400 }
+      )
+    }
+
+    // Update the speaker_corrections map in DynamoDB
+    // The key is the lowercase original name for consistent lookups
+    const correctionKey = originalName.toLowerCase()
+
+    const updateCommand = new UpdateCommand({
+      TableName: TABLE_NAME,
+      Key: { meeting_id: meetingId },
+      UpdateExpression: 'SET speaker_corrections.#speakerKey = :correction',
+      ExpressionAttributeNames: {
+        '#speakerKey': correctionKey,
+      },
+      ExpressionAttributeValues: {
+        ':correction': { name: correctedName },
+      },
+      ReturnValues: 'ALL_NEW',
+    })
+
+    const result = await dynamodb.send(updateCommand)
+
+    return NextResponse.json({
+      success: true,
+      speakerCorrections: result.Attributes?.speaker_corrections || {},
+    })
+  } catch (error) {
+    console.error('PATCH error:', error)
+
+    // Handle case where speaker_corrections doesn't exist yet
+    // Need to create the map first
+    try {
+      const body = await request.json().catch(() => ({}))
+      const { meetingId, speakerCorrection } = body
+
+      if (meetingId && speakerCorrection) {
+        const correctionKey = speakerCorrection.originalName.toLowerCase()
+
+        const createMapCommand = new UpdateCommand({
+          TableName: TABLE_NAME,
+          Key: { meeting_id: meetingId },
+          UpdateExpression: 'SET speaker_corrections = :corrections',
+          ExpressionAttributeValues: {
+            ':corrections': {
+              [correctionKey]: { name: speakerCorrection.correctedName },
+            },
+          },
+          ReturnValues: 'ALL_NEW',
+        })
+
+        const result = await dynamodb.send(createMapCommand)
+
+        return NextResponse.json({
+          success: true,
+          speakerCorrections: result.Attributes?.speaker_corrections || {},
+        })
+      }
+    } catch (retryError) {
+      console.error('Retry error:', retryError)
+    }
+
+    return NextResponse.json(
+      { error: 'Failed to update speaker correction', details: String(error) },
       { status: 500 }
     )
   }
