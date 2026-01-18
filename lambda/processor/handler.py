@@ -27,7 +27,7 @@ vectors_client = get_vectors_client()
 TABLE_NAME = os.environ.get('DYNAMODB_TABLE', 'krisp-transcripts-index')
 ENABLE_VECTORS = os.environ.get('ENABLE_VECTORS', 'true').lower() == 'true'
 ENABLE_TOPICS = os.environ.get('ENABLE_TOPICS', 'true').lower() == 'true'
-TOPIC_MODEL_ID = os.environ.get('TOPIC_MODEL_ID', 'anthropic.claude-3-haiku-20240307-v1:0')
+TOPIC_MODEL_ID = os.environ.get('TOPIC_MODEL_ID', 'amazon.nova-lite-v1:0')
 table = dynamodb.Table(TABLE_NAME)
 
 
@@ -157,14 +157,17 @@ Return ONLY the topic, nothing else. The topic should be descriptive but brief (
 
     try:
         body = json.dumps({
-            "anthropic_version": "bedrock-2023-05-31",
-            "max_tokens": 50,
             "messages": [
                 {
                     "role": "user",
-                    "content": prompt
+                    "content": [{"text": prompt}]
                 }
-            ]
+            ],
+            "inferenceConfig": {
+                "maxTokens": 50,
+                "temperature": 0.3,
+                "topP": 0.9
+            }
         })
 
         response = bedrock_client.invoke_model(
@@ -175,7 +178,7 @@ Return ONLY the topic, nothing else. The topic should be descriptive but brief (
         )
 
         response_body = json.loads(response['body'].read())
-        topic = response_body.get('content', [{}])[0].get('text', '').strip()
+        topic = response_body.get('output', {}).get('message', {}).get('content', [{}])[0].get('text', '').strip()
 
         # Validate topic is reasonable (1-5 words, not too long)
         if topic and len(topic) <= 50 and len(topic.split()) <= 6:

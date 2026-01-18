@@ -25,7 +25,7 @@ from typing import Optional
 BUCKET_NAME = os.environ.get('KRISP_S3_BUCKET', '')  # Required: set KRISP_S3_BUCKET env var
 TABLE_NAME = os.environ.get('DYNAMODB_TABLE', 'krisp-transcripts-index')
 REGION = os.environ.get('AWS_REGION', 'us-east-1')
-TOPIC_MODEL_ID = os.environ.get('TOPIC_MODEL_ID', 'anthropic.claude-3-haiku-20240307-v1:0')
+TOPIC_MODEL_ID = os.environ.get('TOPIC_MODEL_ID', 'amazon.nova-lite-v1:0')
 
 # Initialize clients
 s3 = boto3.client('s3', region_name=REGION)
@@ -62,14 +62,17 @@ Return ONLY the topic, nothing else. The topic should be descriptive but brief (
 
     try:
         body = json.dumps({
-            "anthropic_version": "bedrock-2023-05-31",
-            "max_tokens": 50,
             "messages": [
                 {
                     "role": "user",
-                    "content": prompt
+                    "content": [{"text": prompt}]
                 }
-            ]
+            ],
+            "inferenceConfig": {
+                "maxTokens": 50,
+                "temperature": 0.3,
+                "topP": 0.9
+            }
         })
 
         response = bedrock.invoke_model(
@@ -80,7 +83,7 @@ Return ONLY the topic, nothing else. The topic should be descriptive but brief (
         )
 
         response_body = json.loads(response['body'].read())
-        topic = response_body.get('content', [{}])[0].get('text', '').strip()
+        topic = response_body.get('output', {}).get('message', {}).get('content', [{}])[0].get('text', '').strip()
 
         # Validate topic is reasonable (1-5 words, not too long)
         if topic and len(topic) <= 50 and len(topic.split()) <= 6:
