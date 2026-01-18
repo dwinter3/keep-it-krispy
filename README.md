@@ -64,7 +64,7 @@ The MCP server provides three tools to Claude:
 
 ## Web Dashboard
 
-A companion web dashboard is available at **[main.dh65gpsgmkx3x.amplifyapp.com](https://main.dh65gpsgmkx3x.amplifyapp.com)**:
+A companion web dashboard is available at **[app.krispy.alpha-pm.dev](https://app.krispy.alpha-pm.dev)**:
 
 - **Transcripts Browser** (`/transcripts`) — Browse all your meetings with pagination and search
 - **Speakers Directory** (`/speakers`) — See everyone you've met with, ranked by meeting frequency

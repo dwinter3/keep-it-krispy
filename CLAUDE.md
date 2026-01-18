@@ -5,7 +5,7 @@
 **Keep It Krispy** (repo: `krisp-buddy`) - AI-powered meeting memory that turns Krisp transcripts into a searchable knowledge base for Claude.
 
 - **Marketing Site**: https://krispy.alpha-pm.dev (S3 + CloudFront)
-- **SaaS Dashboard**: https://main.dh65gpsgmkx3x.amplifyapp.com (AWS Amplify)
+- **SaaS Dashboard**: https://app.krispy.alpha-pm.dev (AWS Amplify)
 - **GitHub**: https://github.com/dwinter3/keep-it-krispy
 
 ## Architecture
