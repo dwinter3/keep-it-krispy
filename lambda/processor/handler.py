@@ -130,7 +130,7 @@ def extract_transcript_text(content: dict) -> str:
 
 def generate_topic(transcript_text: str, title: str, bedrock_client) -> Optional[str]:
     """
-    Generate a concise 1-5 word topic for the meeting using Claude.
+    Generate a descriptive topic for the meeting using Claude.
 
     Args:
         transcript_text: The full transcript text
@@ -138,7 +138,7 @@ def generate_topic(transcript_text: str, title: str, bedrock_client) -> Optional
         bedrock_client: Bedrock runtime client
 
     Returns:
-        A short topic string (1-5 words) or None if generation fails
+        A descriptive topic string (10-20 words) or None if generation fails
     """
     if not transcript_text or len(transcript_text.strip()) < 50:
         return None
@@ -146,14 +146,26 @@ def generate_topic(transcript_text: str, title: str, bedrock_client) -> Optional
     # Use first 4000 chars of transcript to keep within token limits
     text_sample = transcript_text[:4000]
 
-    prompt = f"""Based on this meeting transcript, generate a concise 1-5 word topic that describes the main subject discussed.
+    prompt = f"""Based on this meeting transcript, generate a descriptive topic title (10-20 words) that captures:
+1. The main subject or purpose of the meeting
+2. Key companies, products, or people mentioned
+3. Specific topics or decisions discussed
 
 Meeting title: {title}
 
 Transcript excerpt:
 {text_sample}
 
-Return ONLY the topic, nothing else. The topic should be descriptive but brief (1-5 words max). Examples of good topics: "Q4 Sales Review", "Product Roadmap Planning", "Customer Onboarding", "Bug Triage", "Team Standup"."""
+Return ONLY the topic title, nothing else. Use a dash to separate the main topic from details.
+
+Examples of good topic titles:
+- "Partnership discussion - AWS and Azure integration challenges and go-to-market strategy"
+- "Q4 Sales Review - ACME Corp deal progress, pipeline forecast, and team quotas"
+- "Product roadmap planning - mobile app redesign priorities and Q1 launch timeline"
+- "Customer onboarding call with TechCorp - implementation requirements and success criteria"
+- "Weekly team standup - sprint progress, blockers on auth feature, and upcoming PTO"
+
+Generate a similarly detailed topic title for this meeting."""
 
     try:
         body = json.dumps({
@@ -164,7 +176,7 @@ Return ONLY the topic, nothing else. The topic should be descriptive but brief (
                 }
             ],
             "inferenceConfig": {
-                "maxTokens": 50,
+                "maxTokens": 100,
                 "temperature": 0.3,
                 "topP": 0.9
             }
@@ -180,13 +192,17 @@ Return ONLY the topic, nothing else. The topic should be descriptive but brief (
         response_body = json.loads(response['body'].read())
         topic = response_body.get('output', {}).get('message', {}).get('content', [{}])[0].get('text', '').strip()
 
-        # Validate topic is reasonable (1-5 words, not too long)
-        if topic and len(topic) <= 50 and len(topic.split()) <= 6:
+        # Validate topic is reasonable (max 150 chars, reasonable word count)
+        if topic and len(topic) <= 150 and len(topic.split()) <= 25:
             return topic
         elif topic:
-            # Truncate if too long
-            words = topic.split()[:5]
-            return ' '.join(words)
+            # Truncate if too long - keep first 150 chars and trim to last complete word
+            truncated = topic[:150]
+            if len(topic) > 150:
+                last_space = truncated.rfind(' ')
+                if last_space > 50:
+                    truncated = truncated[:last_space]
+            return truncated
 
         return None
 

@@ -54,7 +54,7 @@ export default function DashboardPage() {
     fetchData()
   }, [])
 
-  function formatDate(dateStr: string) {
+  function formatRelativeTime(dateStr: string) {
     try {
       const date = new Date(dateStr)
       const now = new Date()
@@ -63,18 +63,31 @@ export default function DashboardPage() {
       const diffHours = Math.floor(diffMins / 60)
       const diffDays = Math.floor(diffHours / 24)
 
+      if (diffMins < 1) return 'Just now'
       if (diffMins < 60) return `${diffMins}m ago`
       if (diffHours < 24) return `${diffHours}h ago`
-      if (diffDays < 7) return `${diffDays}d ago`
+      if (diffDays === 1) return 'Yesterday'
+      if (diffDays < 7) return `${diffDays} days ago`
+      if (diffDays < 14) return '1 week ago'
+      if (diffDays < 30) return `${Math.floor(diffDays / 7)} weeks ago`
+      if (diffDays < 60) return '1 month ago'
+      return `${Math.floor(diffDays / 30)} months ago`
+    } catch {
+      return ''
+    }
+  }
 
-      // Display in EST timezone with time
+  function formatFullDateTime(dateStr: string) {
+    try {
+      const date = new Date(dateStr)
       return date.toLocaleDateString('en-US', {
         month: 'short',
         day: 'numeric',
+        year: 'numeric',
         hour: 'numeric',
         minute: '2-digit',
+        hour12: true,
         timeZone: 'America/New_York',
-        timeZoneName: 'short',
       })
     } catch {
       return dateStr
@@ -168,20 +181,25 @@ export default function DashboardPage() {
                     <li key={transcript.key}>
                       <Link
                         href={`/transcripts?view=${transcript.meetingId}`}
-                        className="flex items-center py-3 hover:bg-gray-50 dark:hover:bg-gray-700/50 -mx-2 px-2 rounded-lg transition-colors"
+                        className="block py-3 hover:bg-gray-50 dark:hover:bg-gray-700/50 -mx-2 px-2 rounded-lg transition-colors"
                       >
                         <div className="flex-1 min-w-0">
+                          {/* Topic as main title if available, otherwise use meeting title */}
                           <p className="text-sm font-medium text-gray-900 dark:text-white truncate">
-                            {transcript.title || 'Untitled Meeting'}
+                            {transcript.topic || transcript.title || 'Untitled Meeting'}
                           </p>
-                          {transcript.topic && (
-                            <p className="text-xs text-purple-600 dark:text-purple-400 mt-0.5 flex items-center gap-1">
-                              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
-                              </svg>
-                              {transcript.topic}
-                            </p>
-                          )}
+
+                          {/* Full date and relative time */}
+                          <div className="flex items-center justify-between mt-1">
+                            <span className="text-xs text-gray-500 dark:text-gray-400">
+                              {formatFullDateTime(transcript.timestamp || transcript.date)}
+                            </span>
+                            <span className="text-xs text-gray-400 dark:text-gray-500">
+                              {formatRelativeTime(transcript.timestamp || transcript.date)}
+                            </span>
+                          </div>
+
+                          {/* Speakers and duration */}
                           <div className="flex items-center gap-2 mt-1">
                             {transcript.speakers.length > 0 && (
                               <span className="text-xs text-gray-500 dark:text-gray-400 truncate max-w-[200px]">
@@ -199,9 +217,6 @@ export default function DashboardPage() {
                             )}
                           </div>
                         </div>
-                        <span className="text-xs text-gray-400 dark:text-gray-500 ml-4 flex-shrink-0">
-                          {formatDate(transcript.timestamp || transcript.date)}
-                        </span>
                       </Link>
                     </li>
                   ))}

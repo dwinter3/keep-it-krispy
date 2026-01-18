@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useMemo } from 'react'
 import Link from 'next/link'
 import Shell from '@/components/Shell'
 import ExpandableSpeakers from '@/components/ExpandableSpeakers'
@@ -22,6 +22,9 @@ interface Transcript {
   speakerCorrections: Record<string, SpeakerCorrection> | null
   topic?: string | null
 }
+
+type DateFilter = 'all' | 'today' | 'week' | 'month'
+type SortOption = 'newest' | 'oldest' | 'longest'
 
 interface TranscriptContent {
   raw_payload?: {
@@ -47,6 +50,11 @@ export default function TranscriptsPage() {
   const [loadingContent, setLoadingContent] = useState(false)
   const [nextCursor, setNextCursor] = useState<string | null>(null)
   const [loadingMore, setLoadingMore] = useState(false)
+
+  // Filter and sort state
+  const [dateFilter, setDateFilter] = useState<DateFilter>('all')
+  const [speakerFilter, setSpeakerFilter] = useState<string>('all')
+  const [sortOption, setSortOption] = useState<SortOption>('newest')
 
   useEffect(() => {
     fetchTranscripts()
@@ -155,6 +163,46 @@ export default function TranscriptsPage() {
     return `${mins}m ${secs}s`
   }
 
+  function formatRelativeTime(dateStr: string) {
+    try {
+      const date = new Date(dateStr)
+      const now = new Date()
+      const diffMs = now.getTime() - date.getTime()
+      const diffMins = Math.floor(diffMs / 60000)
+      const diffHours = Math.floor(diffMins / 60)
+      const diffDays = Math.floor(diffHours / 24)
+
+      if (diffMins < 1) return 'Just now'
+      if (diffMins < 60) return `${diffMins}m ago`
+      if (diffHours < 24) return `${diffHours}h ago`
+      if (diffDays === 1) return 'Yesterday'
+      if (diffDays < 7) return `${diffDays} days ago`
+      if (diffDays < 14) return '1 week ago'
+      if (diffDays < 30) return `${Math.floor(diffDays / 7)} weeks ago`
+      if (diffDays < 60) return '1 month ago'
+      return `${Math.floor(diffDays / 30)} months ago`
+    } catch {
+      return ''
+    }
+  }
+
+  function formatFullDateTime(dateStr: string) {
+    try {
+      const date = new Date(dateStr)
+      return date.toLocaleDateString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true,
+        timeZone: 'America/New_York',
+      })
+    } catch {
+      return dateStr
+    }
+  }
+
   // Filter out generic speaker names like "Speaker 1", "Speaker 2"
   function getRealSpeakers(speakers: string[]) {
     return speakers.filter(s => {
@@ -162,6 +210,73 @@ export default function TranscriptsPage() {
       return !lower.startsWith('speaker ') && lower !== 'unknown' && lower !== 'guest'
     })
   }
+
+  // Get all unique speakers from all transcripts for the filter dropdown
+  const allUniqueSpeakers = useMemo(() => {
+    const speakerSet = new Set<string>()
+    transcripts.forEach(t => {
+      getRealSpeakers(t.speakers).forEach(speaker => {
+        // Apply corrections if available
+        const { displayName } = applySpeakerCorrection(speaker, t.speakerCorrections)
+        speakerSet.add(displayName)
+      })
+    })
+    return Array.from(speakerSet).sort((a, b) => a.localeCompare(b))
+  }, [transcripts])
+
+  // Filter and sort transcripts
+  const filteredTranscripts = useMemo(() => {
+    let result = [...transcripts]
+
+    // Date filter
+    if (dateFilter !== 'all') {
+      const now = new Date()
+      const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+      const startOfWeek = new Date(startOfToday)
+      startOfWeek.setDate(startOfWeek.getDate() - startOfWeek.getDay())
+      const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1)
+
+      result = result.filter(t => {
+        const transcriptDate = new Date(t.timestamp || t.date)
+        switch (dateFilter) {
+          case 'today':
+            return transcriptDate >= startOfToday
+          case 'week':
+            return transcriptDate >= startOfWeek
+          case 'month':
+            return transcriptDate >= startOfMonth
+          default:
+            return true
+        }
+      })
+    }
+
+    // Speaker filter
+    if (speakerFilter !== 'all') {
+      result = result.filter(t => {
+        const correctedSpeakers = getRealSpeakers(t.speakers).map(s => {
+          const { displayName } = applySpeakerCorrection(s, t.speakerCorrections)
+          return displayName
+        })
+        return correctedSpeakers.includes(speakerFilter)
+      })
+    }
+
+    // Sort
+    switch (sortOption) {
+      case 'oldest':
+        result.sort((a, b) => new Date(a.timestamp || a.date).getTime() - new Date(b.timestamp || b.date).getTime())
+        break
+      case 'longest':
+        result.sort((a, b) => (b.duration || 0) - (a.duration || 0))
+        break
+      case 'newest':
+      default:
+        result.sort((a, b) => new Date(b.timestamp || b.date).getTime() - new Date(a.timestamp || a.date).getTime())
+    }
+
+    return result
+  }, [transcripts, dateFilter, speakerFilter, sortOption])
 
   // Apply speaker corrections: returns { displayName, wasCorreted, linkedin? }
   function applySpeakerCorrection(
@@ -228,9 +343,74 @@ export default function TranscriptsPage() {
             <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">All your meeting transcripts</p>
           </div>
           <span className="text-sm text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-700 px-3 py-1 rounded-full">
-            {transcripts.length} transcripts
+            {filteredTranscripts.length}{filteredTranscripts.length !== transcripts.length && ` of ${transcripts.length}`} transcripts
           </span>
         </div>
+
+        {/* Filter Bar */}
+        {!loading && transcripts.length > 0 && (
+          <div className="mb-4 flex flex-wrap items-center gap-3 p-3 bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700">
+            <span className="text-sm font-medium text-gray-600 dark:text-gray-400">Filters:</span>
+
+            {/* Date Filter */}
+            <select
+              value={dateFilter}
+              onChange={(e) => setDateFilter(e.target.value as DateFilter)}
+              className="text-sm bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-1.5 text-gray-700 dark:text-gray-300 focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+            >
+              <option value="all">All Time</option>
+              <option value="today">Today</option>
+              <option value="week">This Week</option>
+              <option value="month">This Month</option>
+            </select>
+
+            {/* Speaker Filter */}
+            <select
+              value={speakerFilter}
+              onChange={(e) => setSpeakerFilter(e.target.value)}
+              className="text-sm bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-1.5 text-gray-700 dark:text-gray-300 focus:ring-2 focus:ring-primary-500 focus:border-primary-500 max-w-[200px]"
+            >
+              <option value="all">All Speakers</option>
+              {allUniqueSpeakers.map((speaker) => (
+                <option key={speaker} value={speaker}>
+                  {speaker}
+                </option>
+              ))}
+            </select>
+
+            <span className="text-gray-300 dark:text-gray-600">|</span>
+
+            <span className="text-sm font-medium text-gray-600 dark:text-gray-400">Sort:</span>
+
+            {/* Sort Option */}
+            <select
+              value={sortOption}
+              onChange={(e) => setSortOption(e.target.value as SortOption)}
+              className="text-sm bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-1.5 text-gray-700 dark:text-gray-300 focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+            >
+              <option value="newest">Newest First</option>
+              <option value="oldest">Oldest First</option>
+              <option value="longest">Longest Duration</option>
+            </select>
+
+            {/* Clear Filters */}
+            {(dateFilter !== 'all' || speakerFilter !== 'all' || sortOption !== 'newest') && (
+              <button
+                onClick={() => {
+                  setDateFilter('all')
+                  setSpeakerFilter('all')
+                  setSortOption('newest')
+                }}
+                className="ml-auto text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 flex items-center gap-1"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+                Clear filters
+              </button>
+            )}
+          </div>
+        )}
 
         {loading && (
           <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-8 text-center">
@@ -257,14 +437,33 @@ export default function TranscriptsPage() {
           </div>
         )}
 
-        {!loading && transcripts.length > 0 && (
+        {!loading && transcripts.length > 0 && filteredTranscripts.length === 0 && (
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-8 text-center">
+            <svg className="mx-auto h-12 w-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
+            </svg>
+            <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">No transcripts match your filters</p>
+            <button
+              onClick={() => {
+                setDateFilter('all')
+                setSpeakerFilter('all')
+                setSortOption('newest')
+              }}
+              className="mt-2 text-sm text-primary-600 dark:text-primary-400 hover:underline"
+            >
+              Clear all filters
+            </button>
+          </div>
+        )}
+
+        {!loading && filteredTranscripts.length > 0 && (
           <div className="flex gap-6">
             {/* Transcript list */}
             <div className={`${selectedTranscript ? 'w-1/2' : 'w-full'} transition-all`}>
               <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden">
                 {/* Group transcripts by date */}
                 {(() => {
-                  const grouped = transcripts.reduce((acc, t) => {
+                  const grouped = filteredTranscripts.reduce((acc, t) => {
                     const dateKey = formatDate(t.date || t.timestamp)
                     if (!acc[dateKey]) acc[dateKey] = []
                     acc[dateKey].push(t)
@@ -289,26 +488,36 @@ export default function TranscriptsPage() {
                                 : 'hover:bg-gray-50 dark:hover:bg-gray-700/50'
                             }`}
                           >
+                            {/* Topic as main title if available, otherwise use meeting title */}
                             <div className="font-medium text-gray-900 dark:text-white">
-                              {buildRichTitle(transcript)}
+                              {transcript.topic || transcript.title || 'Meeting'}
                             </div>
-                            {transcript.topic && (
-                              <div className="mt-1 flex items-center gap-1 text-xs text-purple-600 dark:text-purple-400">
-                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
-                                </svg>
-                                {transcript.topic}
+
+                            {/* Date and time row */}
+                            <div className="mt-1 flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
+                              <span>{formatFullDateTime(transcript.timestamp || transcript.date)}</span>
+                              <span className="text-gray-400 dark:text-gray-500">
+                                {formatRelativeTime(transcript.timestamp || transcript.date)}
+                              </span>
+                            </div>
+
+                            {/* Speakers and duration row */}
+                            <div className="mt-2 flex items-center justify-between">
+                              <div className="text-xs">
+                                {transcript.speakers.length > 0 && (
+                                  <ExpandableSpeakers
+                                    speakers={transcript.speakers}
+                                    speakerCorrections={transcript.speakerCorrections}
+                                    initialCount={2}
+                                  />
+                                )}
                               </div>
-                            )}
-                            {transcript.speakers.length > 0 && (
-                              <div className="mt-1 text-xs">
-                                <ExpandableSpeakers
-                                  speakers={transcript.speakers}
-                                  speakerCorrections={transcript.speakerCorrections}
-                                  initialCount={2}
-                                />
-                              </div>
-                            )}
+                              {transcript.duration > 0 && (
+                                <span className="text-xs text-gray-500 dark:text-gray-400 flex-shrink-0 ml-2">
+                                  {formatDuration(transcript.duration)}
+                                </span>
+                              )}
+                            </div>
                           </div>
                         ))}
                       </div>
