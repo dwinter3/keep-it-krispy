@@ -166,6 +166,9 @@ export default function SpeakerProfilePage({ params }: { params: Promise<{ name:
       setEnrichmentResult(data)
 
       // Update profile with enrichment data
+      // When not cached (fresh search), always update role/company/linkedin with new data
+      // This is important for "Wrong Person" flow where we want to replace old values
+      const isFreshSearch = !data.cached
       setProfile({
         ...profile,
         aiSummary: data.aiSummary,
@@ -178,10 +181,10 @@ export default function SpeakerProfilePage({ params }: { params: Promise<{ name:
         humanHints: data.humanHints,
         rejectedProfiles: data.rejectedProfiles,
         humanVerified: data.humanVerified,
-        // Update role/company if enrichment found them and we don't have them
-        role: profile.role || data.enrichedData?.title || undefined,
-        company: profile.company || data.enrichedData?.company || undefined,
-        linkedin: profile.linkedin || data.enrichedData?.linkedinUrl || undefined,
+        // For fresh searches, prefer new enriched data; for cached, keep existing values
+        role: isFreshSearch ? (data.enrichedData?.title || profile.role) : (profile.role || data.enrichedData?.title || undefined),
+        company: isFreshSearch ? (data.enrichedData?.company || profile.company) : (profile.company || data.enrichedData?.company || undefined),
+        linkedin: isFreshSearch ? (data.enrichedData?.linkedinUrl || profile.linkedin) : (profile.linkedin || data.enrichedData?.linkedinUrl || undefined),
       })
 
       // Clear hints input after successful search
