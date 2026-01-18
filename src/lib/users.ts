@@ -18,7 +18,16 @@ import {
 } from '@aws-sdk/lib-dynamodb'
 import { randomBytes, createHash } from 'crypto'
 
-const client = new DynamoDBClient({ region: process.env.AWS_REGION || 'us-east-1' })
+// AWS clients with custom credentials for Amplify
+const credentials = process.env.S3_ACCESS_KEY_ID ? {
+  accessKeyId: process.env.S3_ACCESS_KEY_ID,
+  secretAccessKey: process.env.S3_SECRET_ACCESS_KEY || '',
+} : undefined
+
+const client = new DynamoDBClient({
+  region: process.env.APP_REGION || process.env.AWS_REGION || 'us-east-1',
+  credentials,
+})
 const docClient = DynamoDBDocumentClient.from(client)
 
 const USERS_TABLE = 'krisp-users'
