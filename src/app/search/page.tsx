@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, Suspense } from 'react'
+import { useState, useEffect, useRef, Suspense } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import Shell from '@/components/Shell'
 
@@ -62,6 +62,7 @@ function SearchPageFallback() {
 function SearchPageContent() {
   const searchParams = useSearchParams()
   const router = useRouter()
+  const searchInputRef = useRef<HTMLInputElement>(null)
 
   const [query, setQuery] = useState(searchParams.get('q') || '')
   const [speakerFilter, setSpeakerFilter] = useState(searchParams.get('speaker') || '')
@@ -74,6 +75,13 @@ function SearchPageContent() {
   const [showFilters, setShowFilters] = useState(false)
   const [speakers, setSpeakers] = useState<Speaker[]>([])
   const [activeFilters, setActiveFilters] = useState<SearchFilters>({ speaker: null, from: null, to: null })
+
+  // Auto-focus search input on page load
+  useEffect(() => {
+    if (searchInputRef.current) {
+      searchInputRef.current.focus()
+    }
+  }, [])
 
   // Fetch speakers for the filter dropdown
   useEffect(() => {
@@ -200,6 +208,7 @@ function SearchPageContent() {
         {/* Search input */}
         <div className="relative mb-4">
           <input
+            ref={searchInputRef}
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
@@ -452,10 +461,10 @@ function SearchResultCard({
     <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-4 hover:border-zinc-700 transition-colors">
       <div className="flex items-start justify-between mb-2">
         <div className="flex-1">
-          <h3 className="font-medium text-white mb-1">{result.title}</h3>
-          {result.topic && (
-            <p className="text-sm text-zinc-400 mb-1 line-clamp-1">{result.topic}</p>
-          )}
+          <h3 className="font-medium text-white mb-1">{result.topic || result.title}</h3>
+          <div className="flex flex-wrap items-center gap-2 text-sm text-zinc-500 mb-1">
+            <span>{result.title}</span>
+          </div>
           <div className="flex flex-wrap items-center gap-2 text-sm text-zinc-500">
             <span>{formatDate(result.date)}</span>
             {result.duration > 0 && (
