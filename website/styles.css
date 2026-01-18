@@ -59,6 +59,20 @@ nav .nav-links a.active {
   color: #00d4aa;
 }
 
+nav .nav-links a.login-btn {
+  background: rgba(0, 212, 170, 0.15);
+  border: 1px solid rgba(0, 212, 170, 0.4);
+  padding: 6px 14px;
+  border-radius: 6px;
+  color: #00d4aa;
+  transition: all 0.2s;
+}
+
+nav .nav-links a.login-btn:hover {
+  background: rgba(0, 212, 170, 0.25);
+  border-color: #00d4aa;
+}
+
 /* Mobile nav */
 @media (max-width: 600px) {
   nav .nav-container {
