@@ -3,6 +3,8 @@
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { useState, useEffect } from 'react'
+import { useSession, signOut } from 'next-auth/react'
+import UserMenu from './UserMenu'
 
 // Navigation items with icons
 const navigation = [
@@ -94,6 +96,7 @@ const navigation = [
 export default function WindsterLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
   const router = useRouter()
+  const { data: session } = useSession()
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [privateCount, setPrivateCount] = useState<number>(0)
 
@@ -115,9 +118,7 @@ export default function WindsterLayout({ children }: { children: React.ReactNode
   }, [pathname]) // Refetch when navigating
 
   const handleLogout = async () => {
-    await fetch('/api/auth', { method: 'DELETE' })
-    router.push('/login')
-    router.refresh()
+    await signOut({ callbackUrl: '/login' })
   }
 
   return (
@@ -211,14 +212,26 @@ export default function WindsterLayout({ children }: { children: React.ReactNode
           {/* User info */}
           <div className="border-t border-gray-700 p-4">
             <div className="flex items-center gap-3">
-              <div className="h-9 w-9 rounded-full bg-gray-600 flex items-center justify-center">
-                <svg className="w-5 h-5 text-gray-300" fill="currentColor" viewBox="0 0 20 20">
-                  <path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd" />
-                </svg>
-              </div>
+              {session?.user?.image ? (
+                <img
+                  src={session.user.image}
+                  alt={session.user.name || 'User'}
+                  className="h-9 w-9 rounded-full"
+                />
+              ) : (
+                <div className="h-9 w-9 rounded-full bg-gray-600 flex items-center justify-center">
+                  <svg className="w-5 h-5 text-gray-300" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd" />
+                  </svg>
+                </div>
+              )}
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-white truncate">User</p>
-                <p className="text-xs text-gray-400 truncate">Meeting Intelligence</p>
+                <p className="text-sm font-medium text-white truncate">
+                  {session?.user?.name || 'User'}
+                </p>
+                <p className="text-xs text-gray-400 truncate">
+                  {session?.user?.email || 'Meeting Intelligence'}
+                </p>
               </div>
             </div>
           </div>
@@ -276,6 +289,9 @@ export default function WindsterLayout({ children }: { children: React.ReactNode
                   <path d="M17.293 13.293A8 8 0 016.707 2.707a8.001 8.001 0 1010.586 10.586z" />
                 </svg>
               </button>
+
+              {/* User menu */}
+              <UserMenu />
             </div>
           </div>
         </header>
