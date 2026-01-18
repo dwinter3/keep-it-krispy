@@ -1,29 +1,26 @@
-import { NextResponse } from 'next/server'
-import type { NextRequest } from 'next/server'
+import { NextResponse } from "next/server"
+import type { NextRequest } from "next/server"
+import { auth } from "@/lib/auth"
 
-const SITE_PASSWORD = process.env.SITE_PASSWORD || 'krispy123'
-const AUTH_COOKIE = 'krisp-auth'
+// NextAuth middleware for protected routes
+export default auth((req) => {
+  const { pathname } = req.nextUrl
 
-export function middleware(request: NextRequest) {
-  const { pathname } = request.nextUrl
-
-  // Allow login page and API routes
-  if (pathname === '/login' || pathname.startsWith('/api/')) {
+  // Allow public routes
+  const publicPaths = ["/login", "/api/auth"]
+  if (publicPaths.some((path) => pathname.startsWith(path))) {
     return NextResponse.next()
   }
 
-  // Check for auth cookie
-  const authCookie = request.cookies.get(AUTH_COOKIE)
-
-  if (authCookie?.value === SITE_PASSWORD) {
-    return NextResponse.next()
+  // Check if user is authenticated
+  if (!req.auth) {
+    const loginUrl = new URL("/login", req.url)
+    loginUrl.searchParams.set("callbackUrl", pathname)
+    return NextResponse.redirect(loginUrl)
   }
 
-  // Redirect to login
-  const loginUrl = new URL('/login', request.url)
-  loginUrl.searchParams.set('redirect', pathname)
-  return NextResponse.redirect(loginUrl)
-}
+  return NextResponse.next()
+})
 
 export const config = {
   matcher: [
@@ -34,6 +31,6 @@ export const config = {
      * - favicon.ico (favicon file)
      * - public files (public folder)
      */
-    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
   ],
 }
