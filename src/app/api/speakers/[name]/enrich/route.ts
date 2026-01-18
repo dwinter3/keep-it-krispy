@@ -652,6 +652,7 @@ Return ONLY the summary text, no JSON.`
     }
 
     // Step 6: Cache the enrichment in DynamoDB
+    // Also update role/company/linkedin fields so they persist on page refresh
     try {
       const updateCommand = new UpdateCommand({
         TableName: SPEAKERS_TABLE,
@@ -667,7 +668,10 @@ Return ONLY the summary text, no JSON.`
           #topics = :topics,
           #enrichedAt = :enrichedAt,
           #humanHints = :humanHints,
-          #rejectedProfiles = :rejectedProfiles`,
+          #rejectedProfiles = :rejectedProfiles,
+          #role = :role,
+          #company = :company,
+          #linkedin = :linkedin`,
         ExpressionAttributeNames: {
           '#displayName': 'displayName',
           '#enrichedData': 'enrichedData',
@@ -680,6 +684,9 @@ Return ONLY the summary text, no JSON.`
           '#enrichedAt': 'enrichedAt',
           '#humanHints': 'humanHints',
           '#rejectedProfiles': 'rejectedProfiles',
+          '#role': 'role',
+          '#company': 'company',
+          '#linkedin': 'linkedin',
         },
         ExpressionAttributeValues: {
           ':displayName': context.name,
@@ -693,6 +700,9 @@ Return ONLY the summary text, no JSON.`
           ':enrichedAt': new Date().toISOString(),
           ':humanHints': combinedHints || null,
           ':rejectedProfiles': allExcludedUrls.length > 0 ? allExcludedUrls : null,
+          ':role': enrichedData.title || null,
+          ':company': enrichedData.company || null,
+          ':linkedin': enrichedData.linkedinUrl || null,
         },
       })
       await dynamodb.send(updateCommand)
