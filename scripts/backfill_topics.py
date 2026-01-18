@@ -116,14 +116,14 @@ Generate a similarly detailed topic title for this meeting."""
         return None
 
 
-def get_transcripts_without_topics(limit: Optional[int] = None):
-    """Scan DynamoDB for transcripts that don't have topics."""
+def get_transcripts(limit: Optional[int] = None, force: bool = False):
+    """Scan DynamoDB for transcripts to process."""
     transcripts = []
 
-    # Scan with filter for items without topic attribute
-    scan_kwargs = {
-        'FilterExpression': 'attribute_not_exists(topic)',
-    }
+    # Scan with filter for items without topic attribute (unless force)
+    scan_kwargs = {}
+    if not force:
+        scan_kwargs['FilterExpression'] = 'attribute_not_exists(topic)'
 
     done = False
     start_key = None
@@ -165,6 +165,7 @@ def main():
     parser = argparse.ArgumentParser(description='Backfill topics for existing transcripts')
     parser.add_argument('--dry-run', action='store_true', help='Show what would be updated without making changes')
     parser.add_argument('--limit', type=int, help='Process at most N transcripts')
+    parser.add_argument('--force', action='store_true', help='Regenerate topics for ALL transcripts, not just those without')
     args = parser.parse_args()
 
     if not BUCKET_NAME:
@@ -176,10 +177,15 @@ def main():
     print(f"Model: {TOPIC_MODEL_ID}")
     if args.dry_run:
         print("DRY RUN MODE - no changes will be made")
+    if args.force:
+        print("FORCE MODE - regenerating ALL topics")
     print()
 
-    transcripts = get_transcripts_without_topics(args.limit)
-    print(f"Found {len(transcripts)} transcripts without topics")
+    transcripts = get_transcripts(args.limit, args.force)
+    if args.force:
+        print(f"Found {len(transcripts)} transcripts to regenerate")
+    else:
+        print(f"Found {len(transcripts)} transcripts without topics")
     print()
 
     updated = 0
