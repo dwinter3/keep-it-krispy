@@ -7,6 +7,7 @@ import ExpandableSpeakers from '@/components/ExpandableSpeakers'
 import SpeakerTalkTime from '@/components/SpeakerTalkTime'
 import ChatTranscript from '@/components/ChatTranscript'
 import SpeakerEditModal from '@/components/SpeakerEditModal'
+import SpeakerInferenceModal from '@/components/SpeakerInferenceModal'
 import { parseTranscript, createSpeakerColorMap, type ParsedTranscript } from '@/lib/transcriptParser'
 
 interface SpeakerCorrection {
@@ -83,6 +84,9 @@ export default function TranscriptsPage() {
   // Speaker edit modal state
   const [editingSpeaker, setEditingSpeaker] = useState<{ original: string; current: string } | null>(null)
   const [savingSpeaker, setSavingSpeaker] = useState(false)
+
+  // Speaker inference modal state
+  const [showInferenceModal, setShowInferenceModal] = useState(false)
 
   useEffect(() => {
     fetchTranscripts()
@@ -211,6 +215,79 @@ export default function TranscriptsPage() {
       original: originalSpeaker,
       current: displayName
     })
+  }
+
+  // Check if a speaker name is generic
+  function isGenericSpeaker(name: string): boolean {
+    const lower = name.toLowerCase().trim()
+    return (
+      /^speaker\s*\d+$/i.test(lower) ||
+      /^participant\s*\d+$/i.test(lower) ||
+      lower === 'guest' ||
+      lower === 'unknown' ||
+      lower === 'me' ||
+      /^person\s*\d+$/i.test(lower)
+    )
+  }
+
+  // Check if transcript has generic speakers that haven't been corrected yet
+  function hasUncorrectedGenericSpeakers(transcript: Transcript): boolean {
+    return transcript.speakers.some(speaker => {
+      if (!isGenericSpeaker(speaker)) return false
+      // Check if already corrected
+      if (transcript.speakerCorrections) {
+        const key = speaker.toLowerCase()
+        if (transcript.speakerCorrections[key]) return false
+      }
+      return true
+    })
+  }
+
+  // Handle applying multiple speaker corrections from inference
+  async function handleApplyInferences(corrections: Array<{ originalName: string; correctedName: string }>) {
+    if (!selectedTranscript || corrections.length === 0) return
+
+    // Apply each correction sequentially
+    for (const correction of corrections) {
+      try {
+        const response = await fetch(`/api/transcripts`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            meetingId: selectedTranscript.meetingId,
+            speakerCorrection: {
+              originalName: correction.originalName,
+              correctedName: correction.correctedName
+            }
+          })
+        })
+
+        if (!response.ok) {
+          console.error('Failed to save correction for:', correction.originalName)
+        }
+      } catch (err) {
+        console.error('Error saving correction:', err)
+      }
+    }
+
+    // Update local state with all corrections
+    const updatedCorrections = { ...selectedTranscript.speakerCorrections }
+    for (const correction of corrections) {
+      updatedCorrections[correction.originalName.toLowerCase()] = { name: correction.correctedName }
+    }
+
+    // Update selectedTranscript
+    setSelectedTranscript({
+      ...selectedTranscript,
+      speakerCorrections: updatedCorrections
+    })
+
+    // Update transcripts list
+    setTranscripts(prev => prev.map(t =>
+      t.meetingId === selectedTranscript.meetingId
+        ? { ...t, speakerCorrections: updatedCorrections }
+        : t
+    ))
   }
 
   async function handleDelete() {
@@ -984,7 +1061,21 @@ export default function TranscriptsPage() {
 
                   {selectedTranscript.speakers.length > 0 && (
                     <div className="mb-4">
-                      <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Speakers</h3>
+                      <div className="flex items-center justify-between mb-2">
+                        <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">Speakers</h3>
+                        {hasUncorrectedGenericSpeakers(selectedTranscript) && (
+                          <button
+                            onClick={() => setShowInferenceModal(true)}
+                            className="px-2.5 py-1 text-xs font-medium bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-400 hover:bg-indigo-200 dark:hover:bg-indigo-900/50 rounded-lg flex items-center gap-1.5 transition-colors"
+                            title="Use AI to identify unknown speakers from transcript content"
+                          >
+                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                            </svg>
+                            Identify Speakers
+                          </button>
+                        )}
+                      </div>
                       <div className="flex flex-wrap gap-2">
                         {selectedTranscript.speakers.map((speaker, i) => {
                           const { displayName, wasCorrected, linkedin } = applySpeakerCorrection(
@@ -1200,6 +1291,16 @@ export default function TranscriptsPage() {
         onSave={handleSpeakerSave}
         onCancel={() => setEditingSpeaker(null)}
       />
+
+      {/* Speaker Inference Modal */}
+      {selectedTranscript && (
+        <SpeakerInferenceModal
+          isOpen={showInferenceModal}
+          meetingId={selectedTranscript.meetingId}
+          onClose={() => setShowInferenceModal(false)}
+          onApply={handleApplyInferences}
+        />
+      )}
     </Shell>
   )
 }
