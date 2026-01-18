@@ -49,6 +49,7 @@ export interface ApiKey {
   key_id: string // Public ID for display
   user_id: string
   name: string
+  status: 'active' | 'revoked'
   created_at: string
   last_used_at?: string
   revoked_at?: string
@@ -271,6 +272,7 @@ export async function createApiKey(userId: string, name: string): Promise<{ key:
     key_id: keyId,
     user_id: userId,
     name,
+    status: 'active',
     created_at: now,
   }
 
@@ -322,11 +324,12 @@ export async function listUserApiKeys(userId: string): Promise<Omit<ApiKey, 'key
     }))
 
     return (result.Items || [])
-      .filter(item => !item.revoked_at)
+      .filter(item => item.status === 'active')
       .map(item => ({
         key_id: item.key_id,
         user_id: item.user_id,
         name: item.name,
+        status: item.status as 'active' | 'revoked',
         created_at: item.created_at,
         last_used_at: item.last_used_at,
       }))
@@ -335,14 +338,16 @@ export async function listUserApiKeys(userId: string): Promise<Omit<ApiKey, 'key
     const { ScanCommand } = await import('@aws-sdk/lib-dynamodb')
     const result = await docClient.send(new ScanCommand({
       TableName: API_KEYS_TABLE,
-      FilterExpression: 'user_id = :userId AND attribute_not_exists(revoked_at)',
-      ExpressionAttributeValues: { ':userId': userId },
+      FilterExpression: 'user_id = :userId AND #status = :active',
+      ExpressionAttributeNames: { '#status': 'status' },
+      ExpressionAttributeValues: { ':userId': userId, ':active': 'active' },
     }))
 
     return (result.Items || []).map(item => ({
       key_id: item.key_id,
       user_id: item.user_id,
       name: item.name,
+      status: item.status as 'active' | 'revoked',
       created_at: item.created_at,
       last_used_at: item.last_used_at,
     }))
@@ -382,8 +387,12 @@ export async function revokeApiKey(keyId: string, userId: string): Promise<boole
   await docClient.send(new UpdateCommand({
     TableName: API_KEYS_TABLE,
     Key: { key_hash: key.key_hash as string },
-    UpdateExpression: 'SET revoked_at = :now',
-    ExpressionAttributeValues: { ':now': new Date().toISOString() },
+    UpdateExpression: 'SET revoked_at = :now, #status = :revoked',
+    ExpressionAttributeNames: { '#status': 'status' },
+    ExpressionAttributeValues: {
+      ':now': new Date().toISOString(),
+      ':revoked': 'revoked',
+    },
   }))
 
   return true

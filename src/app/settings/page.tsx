@@ -107,27 +107,27 @@ export default function SettingsPage() {
 
   return (
     <div className="max-w-4xl mx-auto p-8">
-      <h1 className="text-2xl font-bold mb-6">Settings</h1>
+      <h1 className="text-2xl font-bold mb-6 text-gray-900 dark:text-white">Settings</h1>
 
       {/* User Info */}
-      <section className="bg-white rounded-lg shadow p-6 mb-8">
-        <h2 className="text-lg font-semibold mb-4">Account</h2>
+      <section className="bg-white dark:bg-gray-800 rounded-lg shadow p-6 mb-8">
+        <h2 className="text-lg font-semibold mb-4 text-gray-900 dark:text-white">Account</h2>
         <div className="space-y-2">
           <p>
-            <span className="text-gray-500">Email:</span>{' '}
-            <span className="font-medium">{session?.user?.email}</span>
+            <span className="text-gray-500 dark:text-gray-400">Email:</span>{' '}
+            <span className="font-medium text-gray-900 dark:text-white">{session?.user?.email}</span>
           </p>
           <p>
-            <span className="text-gray-500">Name:</span>{' '}
-            <span className="font-medium">{session?.user?.name}</span>
+            <span className="text-gray-500 dark:text-gray-400">Name:</span>{' '}
+            <span className="font-medium text-gray-900 dark:text-white">{session?.user?.name}</span>
           </p>
         </div>
       </section>
 
       {/* API Keys */}
-      <section className="bg-white rounded-lg shadow p-6">
-        <h2 className="text-lg font-semibold mb-4">API Keys</h2>
-        <p className="text-gray-600 text-sm mb-6">
+      <section className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
+        <h2 className="text-lg font-semibold mb-4 text-gray-900 dark:text-white">API Keys</h2>
+        <p className="text-gray-600 dark:text-gray-300 text-sm mb-6">
           API keys are used to authenticate external services like the Krisp webhook and MCP server.
           Each key can be revoked individually.
         </p>
@@ -165,40 +165,40 @@ export default function SettingsPage() {
             placeholder="Key name (e.g., Krisp Webhook)"
             value={newKeyName}
             onChange={(e) => setNewKeyName(e.target.value)}
-            className="flex-1 px-3 py-2 border rounded-lg"
+            className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400"
             onKeyDown={(e) => e.key === 'Enter' && createKey()}
           />
           <button
             onClick={createKey}
             disabled={creating}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+            className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50"
           >
             {creating ? 'Creating...' : 'Create Key'}
           </button>
         </div>
 
         {error && (
-          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-2 rounded mb-4">
+          <div className="bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 px-4 py-2 rounded mb-4">
             {error}
           </div>
         )}
 
         {/* Keys List */}
         {loading ? (
-          <p className="text-gray-500">Loading keys...</p>
+          <p className="text-gray-500 dark:text-gray-400">Loading keys...</p>
         ) : apiKeys.length === 0 ? (
-          <p className="text-gray-500">No API keys yet. Create one above.</p>
+          <p className="text-gray-500 dark:text-gray-400">No API keys yet. Create one above.</p>
         ) : (
           <div className="space-y-3">
             {apiKeys.map((key) => (
               <div
                 key={key.key_id}
-                className="flex items-center justify-between p-4 bg-gray-50 rounded-lg"
+                className="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-700 rounded-lg"
               >
                 <div>
-                  <p className="font-medium">{key.name}</p>
-                  <p className="text-sm text-gray-500">
-                    ID: <code className="bg-gray-200 px-1 rounded">{key.key_id}</code>
+                  <p className="font-medium text-gray-900 dark:text-white">{key.name}</p>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">
+                    ID: <code className="bg-gray-200 dark:bg-gray-600 px-1 rounded text-gray-800 dark:text-gray-200">{key.key_id}</code>
                     {' • '}
                     Created: {new Date(key.created_at).toLocaleDateString()}
                     {key.last_used_at && (
@@ -211,7 +211,7 @@ export default function SettingsPage() {
                 </div>
                 <button
                   onClick={() => revokeKey(key.key_id)}
-                  className="px-3 py-1 text-red-600 hover:bg-red-50 rounded"
+                  className="px-3 py-1 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 rounded"
                 >
                   Revoke
                 </button>
@@ -221,19 +221,19 @@ export default function SettingsPage() {
         )}
 
         {/* Usage Instructions */}
-        <div className="mt-8 p-4 bg-gray-50 rounded-lg">
-          <h3 className="font-medium mb-2">How to use your API key</h3>
-          <div className="space-y-3 text-sm text-gray-600">
+        <div className="mt-8 p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
+          <h3 className="font-medium mb-2 text-gray-900 dark:text-white">How to use your API key</h3>
+          <div className="space-y-3 text-sm text-gray-600 dark:text-gray-300">
             <div>
-              <p className="font-medium text-gray-700">Krisp Webhook:</p>
+              <p className="font-medium text-gray-700 dark:text-gray-200">Krisp Webhook:</p>
               <p>
-                In Krisp settings, set the webhook URL and add your API key to the Authorization header.
+                In Krisp settings, set the webhook URL and add your API key to the X-API-Key header.
               </p>
             </div>
             <div>
-              <p className="font-medium text-gray-700">MCP Server:</p>
+              <p className="font-medium text-gray-700 dark:text-gray-200">MCP Server:</p>
               <p>
-                Set the <code className="bg-gray-200 px-1 rounded">KRISP_API_KEY</code> environment
+                Set the <code className="bg-gray-200 dark:bg-gray-600 px-1 rounded text-gray-800 dark:text-gray-200">KRISP_API_KEY</code> environment
                 variable in your Claude config.
               </p>
             </div>

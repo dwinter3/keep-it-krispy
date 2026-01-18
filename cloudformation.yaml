@@ -149,6 +149,16 @@ Resources:
                 Action:
                   - dynamodb:PutItem
                 Resource: !GetAtt TranscriptsIndex.Arn
+        - PolicyName: ApiKeyLookup
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:Query
+                Resource:
+                  - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/krisp-api-keys'
+                  - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/krisp-api-keys/index/*'
 
   # IAM Role for Processor Lambda
   ProcessorLambdaRole:
@@ -223,20 +233,44 @@ Resources:
           import json
           import os
           import boto3
+          import hashlib
           from datetime import datetime
 
           s3 = boto3.client('s3')
           dynamodb = boto3.resource('dynamodb')
           BUCKET_NAME = os.environ.get('KRISP_S3_BUCKET', '')
           DYNAMODB_TABLE = os.environ.get('DYNAMODB_TABLE', 'krisp-transcripts-index')
-          WEBHOOK_AUTH_KEY = os.environ.get('KRISP_WEBHOOK_AUTH_KEY')
+          API_KEYS_TABLE = 'krisp-api-keys'
+
+          def hash_api_key(key):
+              return hashlib.sha256(key.encode()).hexdigest()
+
+          def get_user_from_api_key(api_key):
+              """Look up user_id from API key"""
+              key_hash = hash_api_key(api_key)
+              table = dynamodb.Table(API_KEYS_TABLE)
+              response = table.query(
+                  IndexName='keyid-index',
+                  KeyConditionExpression='key_hash = :kh',
+                  ExpressionAttributeValues={':kh': key_hash}
+              )
+              items = response.get('Items', [])
+              if items and items[0].get('status') == 'active':
+                  return items[0].get('user_id')
+              return None
 
           def lambda_handler(event, context):
               headers = event.get('headers', {})
-              auth_header = headers.get('authorization', '')
 
-              if WEBHOOK_AUTH_KEY and auth_header != WEBHOOK_AUTH_KEY:
-                  return {'statusCode': 401, 'body': json.dumps({'error': 'Unauthorized'})}
+              # Get API key from X-API-Key header
+              api_key = headers.get('x-api-key', '')
+              if not api_key:
+                  return {'statusCode': 401, 'body': json.dumps({'error': 'API key required. Set X-API-Key header.'})}
+
+              # Look up user from API key
+              user_id = get_user_from_api_key(api_key)
+              if not user_id:
+                  return {'statusCode': 401, 'body': json.dumps({'error': 'Invalid or revoked API key'})}
 
               body = event.get('body', '{}')
               if event.get('isBase64Encoded', False):
@@ -299,6 +333,7 @@ Resources:
                   'event_type': event_type,
                   'received_at': received_at,
                   'indexed_at': received_at,
+                  'user_id': user_id,  # Multi-tenant isolation
               }
               if speakers:
                   dynamo_item['speakers'] = speakers
