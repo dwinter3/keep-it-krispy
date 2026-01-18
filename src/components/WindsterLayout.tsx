@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 
 // Navigation items with icons
 const navigation = [
@@ -24,6 +24,16 @@ const navigation = [
         <path fillRule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4zm2 6a1 1 0 011-1h6a1 1 0 110 2H7a1 1 0 01-1-1zm1 3a1 1 0 100 2h6a1 1 0 100-2H7z" clipRule="evenodd" />
       </svg>
     ),
+  },
+  {
+    name: 'Private',
+    href: '/transcripts/private',
+    icon: (
+      <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+        <path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" />
+      </svg>
+    ),
+    showBadge: true,
   },
   {
     name: 'Speakers',
@@ -76,6 +86,24 @@ export default function WindsterLayout({ children }: { children: React.ReactNode
   const pathname = usePathname()
   const router = useRouter()
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [privateCount, setPrivateCount] = useState<number>(0)
+
+  // Fetch private transcript count
+  useEffect(() => {
+    async function fetchPrivateCount() {
+      try {
+        const res = await fetch('/api/transcripts?onlyPrivate=true&limit=1')
+        if (res.ok) {
+          const data = await res.json()
+          // For now, just check if there are any private transcripts
+          setPrivateCount(data.transcripts?.length || 0)
+        }
+      } catch (e) {
+        console.error('Error fetching private count:', e)
+      }
+    }
+    fetchPrivateCount()
+  }, [pathname]) // Refetch when navigating
 
   const handleLogout = async () => {
     await fetch('/api/auth', { method: 'DELETE' })
@@ -126,7 +154,8 @@ export default function WindsterLayout({ children }: { children: React.ReactNode
             <ul className="space-y-1">
               {navigation.map((item) => {
                 const isActive = pathname === item.href ||
-                  (item.href !== '/' && pathname.startsWith(item.href))
+                  (item.href !== '/' && item.href !== '/transcripts/private' && pathname.startsWith(item.href))
+                const showBadge = 'showBadge' in item && item.showBadge && privateCount > 0
                 return (
                   <li key={item.name}>
                     <Link
@@ -139,7 +168,12 @@ export default function WindsterLayout({ children }: { children: React.ReactNode
                       onClick={() => setSidebarOpen(false)}
                     >
                       <span className={isActive ? 'text-white' : 'text-gray-400'}>{item.icon}</span>
-                      {item.name}
+                      <span className="flex-1">{item.name}</span>
+                      {showBadge && (
+                        <span className="px-2 py-0.5 text-xs bg-amber-500 text-white rounded-full">
+                          {privateCount > 99 ? '99+' : privateCount}
+                        </span>
+                      )}
                     </Link>
                   </li>
                 )

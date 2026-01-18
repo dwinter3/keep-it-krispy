@@ -251,7 +251,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const transcripts = await s3Client.getTranscripts(keys);
         debug(`get_transcripts: fetched ${transcripts.length} transcripts in ${Date.now() - startTime}ms`);
 
-        // Apply speaker corrections from DynamoDB
+        // Apply speaker corrections from DynamoDB and check privacy
         const transcriptsWithCorrections = await Promise.all(
           transcripts.map(async (t) => {
             if (t.error) {
@@ -261,6 +261,19 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             // Extract meeting_id from key (format: meetings/YYYY/MM/YYYYMMDD_HHMMSS_title_meetingId.json)
             const keyParts = t.key.split('_');
             const meetingId = keyParts[keyParts.length - 1]?.replace('.json', '');
+
+            // Check if transcript is private
+            if (meetingId) {
+              const record = await dynamoClient.getByMeetingId(meetingId);
+              if (record?.isPrivate) {
+                debug(`get_transcripts: skipping private transcript ${meetingId}`);
+                return {
+                  key: t.key,
+                  error: 'This transcript is marked as private and cannot be accessed via MCP',
+                  is_private: true,
+                };
+              }
+            }
 
             let correctedSpeakers = t.speakers;
             let speakerCorrections: Record<string, { name: string; linkedin?: string }> | null = null;
