@@ -4,13 +4,14 @@ Triggered by S3 events when new transcripts are uploaded.
 
 Phase 1: Extract metadata and index to DynamoDB
 Phase 2: Generate embeddings and store in S3 Vectors
+Phase 3: Generate AI topic for the meeting
 """
 
 import json
 import os
 import boto3
 from datetime import datetime
-from typing import Any, List, Dict
+from typing import Any, List, Dict, Optional
 from urllib.parse import unquote_plus
 
 from embeddings import generate_embedding, chunk_text, get_bedrock_client
@@ -25,6 +26,8 @@ vectors_client = get_vectors_client()
 
 TABLE_NAME = os.environ.get('DYNAMODB_TABLE', 'krisp-transcripts-index')
 ENABLE_VECTORS = os.environ.get('ENABLE_VECTORS', 'true').lower() == 'true'
+ENABLE_TOPICS = os.environ.get('ENABLE_TOPICS', 'true').lower() == 'true'
+TOPIC_MODEL_ID = os.environ.get('TOPIC_MODEL_ID', 'anthropic.claude-3-haiku-20240307-v1:0')
 table = dynamodb.Table(TABLE_NAME)
 
 
@@ -36,6 +39,7 @@ def handler(event: dict, context: Any) -> dict:
 
     processed = 0
     vectors_stored = 0
+    topics_generated = 0
     errors = []
 
     for record in event.get('Records', []):
@@ -60,15 +64,30 @@ def handler(event: dict, context: Any) -> dict:
             response = s3.get_object(Bucket=bucket, Key=key)
             content = json.loads(response['Body'].read().decode('utf-8'))
 
+            # Extract transcript text (used for vectors and topic)
+            transcript_text = extract_transcript_text(content)
+
             # Extract and index metadata to DynamoDB
             metadata = extract_metadata(key, content)
+
+            # Generate AI topic for the meeting
+            topic = None
+            if ENABLE_TOPICS and transcript_text:
+                try:
+                    topic = generate_topic(transcript_text, metadata['title'], bedrock_client)
+                    if topic:
+                        metadata['topic'] = topic
+                        topics_generated += 1
+                        print(f"Generated topic: {topic}")
+                except Exception as te:
+                    print(f"Topic generation error (non-fatal): {te}")
+
             index_to_dynamodb(metadata)
             print(f"Indexed to DynamoDB: {metadata['meeting_id']}")
 
             # Generate embeddings and store vectors
             if ENABLE_VECTORS:
                 try:
-                    transcript_text = extract_transcript_text(content)
                     if transcript_text:
                         num_vectors = process_vectors(
                             meeting_id=metadata['meeting_id'],
@@ -93,6 +112,7 @@ def handler(event: dict, context: Any) -> dict:
         'body': json.dumps({
             'processed': processed,
             'vectors_stored': vectors_stored,
+            'topics_generated': topics_generated,
             'errors': errors
         })
     }
@@ -106,6 +126,70 @@ def extract_transcript_text(content: dict) -> str:
     raw_payload = content.get('raw_payload', {})
     data = raw_payload.get('data', {})
     return data.get('raw_content', '')
+
+
+def generate_topic(transcript_text: str, title: str, bedrock_client) -> Optional[str]:
+    """
+    Generate a concise 1-5 word topic for the meeting using Claude.
+
+    Args:
+        transcript_text: The full transcript text
+        title: The meeting title
+        bedrock_client: Bedrock runtime client
+
+    Returns:
+        A short topic string (1-5 words) or None if generation fails
+    """
+    if not transcript_text or len(transcript_text.strip()) < 50:
+        return None
+
+    # Use first 4000 chars of transcript to keep within token limits
+    text_sample = transcript_text[:4000]
+
+    prompt = f"""Based on this meeting transcript, generate a concise 1-5 word topic that describes the main subject discussed.
+
+Meeting title: {title}
+
+Transcript excerpt:
+{text_sample}
+
+Return ONLY the topic, nothing else. The topic should be descriptive but brief (1-5 words max). Examples of good topics: "Q4 Sales Review", "Product Roadmap Planning", "Customer Onboarding", "Bug Triage", "Team Standup"."""
+
+    try:
+        body = json.dumps({
+            "anthropic_version": "bedrock-2023-05-31",
+            "max_tokens": 50,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ]
+        })
+
+        response = bedrock_client.invoke_model(
+            modelId=TOPIC_MODEL_ID,
+            body=body,
+            contentType='application/json',
+            accept='application/json'
+        )
+
+        response_body = json.loads(response['body'].read())
+        topic = response_body.get('content', [{}])[0].get('text', '').strip()
+
+        # Validate topic is reasonable (1-5 words, not too long)
+        if topic and len(topic) <= 50 and len(topic.split()) <= 6:
+            return topic
+        elif topic:
+            # Truncate if too long
+            words = topic.split()[:5]
+            return ' '.join(words)
+
+        return None
+
+    except Exception as e:
+        print(f"Error generating topic: {e}")
+        return None
 
 
 def is_real_speaker_name(name: str) -> bool:
@@ -282,6 +366,10 @@ def index_to_dynamodb(metadata: dict) -> None:
         item['speakers'] = metadata['speakers']
         # Add first speaker as speaker_name for GSI
         item['speaker_name'] = metadata['speakers'][0].lower()
+
+    # Add AI-generated topic if available
+    if metadata.get('topic'):
+        item['topic'] = metadata['topic']
 
     # Put item (will overwrite if exists)
     table.put_item(Item=item)

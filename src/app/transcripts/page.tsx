@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import Shell from '@/components/Shell'
+import ExpandableSpeakers from '@/components/ExpandableSpeakers'
 
 interface SpeakerCorrection {
   name: string
@@ -19,6 +20,7 @@ interface Transcript {
   speakers: string[]
   eventType: string
   speakerCorrections: Record<string, SpeakerCorrection> | null
+  topic?: string | null
 }
 
 interface TranscriptContent {
@@ -290,6 +292,23 @@ export default function TranscriptsPage() {
                             <div className="font-medium text-gray-900 dark:text-white">
                               {buildRichTitle(transcript)}
                             </div>
+                            {transcript.topic && (
+                              <div className="mt-1 flex items-center gap-1 text-xs text-purple-600 dark:text-purple-400">
+                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
+                                </svg>
+                                {transcript.topic}
+                              </div>
+                            )}
+                            {transcript.speakers.length > 0 && (
+                              <div className="mt-1 text-xs">
+                                <ExpandableSpeakers
+                                  speakers={transcript.speakers}
+                                  speakerCorrections={transcript.speakerCorrections}
+                                  initialCount={2}
+                                />
+                              </div>
+                            )}
                           </div>
                         ))}
                       </div>
@@ -345,6 +364,14 @@ export default function TranscriptsPage() {
                     <span className="px-2.5 py-1 bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 rounded-full">
                       {selectedTranscript.eventType?.replace(/_/g, ' ') || 'Krisp'}
                     </span>
+                    {selectedTranscript.topic && (
+                      <span className="px-2.5 py-1 bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 rounded-full flex items-center gap-1">
+                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
+                        </svg>
+                        {selectedTranscript.topic}
+                      </span>
+                    )}
                   </div>
 
                   {selectedTranscript.speakers.length > 0 && (
