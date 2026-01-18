@@ -82,6 +82,32 @@ Resources:
           Projection:
             ProjectionType: ALL
 
+  # DynamoDB Table for Companies
+  CompaniesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: krisp-companies
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+        - AttributeName: pk
+          AttributeType: S
+        - AttributeName: mentionCount
+          AttributeType: N
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: all-companies-index
+          KeySchema:
+            - AttributeName: pk
+              KeyType: HASH
+            - AttributeName: mentionCount
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+
   # IAM Role for Webhook Lambda
   WebhookLambdaRole:
     Type: AWS::IAM::Role
@@ -143,13 +169,18 @@ Resources:
                   - dynamodb:GetItem
                   - dynamodb:UpdateItem
                   - dynamodb:Query
+                  - dynamodb:Scan
                 Resource:
                   - !GetAtt TranscriptsIndex.Arn
                   - !Sub '${TranscriptsIndex.Arn}/index/*'
+                  - !GetAtt CompaniesTable.Arn
+                  - !Sub '${CompaniesTable.Arn}/index/*'
               - Effect: Allow
                 Action:
                   - bedrock:InvokeModel
-                Resource: !Sub 'arn:aws:bedrock:${AWS::Region}::foundation-model/amazon.titan-embed-text-v2:0'
+                Resource:
+                  - !Sub 'arn:aws:bedrock:${AWS::Region}::foundation-model/amazon.titan-embed-text-v2:0'
+                  - !Sub 'arn:aws:bedrock:${AWS::Region}::foundation-model/amazon.nova-lite-v1:0'
               - Effect: Allow
                 Action:
                   - s3vectors:PutVectors
@@ -376,11 +407,16 @@ Outputs:
     Description: DynamoDB table for transcript metadata
     Value: !Ref TranscriptsIndex
 
+  CompaniesTable:
+    Description: DynamoDB table for company data
+    Value: !Ref CompaniesTable
+
   MCPServerConfig:
     Description: Environment variables for MCP server
     Value: !Sub |
       KRISP_S3_BUCKET=${TranscriptsBucket}
       DYNAMODB_TABLE=${TranscriptsIndex}
+      COMPANIES_TABLE=${CompaniesTable}
       VECTOR_BUCKET=${VectorsBucket}
       VECTOR_INDEX=transcript-chunks
       AWS_REGION=${AWS::Region}
