@@ -1,26 +1,107 @@
 @import "tailwindcss";
 
+/* Windster Theme Color Palette */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* Primary colors - Blue accent */
+  --color-primary-50: #eff6ff;
+  --color-primary-100: #dbeafe;
+  --color-primary-200: #bfdbfe;
+  --color-primary-300: #93c5fd;
+  --color-primary-400: #60a5fa;
+  --color-primary-500: #3b82f6;
+  --color-primary-600: #2563eb;
+  --color-primary-700: #1d4ed8;
+  --color-primary-800: #1e40af;
+  --color-primary-900: #1e3a8a;
+
+  /* Sidebar dark theme */
+  --sidebar-bg: #1f2937;
+  --sidebar-hover: #374151;
+  --sidebar-active: #111827;
+  --sidebar-border: #374151;
+  --sidebar-text: #9ca3af;
+  --sidebar-text-active: #ffffff;
+
+  /* Content area light theme */
+  --content-bg: #f9fafb;
+  --content-card: #ffffff;
+  --content-border: #e5e7eb;
+  --content-text: #111827;
+  --content-text-muted: #6b7280;
+
+  /* Background and foreground */
+  --background: #f9fafb;
+  --foreground: #111827;
+}
+
+/* Dark mode overrides */
+.dark {
+  --content-bg: #111827;
+  --content-card: #1f2937;
+  --content-border: #374151;
+  --content-text: #f9fafb;
+  --content-text-muted: #9ca3af;
+  --background: #111827;
+  --foreground: #f9fafb;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
+  --font-sans: var(--font-inter), system-ui, -apple-system, sans-serif;
+  --font-mono: ui-monospace, monospace;
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  /* Custom colors for theme */
+  --color-primary-50: var(--color-primary-50);
+  --color-primary-100: var(--color-primary-100);
+  --color-primary-200: var(--color-primary-200);
+  --color-primary-300: var(--color-primary-300);
+  --color-primary-400: var(--color-primary-400);
+  --color-primary-500: var(--color-primary-500);
+  --color-primary-600: var(--color-primary-600);
+  --color-primary-700: var(--color-primary-700);
+  --color-primary-800: var(--color-primary-800);
+  --color-primary-900: var(--color-primary-900);
+
+  --color-sidebar-bg: var(--sidebar-bg);
+  --color-sidebar-hover: var(--sidebar-hover);
+  --color-sidebar-active: var(--sidebar-active);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-text: var(--sidebar-text);
+  --color-sidebar-text-active: var(--sidebar-text-active);
+
+  --color-content-bg: var(--content-bg);
+  --color-content-card: var(--content-card);
+  --color-content-border: var(--content-border);
+  --color-content-text: var(--content-text);
+  --color-content-text-muted: var(--content-text-muted);
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--content-bg);
+  color: var(--content-text);
+  font-family: var(--font-sans), system-ui, -apple-system, sans-serif;
+}
+
+/* Flowbite component customizations */
+.flowbite-sidebar {
+  transition: width 0.3s ease-in-out;
+}
+
+/* Custom scrollbar for sidebar */
+.sidebar-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+
+.sidebar-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.sidebar-scroll::-webkit-scrollbar-thumb {
+  background-color: var(--sidebar-border);
+  border-radius: 3px;
+}
+
+.sidebar-scroll::-webkit-scrollbar-thumb:hover {
+  background-color: var(--sidebar-text);
 }
