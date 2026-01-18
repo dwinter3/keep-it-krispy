@@ -4,8 +4,8 @@
 
 **Keep It Krispy** (repo: `krisp-buddy`) - AI-powered meeting memory that turns Krisp transcripts into a searchable knowledge base for Claude.
 
-- **Website**: https://krispy.alpha-pm.dev
-- **Web Dashboard**: https://main.dh65gpsgmkx3x.amplifyapp.com
+- **Marketing Site**: https://krispy.alpha-pm.dev (S3 + CloudFront)
+- **SaaS Dashboard**: https://main.dh65gpsgmkx3x.amplifyapp.com (AWS Amplify)
 - **GitHub**: https://github.com/dwinter3/keep-it-krispy
 
 ## Architecture
@@ -41,12 +41,17 @@ aws <command> --profile krisp-buddy --region us-east-1
 
 | Resource | Name/ID |
 |----------|---------|
+| **SaaS Dashboard** | |
 | Amplify App | `dh65gpsgmkx3x` |
 | DynamoDB Table | `krisp-transcripts-index` |
 | S3 Transcripts | `krisp-transcripts-754639201213` |
 | S3 Vectors | `krisp-vectors-754639201213` |
 | Vector Index | `transcript-chunks` |
 | CloudFormation Stack | `krisp-buddy` |
+| **Marketing Site** | |
+| S3 Bucket | `keepitkrispy-website` |
+| CloudFront Distribution | `E29BWHIS0Y6I7T` |
+| CloudFront Domain | `d2jyxueb2eip8f.cloudfront.net` |
 
 ### Useful AWS Commands
 
@@ -69,7 +74,16 @@ aws logs tail /aws/lambda/krisp-buddy-processor --profile krisp-buddy --region u
 
 ## Deployment
 
-### Deploy Next.js Dashboard (Amplify)
+### Deploy Marketing Site (S3 + CloudFront)
+```bash
+# Sync website folder to S3
+aws s3 sync website/ s3://keepitkrispy-website/ --profile krisp-buddy --region us-east-1 --delete
+
+# Invalidate CloudFront cache (required for changes to appear)
+aws cloudfront create-invalidation --distribution-id E29BWHIS0Y6I7T --paths "/*" --profile krisp-buddy --region us-east-1
+```
+
+### Deploy SaaS Dashboard (Amplify)
 ```bash
 git push origin main
 aws amplify start-job --app-id dh65gpsgmkx3x --branch-name main --job-type RELEASE --profile krisp-buddy --region us-east-1
@@ -110,7 +124,7 @@ gh issue view <number>
 │   ├── processor/               # S3 event processor (embeddings, vectors)
 │   ├── mcp-server/              # MCP server for Claude (Python)
 │   └── mcp-server-ts/           # MCP server for Claude (TypeScript)
-├── website/                     # Static marketing site (krispy.alpha-pm.dev)
+├── website/                     # Marketing site (S3 → krispy.alpha-pm.dev)
 ├── scripts/                     # Backfill and maintenance scripts
 ├── src/                         # Next.js web dashboard
 │   ├── app/
