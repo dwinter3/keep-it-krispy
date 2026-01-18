@@ -53,3 +53,4 @@ lambda/*/.venv/
 
 # Root level build artifacts
 /package/
+client_secret_*.json
