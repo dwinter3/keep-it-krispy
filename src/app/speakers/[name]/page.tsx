@@ -471,45 +471,51 @@ export default function SpeakerProfilePage({ params }: { params: Promise<{ name:
                       )}
                     </div>
                     <div className="flex items-center gap-2">
+                      {/* Show Refresh button only if there's existing enrichment data */}
                       {(enrichmentResult || profile?.enrichedData) && (
                         <button
                           onClick={() => handleEnrich(true)}
                           disabled={enriching}
                           className="text-xs px-3 py-1.5 bg-zinc-700 hover:bg-zinc-600 disabled:bg-zinc-700/50 text-white rounded-lg transition-colors flex items-center gap-2"
-                          title="Force refresh enrichment"
+                          title="Search for updated profile information"
                         >
-                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                          </svg>
-                          Refresh
+                          {enriching ? (
+                            <>
+                              <span className="animate-spin">&#8635;</span>
+                              Searching...
+                            </>
+                          ) : (
+                            <>
+                              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                              </svg>
+                              Refresh
+                            </>
+                          )}
                         </button>
                       )}
-                      <button
-                        onClick={() => handleEnrich(false)}
-                        disabled={enriching}
-                        className="text-xs px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:bg-blue-600/50 text-white rounded-lg transition-colors flex items-center gap-2"
-                      >
-                        {enriching ? (
-                          <>
-                            <span className="animate-spin">&#8635;</span>
-                            Searching...
-                          </>
-                        ) : profile?.enrichedData || enrichmentResult ? (
-                          <>
-                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                            </svg>
-                            View Details
-                          </>
-                        ) : (
-                          <>
-                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9" />
-                            </svg>
-                            Enrich from Web
-                          </>
-                        )}
-                      </button>
+                      {/* Only show "Enrich from Web" button when no data exists yet */}
+                      {!enrichmentResult && !profile?.enrichedData && (
+                        <button
+                          onClick={() => handleEnrich(false)}
+                          disabled={enriching}
+                          className="text-xs px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:bg-blue-600/50 text-white rounded-lg transition-colors flex items-center gap-2"
+                        >
+                          {enriching ? (
+                            <>
+                              <span className="animate-spin">&#8635;</span>
+                              Searching...
+                            </>
+                          ) : (
+                            <>
+                              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9" />
+                              </svg>
+                              Enrich from Web
+                            </>
+                          )}
+                        </button>
+                      )}
                     </div>
                   </div>
 

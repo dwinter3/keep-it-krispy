@@ -403,8 +403,10 @@ Extract and return a JSON object:
   "title": "Job title (if identifiable)",
   "company": "Company name (if identifiable)",
   "summary": "2-3 sentence professional summary combining web info and meeting context. Start with the full name.",
-  "linkedinUrl": "LinkedIn URL if the result is from LinkedIn, otherwise null"
+  "linkedinUrl": "PERSONAL LinkedIn profile URL only (format: linkedin.com/in/username). Must be the individual person's profile, NOT a company page (linkedin.com/company/...). If the URL is a company page or not a personal profile, return null."
 }
+
+IMPORTANT: Only return a linkedinUrl if it's clearly a personal profile URL (contains /in/). Company pages (/company/) should NOT be included.
 
 Return ONLY valid JSON.`
 
@@ -450,13 +452,14 @@ Return ONLY valid JSON.`
     console.error('Enriched data extraction error:', err)
   }
 
-  // Fallback
+  // Fallback - only include LinkedIn URL if it's a personal profile (contains /in/)
+  const isPersonalLinkedIn = bestResult.result.url.includes('linkedin.com/in/')
   return {
     enrichedData: {
       title: '',
       company: context.companies[0] || '',
       summary: bestResult.result.snippet || '',
-      linkedinUrl: bestResult.result.url.includes('linkedin.com') ? bestResult.result.url : undefined,
+      linkedinUrl: isPersonalLinkedIn ? bestResult.result.url : undefined,
     },
     bestConfidence: bestResult.validation.confidence,
     reasoning: bestResult.validation.reasoning,
@@ -617,17 +620,23 @@ export async function POST(
     let aiSummary = ''
     const topics = context.topics
 
-    // If we have context, use it for the summary
+    // If we have context, use it for the summary - focus on actionable insights
     if (context.transcriptCount > 0) {
-      const summaryPrompt = `Based on ${context.transcriptCount} meeting transcripts with ${context.name}, provide a brief professional summary.
+      const summaryPrompt = `Based on ${context.transcriptCount} meeting transcripts with ${context.name}, provide actionable professional insights.
 
-Known context:
-- Topics: ${context.topics.join(', ')}
-- Companies: ${context.companies.join(', ')}
-- Role hints: ${context.roleHints.join(', ')}
-- Keywords: ${context.contextKeywords.join(', ')}
+Known context from meetings:
+- Topics discussed: ${context.topics.join(', ')}
+- Companies mentioned: ${context.companies.join(', ')}
+- Role indicators: ${context.roleHints.join(', ')}
+- Keywords used: ${context.contextKeywords.join(', ')}
+- Recent meeting titles: ${context.recentMeetingTitles?.slice(0, 3).join(', ') || 'N/A'}
 
-Write a 2-3 sentence professional summary focusing on their apparent role and expertise. Be concise and professional.
+Analyze the meeting content and write a 3-4 sentence insight that answers:
+1. What is ${context.name}'s apparent role and what are they responsible for?
+2. What seems to motivate them or what problems are they trying to solve?
+3. What are their likely goals or priorities based on meeting discussions?
+
+Be specific and actionable - avoid generic statements. Focus on insights that would help someone prepare for their next meeting with this person.
 
 Return ONLY the summary text, no JSON.`
 
