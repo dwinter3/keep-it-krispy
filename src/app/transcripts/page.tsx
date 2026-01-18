@@ -1593,7 +1593,7 @@ function TranscriptDetail({
 
             <div className="p-4 space-y-4">
               {/* Key Discussion Points */}
-              {detailedSummary.keyDiscussionPoints.length > 0 && (
+              {Array.isArray(detailedSummary.keyDiscussionPoints) && detailedSummary.keyDiscussionPoints.length > 0 && (
                 <div>
                   <h4 className="text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wide mb-2 flex items-center gap-1.5">
                     <svg className="w-3.5 h-3.5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1613,7 +1613,7 @@ function TranscriptDetail({
               )}
 
               {/* Decisions */}
-              {detailedSummary.decisions.length > 0 && (
+              {Array.isArray(detailedSummary.decisions) && detailedSummary.decisions.length > 0 && (
                 <div>
                   <h4 className="text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wide mb-2 flex items-center gap-1.5">
                     <svg className="w-3.5 h-3.5 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1633,7 +1633,7 @@ function TranscriptDetail({
               )}
 
               {/* Action Items */}
-              {detailedSummary.actionItems.length > 0 && (
+              {Array.isArray(detailedSummary.actionItems) && detailedSummary.actionItems.length > 0 && (
                 <div>
                   <h4 className="text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wide mb-2 flex items-center gap-1.5">
                     <svg className="w-3.5 h-3.5 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1653,7 +1653,7 @@ function TranscriptDetail({
               )}
 
               {/* Topics */}
-              {detailedSummary.importantTopics.length > 0 && (
+              {Array.isArray(detailedSummary.importantTopics) && detailedSummary.importantTopics.length > 0 && (
                 <div>
                   <h4 className="text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wide mb-2 flex items-center gap-1.5">
                     <svg className="w-3.5 h-3.5 text-purple-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
