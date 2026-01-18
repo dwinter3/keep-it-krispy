@@ -95,6 +95,7 @@ export async function GET(request: NextRequest) {
       speakers: item.speakers || [],
       eventType: item.event_type,
       speakerCorrections: item.speaker_corrections || null,
+      topic: item.topic || null,
     }))
 
     // Build next cursor if there are more results
