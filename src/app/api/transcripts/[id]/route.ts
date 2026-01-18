@@ -111,7 +111,7 @@ export async function PATCH(
 
   try {
     const body = await request.json()
-    const { isPrivate, privacyDismissed } = body
+    const { isPrivate, privacyDismissed, irrelevanceDismissed } = body
 
     // Get the current transcript record
     const getCommand = new GetCommand({
@@ -151,6 +151,12 @@ export async function PATCH(
       updateParts.push('#privacyDismissed = :privacyDismissed')
       expressionNames['#privacyDismissed'] = 'privacy_dismissed'
       expressionValues[':privacyDismissed'] = privacyDismissed
+    }
+
+    if (typeof irrelevanceDismissed === 'boolean') {
+      updateParts.push('#irrelevanceDismissed = :irrelevanceDismissed')
+      expressionNames['#irrelevanceDismissed'] = 'irrelevance_dismissed'
+      expressionValues[':irrelevanceDismissed'] = irrelevanceDismissed
     }
 
     if (updateParts.length === 0) {

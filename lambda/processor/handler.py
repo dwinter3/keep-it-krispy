@@ -28,8 +28,12 @@ TABLE_NAME = os.environ.get('DYNAMODB_TABLE', 'krisp-transcripts-index')
 ENABLE_VECTORS = os.environ.get('ENABLE_VECTORS', 'true').lower() == 'true'
 ENABLE_TOPICS = os.environ.get('ENABLE_TOPICS', 'true').lower() == 'true'
 ENABLE_PRIVACY = os.environ.get('ENABLE_PRIVACY', 'true').lower() == 'true'
+ENABLE_RELEVANCE = os.environ.get('ENABLE_RELEVANCE', 'true').lower() == 'true'
 TOPIC_MODEL_ID = os.environ.get('TOPIC_MODEL_ID', 'amazon.nova-lite-v1:0')
 PRIVACY_MODEL_ID = os.environ.get('PRIVACY_MODEL_ID', 'amazon.nova-lite-v1:0')
+RELEVANCE_MODEL_ID = os.environ.get('RELEVANCE_MODEL_ID', 'amazon.nova-lite-v1:0')
+# Threshold for short calls that should be checked for relevance (5 minutes)
+SHORT_CALL_THRESHOLD_SECONDS = 300
 table = dynamodb.Table(TABLE_NAME)
 
 
@@ -43,6 +47,7 @@ def handler(event: dict, context: Any) -> dict:
     vectors_stored = 0
     topics_generated = 0
     privacy_analyzed = 0
+    relevance_analyzed = 0
     errors = []
 
     for record in event.get('Records', []):
@@ -100,6 +105,23 @@ def handler(event: dict, context: Any) -> dict:
                 except Exception as pe:
                     print(f"Privacy analysis error (non-fatal): {pe}")
 
+            # Analyze relevance for short calls (< 5 minutes)
+            duration = metadata.get('duration', 0)
+            if ENABLE_RELEVANCE and duration > 0 and duration < SHORT_CALL_THRESHOLD_SECONDS:
+                try:
+                    relevance_result = analyze_relevance(transcript_text, metadata['title'], duration, bedrock_client)
+                    if relevance_result:
+                        metadata['is_irrelevant'] = relevance_result['is_irrelevant']
+                        metadata['irrelevance_reason'] = relevance_result['reason']
+                        metadata['irrelevance_confidence'] = relevance_result['confidence']
+                        relevance_analyzed += 1
+                        if relevance_result['is_irrelevant']:
+                            print(f"Marked as irrelevant: {relevance_result['reason']} ({relevance_result['confidence']}% confidence)")
+                        else:
+                            print(f"Short call is relevant: {relevance_result['reason']}")
+                except Exception as re:
+                    print(f"Relevance analysis error (non-fatal): {re}")
+
             index_to_dynamodb(metadata)
             print(f"Indexed to DynamoDB: {metadata['meeting_id']}")
 
@@ -132,6 +154,7 @@ def handler(event: dict, context: Any) -> dict:
             'vectors_stored': vectors_stored,
             'topics_generated': topics_generated,
             'privacy_analyzed': privacy_analyzed,
+            'relevance_analyzed': relevance_analyzed,
             'errors': errors
         })
     }
@@ -334,6 +357,121 @@ Return ONLY the JSON object, no other text."""
         return None
 
 
+def analyze_relevance(transcript_text: str, title: str, duration: int, bedrock_client) -> Optional[Dict]:
+    """
+    Analyze if a short meeting transcript is relevant or likely a test/irrelevant call.
+
+    Only called for meetings under 5 minutes. Checks for:
+    - Test calls (audio/video testing)
+    - Quick check-ins with no substance
+    - Accidental recordings
+    - No discernible topic discussed
+
+    Args:
+        transcript_text: The full transcript text
+        title: The meeting title
+        duration: Meeting duration in seconds
+        bedrock_client: Bedrock runtime client
+
+    Returns:
+        Dict with is_irrelevant, reason, confidence or None if analysis fails
+    """
+    if not transcript_text:
+        # No transcript text = likely irrelevant
+        return {
+            'is_irrelevant': True,
+            'reason': 'No transcript content available',
+            'confidence': 90
+        }
+
+    # Very short transcript text is likely a test
+    if len(transcript_text.strip()) < 100:
+        return {
+            'is_irrelevant': True,
+            'reason': 'Minimal transcript content - likely a test or quick check',
+            'confidence': 85
+        }
+
+    # Use the transcript for analysis
+    text_sample = transcript_text[:3000]
+    duration_mins = round(duration / 60, 1)
+
+    prompt = f"""Analyze this short meeting transcript ({duration_mins} minutes) and determine if it contains meaningful content or is likely a test/irrelevant call.
+
+Meeting title: {title}
+
+Transcript:
+{text_sample}
+
+A meeting should be marked as IRRELEVANT if it matches any of these criteria:
+1. Test calls - checking audio, video, or connection quality
+2. Quick hellos with no actual discussion
+3. Accidental recordings or background noise
+4. Only greetings/goodbyes with no substance
+5. No discernible business or personal topic discussed
+6. Technical troubleshooting with no meeting content
+
+A meeting is RELEVANT if it has:
+1. Any actual discussion or information exchange
+2. Questions and answers about any topic
+3. Planning or decision-making
+4. Updates or status reports
+5. Clear purpose even if brief
+
+Return your analysis as JSON:
+{{
+  "is_irrelevant": true/false,
+  "reason": "Brief explanation (1 sentence)",
+  "confidence": 0-100
+}}
+
+Return ONLY the JSON object, no other text."""
+
+    try:
+        body = json.dumps({
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [{"text": prompt}]
+                }
+            ],
+            "inferenceConfig": {
+                "maxTokens": 150,
+                "temperature": 0.2,
+                "topP": 0.9
+            }
+        })
+
+        response = bedrock_client.invoke_model(
+            modelId=RELEVANCE_MODEL_ID,
+            body=body,
+            contentType='application/json',
+            accept='application/json'
+        )
+
+        response_body = json.loads(response['body'].read())
+        result_text = response_body.get('output', {}).get('message', {}).get('content', [{}])[0].get('text', '').strip()
+
+        # Handle potential markdown code blocks
+        if result_text.startswith('```'):
+            result_text = result_text.split('```')[1]
+            if result_text.startswith('json'):
+                result_text = result_text[4:]
+            result_text = result_text.strip()
+
+        result = json.loads(result_text)
+
+        return {
+            'is_irrelevant': bool(result.get('is_irrelevant', False)),
+            'reason': result.get('reason', '')[:200],  # Limit reason length
+            'confidence': min(100, max(0, int(result.get('confidence', 50))))
+        }
+
+    except Exception as e:
+        print(f"Error analyzing relevance: {e}")
+        return None
+
+
 def is_real_speaker_name(name: str) -> bool:
     """
     Check if a speaker name is a real name vs generic placeholder.
@@ -520,6 +658,12 @@ def index_to_dynamodb(metadata: dict) -> None:
         item['privacy_topics'] = metadata.get('privacy_topics', [])
         item['privacy_confidence'] = metadata.get('privacy_confidence', 0)
         item['privacy_work_percent'] = metadata.get('privacy_work_percent', 0)
+
+    # Add relevance analysis fields if available
+    if 'is_irrelevant' in metadata:
+        item['is_irrelevant'] = metadata['is_irrelevant']
+        item['irrelevance_reason'] = metadata.get('irrelevance_reason', '')
+        item['irrelevance_confidence'] = metadata.get('irrelevance_confidence', 0)
 
     # Put item (will overwrite if exists)
     table.put_item(Item=item)

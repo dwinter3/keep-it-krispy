@@ -33,6 +33,11 @@ interface Transcript {
   privacyConfidence?: number | null
   privacyWorkPercent?: number | null
   privacyDismissed?: boolean
+  // Relevance analysis for short calls
+  isIrrelevant?: boolean
+  irrelevanceReason?: string | null
+  irrelevanceConfidence?: number | null
+  irrelevanceDismissed?: boolean
 }
 
 type DateFilter = 'all' | 'today' | 'week' | 'month'
@@ -360,6 +365,28 @@ export default function TranscriptsPage() {
           : t
       ))
       setSelectedTranscript(prev => prev ? { ...prev, privacyDismissed: true } : null)
+    } catch (err) {
+      console.error('Error dismissing warning:', err)
+    }
+  }
+
+  async function handleDismissIrrelevanceWarning() {
+    if (!selectedTranscript) return
+    try {
+      const res = await fetch(`/api/transcripts/${selectedTranscript.meetingId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ irrelevanceDismissed: true }),
+      })
+      if (!res.ok) throw new Error('Failed to dismiss warning')
+
+      // Update local state
+      setTranscripts(prev => prev.map(t =>
+        t.meetingId === selectedTranscript.meetingId
+          ? { ...t, irrelevanceDismissed: true }
+          : t
+      ))
+      setSelectedTranscript(prev => prev ? { ...prev, irrelevanceDismissed: true } : null)
     } catch (err) {
       console.error('Error dismissing warning:', err)
     }
@@ -1193,6 +1220,50 @@ export default function TranscriptsPage() {
                               className="text-xs px-3 py-1.5 text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200"
                             >
                               Dismiss
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Irrelevance Warning Banner */}
+                  {selectedTranscript.isIrrelevant && !selectedTranscript.irrelevanceDismissed && (
+                    <div className="mb-4 p-3 rounded-lg border bg-gray-100 dark:bg-gray-700/50 border-gray-300 dark:border-gray-600">
+                      <div className="flex items-start gap-3">
+                        <svg className="w-5 h-5 mt-0.5 flex-shrink-0 text-gray-500 dark:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                            Likely irrelevant - Test call or no discernible topic
+                          </p>
+                          {selectedTranscript.irrelevanceReason && (
+                            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                              {selectedTranscript.irrelevanceReason}
+                            </p>
+                          )}
+                          <div className="flex items-center gap-2 mt-2 text-xs text-gray-500 dark:text-gray-400">
+                            <span>{Math.floor(selectedTranscript.duration / 60)}:{(selectedTranscript.duration % 60).toString().padStart(2, '0')} duration</span>
+                            {selectedTranscript.irrelevanceConfidence && (
+                              <>
+                                <span>·</span>
+                                <span>{selectedTranscript.irrelevanceConfidence}% confidence</span>
+                              </>
+                            )}
+                          </div>
+                          <div className="flex gap-2 mt-3">
+                            <button
+                              onClick={handleDismissIrrelevanceWarning}
+                              className="text-xs px-3 py-1.5 bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-300 rounded hover:bg-gray-300 dark:hover:bg-gray-500"
+                            >
+                              This is relevant - Dismiss
+                            </button>
+                            <button
+                              onClick={() => setShowDeleteConfirm(true)}
+                              className="text-xs px-3 py-1.5 text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-300"
+                            >
+                              Delete
                             </button>
                           </div>
                         </div>

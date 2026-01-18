@@ -99,6 +99,14 @@ export default function WindsterLayout({ children }: { children: React.ReactNode
   const { data: session } = useSession()
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [privateCount, setPrivateCount] = useState<number>(0)
+  const [searchQuery, setSearchQuery] = useState('')
+
+  function handleGlobalSearch(e: React.FormEvent) {
+    e.preventDefault()
+    if (searchQuery.trim()) {
+      router.push(`/search?q=${encodeURIComponent(searchQuery.trim())}`)
+    }
+  }
 
   // Fetch private transcript count
   useEffect(() => {
@@ -253,8 +261,8 @@ export default function WindsterLayout({ children }: { children: React.ReactNode
               </svg>
             </button>
 
-            {/* Search bar */}
-            <div className="flex-1 max-w-lg mx-4 hidden sm:block">
+            {/* Global Search bar */}
+            <form onSubmit={handleGlobalSearch} className="flex-1 max-w-lg mx-4 hidden sm:block">
               <div className="relative">
                 <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
                   <svg className="h-5 w-5 text-gray-400" fill="currentColor" viewBox="0 0 20 20">
@@ -263,13 +271,13 @@ export default function WindsterLayout({ children }: { children: React.ReactNode
                 </div>
                 <input
                   type="search"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
                   placeholder="Search transcripts..."
                   className="block w-full rounded-lg border border-gray-300 bg-gray-50 py-2 pl-10 pr-3 text-sm text-gray-900 placeholder-gray-500 focus:border-primary-500 focus:ring-primary-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white dark:placeholder-gray-400"
-                  onClick={() => router.push('/search')}
-                  readOnly
                 />
               </div>
-            </div>
+            </form>
 
             {/* Right side actions */}
             <div className="flex items-center gap-3">
