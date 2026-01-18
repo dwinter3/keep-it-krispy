@@ -6,12 +6,17 @@ import {
   QueryCommand,
   GetCommand,
   DeleteCommand,
+  UpdateCommand,
+  ScanCommand,
 } from '@aws-sdk/lib-dynamodb'
 import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3'
 import { BedrockRuntimeClient, InvokeModelCommand } from '@aws-sdk/client-bedrock-runtime'
 import { S3VectorsClient, PutVectorsCommand, DeleteVectorsCommand } from '@aws-sdk/client-s3vectors'
 import { v4 as uuidv4 } from 'uuid'
+import { createHash } from 'crypto'
 import { parseDocument, detectFormat, chunkText, type DocumentFormat } from '@/lib/documentParser'
+import { auth } from '@/lib/auth'
+import { getUserByEmail } from '@/lib/users'
 
 const TABLE_NAME = process.env.DYNAMODB_TABLE || 'krisp-transcripts-index'
 const BUCKET_NAME = process.env.KRISP_S3_BUCKET || ''
@@ -20,6 +25,7 @@ const INDEX_NAME = process.env.VECTOR_INDEX || 'transcript-chunks'
 const AWS_REGION = process.env.APP_REGION || 'us-east-1'
 const MODEL_ID = 'amazon.titan-embed-text-v2:0'
 const EMBEDDING_DIMENSIONS = 1024
+const MAX_FILE_SIZE = 10 * 1024 * 1024 // 10MB
 
 // AWS clients with custom credentials for Amplify
 const credentials = process.env.S3_ACCESS_KEY_ID
@@ -37,7 +43,12 @@ const bedrock = new BedrockRuntimeClient({ region: AWS_REGION, credentials })
 export interface Document {
   document_id: string
   pk: string
+  user_id: string
   title: string
+  filename?: string
+  file_type?: string
+  file_hash?: string
+  file_size?: number
   source: 'upload' | 'url' | 'drive'
   sourceUrl?: string
   format: DocumentFormat
@@ -45,12 +56,25 @@ export interface Document {
   importedAt: string
   wordCount: number
   isPrivate: boolean
+  linked_transcripts?: string[]
 }
 
 /**
  * GET /api/documents - List all documents or fetch a specific one
  */
 export async function GET(request: NextRequest) {
+  // Get authenticated user
+  const session = await auth()
+  if (!session?.user?.email) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
+  const user = await getUserByEmail(session.user.email)
+  if (!user) {
+    return NextResponse.json({ error: 'User not found' }, { status: 404 })
+  }
+  const userId = user.user_id
+
   const { searchParams } = new URL(request.url)
   const documentId = searchParams.get('id')
 
@@ -65,6 +89,11 @@ export async function GET(request: NextRequest) {
 
       if (!response.Item) {
         return NextResponse.json({ error: 'Document not found' }, { status: 404 })
+      }
+
+      // Check ownership
+      if (response.Item.user_id && response.Item.user_id !== userId) {
+        return NextResponse.json({ error: 'Access denied' }, { status: 403 })
       }
 
       // Also fetch the content from S3
@@ -91,30 +120,60 @@ export async function GET(request: NextRequest) {
       return NextResponse.json(response.Item)
     }
 
-    // List all documents using GSI
-    const queryCommand = new QueryCommand({
-      TableName: TABLE_NAME,
-      IndexName: 'all-transcripts-index',
-      KeyConditionExpression: 'pk = :pk',
-      ExpressionAttributeValues: { ':pk': 'DOCUMENT' },
-      ScanIndexForward: false, // Newest first
+    // List documents for this user using GSI
+    // First try user-index, then fall back to scanning with filter
+    let documents: Record<string, unknown>[] = []
+
+    try {
+      const queryCommand = new QueryCommand({
+        TableName: TABLE_NAME,
+        IndexName: 'user-index',
+        KeyConditionExpression: 'user_id = :userId',
+        FilterExpression: 'pk = :pk',
+        ExpressionAttributeValues: {
+          ':userId': userId,
+          ':pk': 'DOCUMENT',
+        },
+        ScanIndexForward: false,
+      })
+      const response = await dynamodb.send(queryCommand)
+      documents = response.Items || []
+    } catch {
+      // Fall back to scan if user-index doesn't work for documents
+      const scanCommand = new ScanCommand({
+        TableName: TABLE_NAME,
+        FilterExpression: 'pk = :pk AND (attribute_not_exists(user_id) OR user_id = :userId)',
+        ExpressionAttributeValues: {
+          ':pk': 'DOCUMENT',
+          ':userId': userId,
+        },
+      })
+      const response = await dynamodb.send(scanCommand)
+      documents = response.Items || []
+    }
+
+    const formattedDocuments = documents.map(item => {
+      const linkedTranscripts = (item.linked_transcripts as string[] | undefined) || []
+      return {
+        documentId: item.document_id,
+        title: item.title,
+        filename: item.filename,
+        fileType: item.file_type || item.format,
+        fileSize: item.file_size,
+        source: item.source,
+        sourceUrl: item.source_url,
+        format: item.format,
+        importedAt: item.timestamp || item.importedAt,
+        wordCount: item.word_count || item.wordCount,
+        isPrivate: item.is_private || item.isPrivate || false,
+        linkedTranscripts,
+        linkedTranscriptCount: linkedTranscripts.length,
+      }
     })
 
-    const response = await dynamodb.send(queryCommand)
-    const documents = (response.Items || []).map(item => ({
-      documentId: item.document_id,
-      title: item.title,
-      source: item.source,
-      sourceUrl: item.source_url,
-      format: item.format,
-      importedAt: item.timestamp || item.importedAt,
-      wordCount: item.word_count || item.wordCount,
-      isPrivate: item.is_private || item.isPrivate || false,
-    }))
-
     return NextResponse.json({
-      count: documents.length,
-      documents,
+      count: formattedDocuments.length,
+      documents: formattedDocuments,
     })
   } catch (error) {
     console.error('Documents API error:', error)
@@ -126,9 +185,49 @@ export async function GET(request: NextRequest) {
 }
 
 /**
+ * Helper: Calculate file hash for deduplication
+ */
+function calculateFileHash(content: string | Buffer): string {
+  return createHash('sha256').update(content).digest('hex')
+}
+
+/**
+ * Helper: Check if a document with the same hash already exists for this user
+ */
+async function findDocumentByHash(userId: string, fileHash: string): Promise<Record<string, unknown> | null> {
+  try {
+    const scanCommand = new ScanCommand({
+      TableName: TABLE_NAME,
+      FilterExpression: 'pk = :pk AND user_id = :userId AND file_hash = :fileHash',
+      ExpressionAttributeValues: {
+        ':pk': 'DOCUMENT',
+        ':userId': userId,
+        ':fileHash': fileHash,
+      },
+    })
+    const response = await dynamodb.send(scanCommand)
+    return response.Items?.[0] || null
+  } catch {
+    return null
+  }
+}
+
+/**
  * POST /api/documents - Upload a new document
  */
 export async function POST(request: NextRequest) {
+  // Get authenticated user
+  const session = await auth()
+  if (!session?.user?.email) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
+  const user = await getUserByEmail(session.user.email)
+  if (!user) {
+    return NextResponse.json({ error: 'User not found' }, { status: 404 })
+  }
+  const userId = user.user_id
+
   try {
     const contentType = request.headers.get('content-type') || ''
 
@@ -139,6 +238,9 @@ export async function POST(request: NextRequest) {
     let sourceUrl: string | undefined
     let wordCount: number
     let isPrivate = false
+    let filename: string | undefined
+    let fileSize: number | undefined
+    let fileHash: string | undefined
 
     // Handle file upload (multipart/form-data)
     if (contentType.includes('multipart/form-data')) {
@@ -147,6 +249,14 @@ export async function POST(request: NextRequest) {
 
       if (!file) {
         return NextResponse.json({ error: 'No file provided' }, { status: 400 })
+      }
+
+      // Check file size
+      if (file.size > MAX_FILE_SIZE) {
+        return NextResponse.json(
+          { error: `File too large. Maximum size is ${MAX_FILE_SIZE / 1024 / 1024}MB` },
+          { status: 400 }
+        )
       }
 
       const detectedFormat = detectFormat(file.name)
@@ -158,7 +268,24 @@ export async function POST(request: NextRequest) {
       }
 
       format = detectedFormat
+      filename = file.name
+      fileSize = file.size
       const fileBuffer = Buffer.from(await file.arrayBuffer())
+
+      // Calculate hash for deduplication
+      fileHash = calculateFileHash(fileBuffer)
+
+      // Check for duplicate
+      const existingDoc = await findDocumentByHash(userId, fileHash)
+      if (existingDoc) {
+        return NextResponse.json({
+          success: true,
+          documentId: existingDoc.document_id,
+          title: existingDoc.title,
+          duplicate: true,
+          message: 'Document already exists',
+        })
+      }
 
       // Parse the document
       const parsed = await parseDocument(fileBuffer, format)
@@ -177,18 +304,34 @@ export async function POST(request: NextRequest) {
       sourceUrl = body.sourceUrl
       wordCount = body.wordCount || content.split(/\s+/).filter((w: string) => w.length > 0).length
       isPrivate = body.isPrivate || false
+      filename = body.filename
 
       if (!title || !content) {
         return NextResponse.json({ error: 'Title and content are required' }, { status: 400 })
+      }
+
+      // Calculate hash for deduplication
+      fileHash = calculateFileHash(content)
+
+      // Check for duplicate
+      const existingDoc = await findDocumentByHash(userId, fileHash)
+      if (existingDoc) {
+        return NextResponse.json({
+          success: true,
+          documentId: existingDoc.document_id,
+          title: existingDoc.title,
+          duplicate: true,
+          message: 'Document already exists',
+        })
       }
     }
 
     // Generate document ID
     const documentId = uuidv4()
     const now = new Date()
-    const datePrefix = now.toISOString().slice(0, 10).replace(/-/g, '/')
-    const safeTitle = title.replace(/[^a-zA-Z0-9-_\s]/g, '').slice(0, 50)
-    const s3Key = `documents/${datePrefix}/${documentId}_${safeTitle}.txt`
+    const safeFilename = (filename || title).replace(/[^a-zA-Z0-9-_.\s]/g, '').slice(0, 50)
+    // Store in user-specific path for isolation
+    const s3Key = `users/${userId}/documents/${documentId}/${safeFilename}.txt`
 
     // Store content in S3
     await s3.send(
@@ -205,7 +348,12 @@ export async function POST(request: NextRequest) {
       pk: 'DOCUMENT',
       meeting_id: `doc_${documentId}`,
       document_id: documentId,
+      user_id: userId,
       title,
+      filename,
+      file_type: format,
+      file_size: fileSize,
+      file_hash: fileHash,
       source,
       source_url: sourceUrl,
       format,
@@ -214,6 +362,7 @@ export async function POST(request: NextRequest) {
       importedAt: now.toISOString(),
       word_count: wordCount,
       is_private: isPrivate,
+      linked_transcripts: [],
     }
 
     await dynamodb.send(
@@ -239,6 +388,8 @@ export async function POST(request: NextRequest) {
       success: true,
       documentId,
       title,
+      filename,
+      fileSize,
       wordCount,
       chunks: chunks.length,
     })
@@ -255,6 +406,18 @@ export async function POST(request: NextRequest) {
  * DELETE /api/documents?id=xxx - Delete a document
  */
 export async function DELETE(request: NextRequest) {
+  // Get authenticated user
+  const session = await auth()
+  if (!session?.user?.email) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
+  const user = await getUserByEmail(session.user.email)
+  if (!user) {
+    return NextResponse.json({ error: 'User not found' }, { status: 404 })
+  }
+  const userId = user.user_id
+
   const { searchParams } = new URL(request.url)
   const documentId = searchParams.get('id')
 
@@ -263,7 +426,7 @@ export async function DELETE(request: NextRequest) {
   }
 
   try {
-    // First get the document to find the S3 key
+    // First get the document to find the S3 key and verify ownership
     const getCommand = new GetCommand({
       TableName: TABLE_NAME,
       Key: { meeting_id: `doc_${documentId}` },
@@ -272,6 +435,11 @@ export async function DELETE(request: NextRequest) {
 
     if (!response.Item) {
       return NextResponse.json({ error: 'Document not found' }, { status: 404 })
+    }
+
+    // Check ownership
+    if (response.Item.user_id && response.Item.user_id !== userId) {
+      return NextResponse.json({ error: 'Access denied' }, { status: 403 })
     }
 
     const s3Key = response.Item.s3_key
@@ -321,6 +489,127 @@ export async function DELETE(request: NextRequest) {
     console.error('Document delete error:', error)
     return NextResponse.json(
       { error: 'Failed to delete document', details: String(error) },
+      { status: 500 }
+    )
+  }
+}
+
+/**
+ * PATCH /api/documents - Link/unlink document to/from transcripts
+ */
+export async function PATCH(request: NextRequest) {
+  // Get authenticated user
+  const session = await auth()
+  if (!session?.user?.email) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
+  const user = await getUserByEmail(session.user.email)
+  if (!user) {
+    return NextResponse.json({ error: 'User not found' }, { status: 404 })
+  }
+  const userId = user.user_id
+
+  try {
+    const body = await request.json()
+    const { documentId, action, meetingId } = body
+
+    if (!documentId) {
+      return NextResponse.json({ error: 'documentId is required' }, { status: 400 })
+    }
+
+    // Get the document and verify ownership
+    const getCommand = new GetCommand({
+      TableName: TABLE_NAME,
+      Key: { meeting_id: `doc_${documentId}` },
+    })
+    const docResponse = await dynamodb.send(getCommand)
+
+    if (!docResponse.Item) {
+      return NextResponse.json({ error: 'Document not found' }, { status: 404 })
+    }
+
+    // Check ownership
+    if (docResponse.Item.user_id && docResponse.Item.user_id !== userId) {
+      return NextResponse.json({ error: 'Access denied' }, { status: 403 })
+    }
+
+    // Handle link action
+    if (action === 'link' && meetingId) {
+      // Verify the transcript belongs to the user
+      const transcriptCheck = new GetCommand({
+        TableName: TABLE_NAME,
+        Key: { meeting_id: meetingId },
+        ProjectionExpression: 'user_id',
+      })
+      const transcriptResponse = await dynamodb.send(transcriptCheck)
+      if (transcriptResponse.Item?.user_id && transcriptResponse.Item.user_id !== userId) {
+        return NextResponse.json({ error: 'Access denied to transcript' }, { status: 403 })
+      }
+
+      // Add meetingId to linked_transcripts array
+      const updateCommand = new UpdateCommand({
+        TableName: TABLE_NAME,
+        Key: { meeting_id: `doc_${documentId}` },
+        UpdateExpression: 'SET linked_transcripts = list_append(if_not_exists(linked_transcripts, :empty), :meetingId)',
+        ConditionExpression: 'NOT contains(if_not_exists(linked_transcripts, :empty), :meetingIdValue)',
+        ExpressionAttributeValues: {
+          ':empty': [],
+          ':meetingId': [meetingId],
+          ':meetingIdValue': meetingId,
+        },
+        ReturnValues: 'ALL_NEW',
+      })
+
+      try {
+        const result = await dynamodb.send(updateCommand)
+        return NextResponse.json({
+          success: true,
+          documentId,
+          linkedTranscripts: result.Attributes?.linked_transcripts || [],
+        })
+      } catch (err: unknown) {
+        // If the condition failed, it means the transcript is already linked
+        if (err && typeof err === 'object' && 'name' in err && err.name === 'ConditionalCheckFailedException') {
+          return NextResponse.json({
+            success: true,
+            documentId,
+            linkedTranscripts: docResponse.Item.linked_transcripts || [],
+            message: 'Transcript already linked',
+          })
+        }
+        throw err
+      }
+    }
+
+    // Handle unlink action
+    if (action === 'unlink' && meetingId) {
+      const currentLinks: string[] = docResponse.Item.linked_transcripts || []
+      const newLinks = currentLinks.filter(id => id !== meetingId)
+
+      const updateCommand = new UpdateCommand({
+        TableName: TABLE_NAME,
+        Key: { meeting_id: `doc_${documentId}` },
+        UpdateExpression: 'SET linked_transcripts = :newLinks',
+        ExpressionAttributeValues: {
+          ':newLinks': newLinks,
+        },
+        ReturnValues: 'ALL_NEW',
+      })
+
+      const result = await dynamodb.send(updateCommand)
+      return NextResponse.json({
+        success: true,
+        documentId,
+        linkedTranscripts: result.Attributes?.linked_transcripts || [],
+      })
+    }
+
+    return NextResponse.json({ error: 'Invalid action. Use "link" or "unlink" with meetingId' }, { status: 400 })
+  } catch (error) {
+    console.error('Document PATCH error:', error)
+    return NextResponse.json(
+      { error: 'Failed to update document', details: String(error) },
       { status: 500 }
     )
   }

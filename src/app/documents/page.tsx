@@ -1,22 +1,35 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import Link from 'next/link'
 import Shell from '@/components/Shell'
 
 interface Document {
   documentId: string
   title: string
+  filename?: string
+  fileType?: string
+  fileSize?: number
   source: 'upload' | 'url' | 'drive'
   sourceUrl?: string
   format: string
   importedAt: string
   wordCount: number
   isPrivate: boolean
+  linkedTranscripts: string[]
+  linkedTranscriptCount: number
 }
 
 interface DocumentWithContent extends Document {
   content?: string
+}
+
+interface Transcript {
+  meetingId: string
+  title: string
+  date: string
+  timestamp: string
+  topic?: string
 }
 
 export default function DocumentsPage() {
@@ -26,6 +39,17 @@ export default function DocumentsPage() {
   const [selectedDocument, setSelectedDocument] = useState<DocumentWithContent | null>(null)
   const [loadingContent, setLoadingContent] = useState(false)
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null)
+
+  // Upload states
+  const [uploading, setUploading] = useState(false)
+  const [uploadProgress, setUploadProgress] = useState<string | null>(null)
+  const [isDragging, setIsDragging] = useState(false)
+
+  // Link transcript modal states
+  const [showLinkModal, setShowLinkModal] = useState(false)
+  const [transcriptsForLinking, setTranscriptsForLinking] = useState<Transcript[]>([])
+  const [loadingTranscripts, setLoadingTranscripts] = useState(false)
+  const [linkingTranscript, setLinkingTranscript] = useState<string | null>(null)
 
   useEffect(() => {
     fetchDocuments()
@@ -76,6 +100,174 @@ export default function DocumentsPage() {
     }
   }
 
+  // File upload handler
+  const handleFileUpload = useCallback(async (files: FileList | File[]) => {
+    if (files.length === 0) return
+
+    setUploading(true)
+    setUploadProgress('Uploading...')
+    setError(null)
+
+    for (const file of Array.from(files)) {
+      try {
+        setUploadProgress(`Uploading ${file.name}...`)
+
+        const formData = new FormData()
+        formData.append('file', file)
+
+        const res = await fetch('/api/documents', {
+          method: 'POST',
+          body: formData,
+        })
+
+        if (!res.ok) {
+          const data = await res.json()
+          throw new Error(data.error || 'Upload failed')
+        }
+
+        const data = await res.json()
+        if (data.duplicate) {
+          setUploadProgress(`${file.name} already exists`)
+        } else {
+          setUploadProgress(`${file.name} uploaded successfully`)
+        }
+      } catch (err) {
+        setError(`Failed to upload ${file.name}: ${String(err)}`)
+      }
+    }
+
+    setUploading(false)
+    setUploadProgress(null)
+    fetchDocuments()
+  }, [])
+
+  // Drag and drop handlers
+  const handleDragEnter = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setIsDragging(true)
+  }, [])
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setIsDragging(false)
+  }, [])
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+  }, [])
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setIsDragging(false)
+
+    const files = e.dataTransfer.files
+    if (files.length > 0) {
+      handleFileUpload(files)
+    }
+  }, [handleFileUpload])
+
+  // Link transcript functionality
+  async function openLinkModal() {
+    setShowLinkModal(true)
+    setLoadingTranscripts(true)
+
+    try {
+      const res = await fetch('/api/transcripts?limit=50')
+      if (!res.ok) throw new Error('Failed to fetch transcripts')
+      const data = await res.json()
+      setTranscriptsForLinking(data.transcripts || [])
+    } catch (err) {
+      console.error('Error loading transcripts:', err)
+    } finally {
+      setLoadingTranscripts(false)
+    }
+  }
+
+  async function linkTranscript(meetingId: string) {
+    if (!selectedDocument) return
+
+    setLinkingTranscript(meetingId)
+    try {
+      const res = await fetch('/api/documents', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          documentId: selectedDocument.documentId,
+          action: 'link',
+          meetingId,
+        }),
+      })
+
+      if (!res.ok) throw new Error('Failed to link transcript')
+
+      const data = await res.json()
+
+      // Update selected document
+      setSelectedDocument({
+        ...selectedDocument,
+        linkedTranscripts: data.linkedTranscripts,
+        linkedTranscriptCount: data.linkedTranscripts.length,
+      })
+
+      // Update document in list
+      setDocuments(prev =>
+        prev.map(d =>
+          d.documentId === selectedDocument.documentId
+            ? { ...d, linkedTranscripts: data.linkedTranscripts, linkedTranscriptCount: data.linkedTranscripts.length }
+            : d
+        )
+      )
+
+      setShowLinkModal(false)
+    } catch (err) {
+      setError(String(err))
+    } finally {
+      setLinkingTranscript(null)
+    }
+  }
+
+  async function unlinkTranscript(meetingId: string) {
+    if (!selectedDocument) return
+
+    try {
+      const res = await fetch('/api/documents', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          documentId: selectedDocument.documentId,
+          action: 'unlink',
+          meetingId,
+        }),
+      })
+
+      if (!res.ok) throw new Error('Failed to unlink transcript')
+
+      const data = await res.json()
+
+      // Update selected document
+      setSelectedDocument({
+        ...selectedDocument,
+        linkedTranscripts: data.linkedTranscripts,
+        linkedTranscriptCount: data.linkedTranscripts.length,
+      })
+
+      // Update document in list
+      setDocuments(prev =>
+        prev.map(d =>
+          d.documentId === selectedDocument.documentId
+            ? { ...d, linkedTranscripts: data.linkedTranscripts, linkedTranscriptCount: data.linkedTranscripts.length }
+            : d
+        )
+      )
+    } catch (err) {
+      setError(String(err))
+    }
+  }
+
   function formatDate(dateStr: string) {
     try {
       const date = new Date(dateStr)
@@ -106,6 +298,13 @@ export default function DocumentsPage() {
     } catch {
       return ''
     }
+  }
+
+  function formatFileSize(bytes?: number) {
+    if (!bytes) return ''
+    if (bytes < 1024) return `${bytes} B`
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
   }
 
   function getSourceIcon(source: string) {
@@ -161,15 +360,20 @@ export default function DocumentsPage() {
             <span className="text-sm text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-700 px-3 py-1 rounded-full">
               {documents.length} document{documents.length !== 1 ? 's' : ''}
             </span>
-            <Link
-              href="/upload"
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg text-sm font-medium text-white transition-colors flex items-center gap-2"
-            >
+            <label className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg text-sm font-medium text-white transition-colors flex items-center gap-2 cursor-pointer">
               <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
                 <path fillRule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clipRule="evenodd" />
               </svg>
               Add Document
-            </Link>
+              <input
+                type="file"
+                className="hidden"
+                multiple
+                accept=".pdf,.docx,.doc,.txt,.md"
+                onChange={(e) => e.target.files && handleFileUpload(e.target.files)}
+                disabled={uploading}
+              />
+            </label>
           </div>
         </div>
 
@@ -177,6 +381,22 @@ export default function DocumentsPage() {
         {error && (
           <div className="mb-6 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-red-700 dark:text-red-400">
             {error}
+            <button
+              onClick={() => setError(null)}
+              className="ml-2 text-red-500 hover:text-red-700"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
+
+        {/* Upload progress */}
+        {uploadProgress && (
+          <div className="mb-6 p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg text-blue-700 dark:text-blue-400 flex items-center gap-3">
+            {uploading && (
+              <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600"></div>
+            )}
+            {uploadProgress}
           </div>
         )}
 
@@ -190,9 +410,19 @@ export default function DocumentsPage() {
           </div>
         )}
 
-        {/* Empty state */}
+        {/* Empty state with drag-drop upload */}
         {!loading && documents.length === 0 && (
-          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-12 text-center">
+          <div
+            className={`bg-white dark:bg-gray-800 rounded-lg shadow-sm border-2 border-dashed transition-colors p-12 text-center ${
+              isDragging
+                ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
+                : 'border-gray-300 dark:border-gray-600'
+            }`}
+            onDragEnter={handleDragEnter}
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
+          >
             <div className="text-gray-400 dark:text-gray-500 mb-4">
               <svg className="w-12 h-12 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path
@@ -205,15 +435,20 @@ export default function DocumentsPage() {
             </div>
             <h3 className="text-lg font-medium mb-2 text-gray-900 dark:text-white">No documents yet</h3>
             <p className="text-sm text-gray-500 dark:text-gray-400 mb-6 max-w-sm mx-auto">
-              Import documents from URLs, upload files, or export from Google Drive to build your knowledge base.
+              Drag and drop files here, or click to upload. Supported formats: PDF, DOCX, TXT, MD
             </p>
             <div className="flex justify-center gap-3">
-              <Link
-                href="/upload"
-                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg text-sm font-medium text-white transition-colors"
-              >
+              <label className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg text-sm font-medium text-white transition-colors cursor-pointer">
                 Upload Files
-              </Link>
+                <input
+                  type="file"
+                  className="hidden"
+                  multiple
+                  accept=".pdf,.docx,.doc,.txt,.md"
+                  onChange={(e) => e.target.files && handleFileUpload(e.target.files)}
+                  disabled={uploading}
+                />
+              </label>
               <Link
                 href="/upload?tab=link"
                 className="px-4 py-2 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 rounded-lg text-sm font-medium text-gray-700 dark:text-gray-200 transition-colors"
@@ -227,8 +462,19 @@ export default function DocumentsPage() {
         {/* Documents list */}
         {!loading && documents.length > 0 && (
           <div className="flex gap-6">
-            {/* Document list */}
-            <div className={`${selectedDocument ? 'w-1/2' : 'w-full'} transition-all`}>
+            {/* Document list with drag-drop zone */}
+            <div
+              className={`${selectedDocument ? 'w-1/2' : 'w-full'} transition-all`}
+              onDragEnter={handleDragEnter}
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
+            >
+              {isDragging && (
+                <div className="mb-4 p-4 bg-blue-50 dark:bg-blue-900/20 border-2 border-dashed border-blue-500 rounded-lg text-center text-blue-600 dark:text-blue-400">
+                  Drop files here to upload
+                </div>
+              )}
               <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden">
                 <div className="divide-y divide-gray-200 dark:divide-gray-700">
                   {documents.map((doc) => (
@@ -252,12 +498,16 @@ export default function DocumentsPage() {
                               {doc.source === 'url' ? 'Web' : doc.source === 'drive' ? 'Drive' : 'Upload'}
                             </span>
                             <span>{doc.wordCount.toLocaleString()} words</span>
+                            {doc.fileSize && <span>{formatFileSize(doc.fileSize)}</span>}
                             <span>{formatRelativeTime(doc.importedAt)}</span>
                           </div>
-                          {doc.sourceUrl && (
-                            <p className="mt-1 text-xs text-gray-400 dark:text-gray-500 truncate">
-                              {doc.sourceUrl}
-                            </p>
+                          {doc.linkedTranscriptCount > 0 && (
+                            <div className="mt-1 flex items-center gap-1 text-xs text-indigo-600 dark:text-indigo-400">
+                              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                              </svg>
+                              {doc.linkedTranscriptCount} linked transcript{doc.linkedTranscriptCount !== 1 ? 's' : ''}
+                            </div>
                           )}
                         </div>
                         <div className="flex items-center gap-2">
@@ -308,10 +558,70 @@ export default function DocumentsPage() {
                     <span className="px-2.5 py-1 bg-gray-100 dark:bg-gray-700 rounded-full text-sm text-gray-700 dark:text-gray-300">
                       {selectedDocument.wordCount.toLocaleString()} words
                     </span>
+                    {selectedDocument.fileSize && (
+                      <span className="px-2.5 py-1 bg-gray-100 dark:bg-gray-700 rounded-full text-sm text-gray-700 dark:text-gray-300">
+                        {formatFileSize(selectedDocument.fileSize)}
+                      </span>
+                    )}
                     <span className="px-2.5 py-1 bg-gray-100 dark:bg-gray-700 rounded-full text-sm text-gray-700 dark:text-gray-300 flex items-center gap-1">
                       {getSourceIcon(selectedDocument.source)}
                       {selectedDocument.source === 'url' ? 'Web Import' : selectedDocument.source === 'drive' ? 'Google Drive' : 'File Upload'}
                     </span>
+                  </div>
+
+                  {/* Linked Transcripts Section */}
+                  <div className="mb-4 p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg border border-gray-100 dark:border-gray-600">
+                    <div className="flex items-center justify-between mb-2">
+                      <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 flex items-center gap-2">
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                        </svg>
+                        Linked Transcripts ({selectedDocument.linkedTranscriptCount})
+                      </h3>
+                      <button
+                        onClick={openLinkModal}
+                        className="text-xs text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 flex items-center gap-1"
+                      >
+                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                        </svg>
+                        Link Transcript
+                      </button>
+                    </div>
+
+                    {selectedDocument.linkedTranscripts.length === 0 ? (
+                      <p className="text-xs text-gray-500 dark:text-gray-400">
+                        No transcripts linked yet. Click "Link Transcript" to associate this document with meeting transcripts.
+                      </p>
+                    ) : (
+                      <div className="space-y-2">
+                        {selectedDocument.linkedTranscripts.map((meetingId) => (
+                          <div
+                            key={meetingId}
+                            className="flex items-center justify-between p-2 bg-white dark:bg-gray-800 rounded border border-gray-200 dark:border-gray-600"
+                          >
+                            <Link
+                              href={`/transcripts?id=${meetingId}`}
+                              className="text-sm text-blue-600 dark:text-blue-400 hover:underline truncate"
+                            >
+                              {meetingId}
+                            </Link>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                unlinkTranscript(meetingId)
+                              }}
+                              className="text-gray-400 hover:text-red-500 dark:hover:text-red-400 p-1"
+                              title="Unlink transcript"
+                            >
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                              </svg>
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
 
                   {/* Source URL */}
@@ -384,6 +694,64 @@ export default function DocumentsPage() {
                 </div>
               </div>
             )}
+          </div>
+        )}
+
+        {/* Link Transcript Modal */}
+        {showLinkModal && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+            <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full max-w-lg mx-4 max-h-[80vh] flex flex-col">
+              <div className="p-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Link to Transcript</h3>
+                <button
+                  onClick={() => setShowLinkModal(false)}
+                  className="text-gray-400 hover:text-gray-600 dark:hover:text-white"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+
+              <div className="p-4 overflow-y-auto flex-1">
+                {loadingTranscripts ? (
+                  <div className="flex items-center justify-center py-8">
+                    <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
+                    <span className="ml-3 text-gray-500 dark:text-gray-400">Loading transcripts...</span>
+                  </div>
+                ) : transcriptsForLinking.length === 0 ? (
+                  <p className="text-center text-gray-500 dark:text-gray-400 py-8">
+                    No transcripts available to link
+                  </p>
+                ) : (
+                  <div className="space-y-2">
+                    {transcriptsForLinking
+                      .filter(t => !selectedDocument?.linkedTranscripts.includes(t.meetingId))
+                      .map((transcript) => (
+                        <button
+                          key={transcript.meetingId}
+                          onClick={() => linkTranscript(transcript.meetingId)}
+                          disabled={linkingTranscript === transcript.meetingId}
+                          className="w-full text-left p-3 bg-gray-50 dark:bg-gray-700/50 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg border border-gray-200 dark:border-gray-600 transition-colors disabled:opacity-50"
+                        >
+                          <div className="font-medium text-gray-900 dark:text-white">
+                            {transcript.topic || transcript.title || 'Untitled Meeting'}
+                          </div>
+                          <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                            {formatDate(transcript.timestamp || transcript.date)}
+                          </div>
+                          {linkingTranscript === transcript.meetingId && (
+                            <div className="mt-2 flex items-center gap-2 text-blue-600 dark:text-blue-400">
+                              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-current"></div>
+                              Linking...
+                            </div>
+                          )}
+                        </button>
+                      ))}
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
         )}
       </div>
