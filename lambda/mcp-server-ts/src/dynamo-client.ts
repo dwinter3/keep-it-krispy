@@ -33,6 +33,12 @@ export interface TranscriptRecord {
   received_at: string;
   url?: string;
   indexed_at: string;
+  isPrivate?: boolean;
+  privacy_level?: 'work' | 'work_with_private' | 'likely_private';
+  privacy_reason?: string;
+  privacy_topics?: string[];
+  privacy_confidence?: number;
+  privacy_work_percent?: number;
 }
 
 export class DynamoTranscriptClient {
@@ -47,6 +53,7 @@ export class DynamoTranscriptClient {
 
   /**
    * List transcripts by date range using GSI.
+   * Excludes private transcripts from results.
    */
   async listByDateRange(
     startDate: string,
@@ -62,11 +69,13 @@ export class DynamoTranscriptClient {
         TableName: this.tableName,
         IndexName: 'date-index',
         KeyConditionExpression: '#date = :date',
+        FilterExpression: 'attribute_not_exists(isPrivate) OR isPrivate = :false',
         ExpressionAttributeNames: {
           '#date': 'date',
         },
         ExpressionAttributeValues: {
           ':date': date,
+          ':false': false,
         },
       });
 
@@ -88,6 +97,7 @@ export class DynamoTranscriptClient {
 
   /**
    * List transcripts by speaker using GSI.
+   * Excludes private transcripts from results.
    */
   async listBySpeaker(
     speakerName: string,
@@ -97,8 +107,10 @@ export class DynamoTranscriptClient {
       TableName: this.tableName,
       IndexName: 'speaker-index',
       KeyConditionExpression: 'speaker_name = :speaker',
+      FilterExpression: 'attribute_not_exists(isPrivate) OR isPrivate = :false',
       ExpressionAttributeValues: {
         ':speaker': speakerName.toLowerCase(),
+        ':false': false,
       },
       Limit: limit,
       ScanIndexForward: false, // descending by date
