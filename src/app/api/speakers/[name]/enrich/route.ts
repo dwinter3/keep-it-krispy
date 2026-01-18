@@ -51,6 +51,7 @@ interface EnrichedData {
   summary: string
   linkedinUrl?: string
   photoUrl?: string
+  fullName?: string  // Full name if found (e.g., "Babak Hosseinzadeh" from "Babak")
 }
 
 interface ValidationResult {
@@ -398,9 +399,10 @@ Additional context from meetings:
 
 Extract and return a JSON object:
 {
+  "fullName": "The person's full name if visible (e.g., 'Babak Hosseinzadeh' from a profile showing just 'Babak')",
   "title": "Job title (if identifiable)",
   "company": "Company name (if identifiable)",
-  "summary": "2-3 sentence professional summary combining web info and meeting context",
+  "summary": "2-3 sentence professional summary combining web info and meeting context. Start with the full name.",
   "linkedinUrl": "LinkedIn URL if the result is from LinkedIn, otherwise null"
 }
 
@@ -427,6 +429,7 @@ Return ONLY valid JSON.`
         const parsed = JSON.parse(jsonMatch[0])
         return {
           enrichedData: {
+            fullName: parsed.fullName || undefined,
             title: parsed.title || '',
             company: parsed.company || '',
             summary: parsed.summary || '',

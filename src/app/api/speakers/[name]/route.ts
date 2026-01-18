@@ -36,6 +36,7 @@ interface EnrichedData {
   summary?: string
   linkedinUrl?: string
   photoUrl?: string
+  fullName?: string
 }
 
 interface SpeakerProfile {
@@ -58,6 +59,7 @@ interface SpeakerProfile {
   humanVerifiedAt?: string
   humanHints?: string
   rejectedProfiles?: string[]
+  verifiedFullName?: string
 }
 
 // GET /api/speakers/[name] - Get speaker profile and meeting history
@@ -166,8 +168,14 @@ export async function GET(
     // Calculate stats
     const totalDuration = meetings.reduce((sum, m) => sum + m.duration, 0)
 
+    // Use verified full name if available
+    const verifiedFullName = profile?.verifiedFullName
+    const displayName = verifiedFullName || canonicalName
+
     return NextResponse.json({
-      name: canonicalName,
+      name: displayName,
+      originalName: canonicalName,  // Keep original for reference
+      verifiedFullName: verifiedFullName || null,
       bio: profile?.bio,
       linkedin: linkedin || profile?.linkedin,
       company: profile?.company,
@@ -289,6 +297,19 @@ export async function PATCH(
         updateExpressions.push('#humanVerifiedAt = :humanVerifiedAt')
         expressionAttributeNames['#humanVerifiedAt'] = 'humanVerifiedAt'
         expressionAttributeValues[':humanVerifiedAt'] = new Date().toISOString()
+
+        // If verifying, check if there's a fullName to use as the displayName
+        const getCommand = new GetCommand({
+          TableName: SPEAKERS_TABLE,
+          Key: { name: speakerNameLower },
+        })
+        const existing = await dynamodb.send(getCommand)
+        const fullName = existing.Item?.enrichedData?.fullName
+        if (fullName && fullName !== speakerName) {
+          updateExpressions.push('#verifiedFullName = :verifiedFullName')
+          expressionAttributeNames['#verifiedFullName'] = 'verifiedFullName'
+          expressionAttributeValues[':verifiedFullName'] = fullName
+        }
       }
     }
 

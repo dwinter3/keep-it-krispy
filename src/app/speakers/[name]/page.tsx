@@ -20,10 +20,13 @@ interface EnrichedData {
   summary?: string
   linkedinUrl?: string
   photoUrl?: string
+  fullName?: string
 }
 
 interface SpeakerProfile {
   name: string
+  originalName?: string
+  verifiedFullName?: string
   bio?: string
   linkedin?: string
   company?: string
@@ -203,12 +206,28 @@ export default function SpeakerProfilePage({ params }: { params: Promise<{ name:
       if (!response.ok) {
         throw new Error('Failed to verify')
       }
-      const data = await response.json()
-      setProfile({
-        ...profile,
-        humanVerified: data.profile.humanVerified,
-        humanVerifiedAt: data.profile.humanVerifiedAt,
-      })
+      const patchData = await response.json()
+
+      // Refresh profile to get updated name (verifiedFullName)
+      const profileResponse = await fetch(`/api/speakers/${encodeURIComponent(name)}`)
+      if (profileResponse.ok) {
+        const refreshedProfile = await profileResponse.json()
+        setProfile({
+          ...profile,
+          ...refreshedProfile,
+          humanVerified: patchData.profile.humanVerified,
+          humanVerifiedAt: patchData.profile.humanVerifiedAt,
+        })
+      } else {
+        // Fallback if refresh fails
+        setProfile({
+          ...profile,
+          humanVerified: patchData.profile.humanVerified,
+          humanVerifiedAt: patchData.profile.humanVerifiedAt,
+          verifiedFullName: patchData.profile.verifiedFullName,
+          name: patchData.profile.verifiedFullName || profile.name,
+        })
+      }
     } catch (err) {
       console.error('Verify error:', err)
     } finally {
