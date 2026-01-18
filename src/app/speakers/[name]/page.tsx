@@ -37,6 +37,11 @@ interface SpeakerProfile {
   enrichedReasoning?: string
   enrichedSources?: string[]
   webEnrichedAt?: string
+  // Human feedback fields
+  humanVerified?: boolean
+  humanVerifiedAt?: string
+  humanHints?: string
+  rejectedProfiles?: string[]
   stats: {
     meetingCount: number
     totalDuration: number
@@ -57,6 +62,10 @@ interface EnrichmentResponse {
   enrichedAt: string
   aiSummary: string
   topics: string[]
+  humanHints?: string
+  rejectedProfiles?: string[]
+  humanVerified?: boolean
+  humanVerifiedAt?: string
   context?: {
     transcriptCount: number
     companies: string[]
@@ -74,6 +83,9 @@ export default function SpeakerProfilePage({ params }: { params: Promise<{ name:
   const [enriching, setEnriching] = useState(false)
   const [enrichmentResult, setEnrichmentResult] = useState<EnrichmentResponse | null>(null)
   const [showReasoning, setShowReasoning] = useState(false)
+  const [hintsInput, setHintsInput] = useState('')
+  const [showHintsInput, setShowHintsInput] = useState(false)
+  const [verifying, setVerifying] = useState(false)
   const [editForm, setEditForm] = useState({
     bio: '',
     linkedin: '',
@@ -130,7 +142,7 @@ export default function SpeakerProfilePage({ params }: { params: Promise<{ name:
     }
   }
 
-  async function handleEnrich(forceRefresh = false) {
+  async function handleEnrich(forceRefresh = false, hints?: string, excludeUrls?: string[]) {
     if (!profile) return
     setEnriching(true)
     setEnrichmentResult(null)
@@ -138,7 +150,11 @@ export default function SpeakerProfilePage({ params }: { params: Promise<{ name:
       const response = await fetch(`/api/speakers/${encodeURIComponent(name)}/enrich`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ forceRefresh }),
+        body: JSON.stringify({
+          forceRefresh,
+          hints: hints || hintsInput || undefined,
+          excludeUrls,
+        }),
       })
       if (!response.ok) {
         throw new Error('Failed to enrich')
@@ -156,15 +172,83 @@ export default function SpeakerProfilePage({ params }: { params: Promise<{ name:
         enrichedConfidence: data.confidence,
         enrichedReasoning: data.reasoning,
         enrichedSources: data.sources,
+        humanHints: data.humanHints,
+        rejectedProfiles: data.rejectedProfiles,
+        humanVerified: data.humanVerified,
         // Update role/company if enrichment found them and we don't have them
         role: profile.role || data.enrichedData?.title || undefined,
         company: profile.company || data.enrichedData?.company || undefined,
         linkedin: profile.linkedin || data.enrichedData?.linkedinUrl || undefined,
       })
+
+      // Clear hints input after successful search
+      setHintsInput('')
+      setShowHintsInput(false)
     } catch (err) {
       console.error('Enrich error:', err)
     } finally {
       setEnriching(false)
+    }
+  }
+
+  async function handleVerify(verified: boolean) {
+    if (!profile) return
+    setVerifying(true)
+    try {
+      const response = await fetch(`/api/speakers/${encodeURIComponent(name)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ humanVerified: verified }),
+      })
+      if (!response.ok) {
+        throw new Error('Failed to verify')
+      }
+      const data = await response.json()
+      setProfile({
+        ...profile,
+        humanVerified: data.profile.humanVerified,
+        humanVerifiedAt: data.profile.humanVerifiedAt,
+      })
+    } catch (err) {
+      console.error('Verify error:', err)
+    } finally {
+      setVerifying(false)
+    }
+  }
+
+  async function handleWrongPerson() {
+    if (!profile) return
+    // Get the current LinkedIn URL to reject
+    const currentLinkedinUrl = enrichmentResult?.enrichedData?.linkedinUrl ||
+                                profile?.enrichedData?.linkedinUrl
+    if (!currentLinkedinUrl) {
+      // No URL to reject, just trigger re-search with hints
+      handleEnrich(true, hintsInput)
+      return
+    }
+
+    setVerifying(true)
+    try {
+      // Mark current profile as rejected and save hints
+      const response = await fetch(`/api/speakers/${encodeURIComponent(name)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          rejectProfile: currentLinkedinUrl,
+          humanHints: hintsInput || undefined,
+        }),
+      })
+      if (!response.ok) {
+        throw new Error('Failed to reject profile')
+      }
+
+      // Now trigger re-search with hints and excluded URL
+      setVerifying(false)
+      const existingRejected = profile.rejectedProfiles || []
+      handleEnrich(true, hintsInput, [...existingRejected, currentLinkedinUrl])
+    } catch (err) {
+      console.error('Wrong person error:', err)
+      setVerifying(false)
     }
   }
 
@@ -350,7 +434,15 @@ export default function SpeakerProfilePage({ params }: { params: Promise<{ name:
                   <div className="flex items-center justify-between mb-3">
                     <div className="flex items-center gap-3">
                       <h3 className="text-sm font-medium text-zinc-300">Web Enrichment</h3>
-                      {(enrichmentResult?.confidence ?? profile?.enrichedConfidence) !== undefined && (
+                      {profile?.humanVerified && (
+                        <span className="text-xs px-2 py-0.5 rounded-full border bg-green-500/20 text-green-400 border-green-500/30 flex items-center gap-1">
+                          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                          </svg>
+                          Verified
+                        </span>
+                      )}
+                      {!profile?.humanVerified && (enrichmentResult?.confidence ?? profile?.enrichedConfidence) !== undefined && (
                         <span className={`text-xs px-2 py-0.5 rounded-full border ${getConfidenceBadgeColor(enrichmentResult?.confidence ?? profile?.enrichedConfidence ?? 0)}`}>
                           {getConfidenceLabel(enrichmentResult?.confidence ?? profile?.enrichedConfidence ?? 0)} ({enrichmentResult?.confidence ?? profile?.enrichedConfidence}%)
                         </span>
@@ -457,15 +549,108 @@ export default function SpeakerProfilePage({ params }: { params: Promise<{ name:
                         </div>
                       )}
 
-                      {/* Feedback link */}
-                      <div className="text-xs text-zinc-500">
-                        <button
-                          onClick={() => setEditing(true)}
-                          className="hover:text-zinc-300 transition-colors underline"
-                        >
-                          Not correct? Edit manually
-                        </button>
-                      </div>
+                      {/* Verification Actions */}
+                      {!profile?.humanVerified && (
+                        <div className="flex flex-wrap items-center gap-3 pt-2 border-t border-zinc-700/50">
+                          <button
+                            onClick={() => handleVerify(true)}
+                            disabled={verifying || enriching}
+                            className="text-xs px-3 py-1.5 bg-green-600 hover:bg-green-500 disabled:bg-green-600/50 text-white rounded-lg transition-colors flex items-center gap-1.5"
+                          >
+                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                            </svg>
+                            Confirm Match
+                          </button>
+                          <button
+                            onClick={() => setShowHintsInput(!showHintsInput)}
+                            disabled={verifying || enriching}
+                            className="text-xs px-3 py-1.5 bg-red-600 hover:bg-red-500 disabled:bg-red-600/50 text-white rounded-lg transition-colors flex items-center gap-1.5"
+                          >
+                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                            </svg>
+                            Wrong Person
+                          </button>
+                          <button
+                            onClick={() => setEditing(true)}
+                            className="text-xs text-zinc-400 hover:text-zinc-300 transition-colors underline"
+                          >
+                            Edit manually
+                          </button>
+                        </div>
+                      )}
+
+                      {/* Human Verified Badge */}
+                      {profile?.humanVerified && (
+                        <div className="flex items-center gap-3 pt-2 border-t border-zinc-700/50">
+                          <span className="text-xs text-green-400 flex items-center gap-1">
+                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                            </svg>
+                            Verified by you
+                            {profile.humanVerifiedAt && ` on ${formatDate(profile.humanVerifiedAt)}`}
+                          </span>
+                          <button
+                            onClick={() => handleVerify(false)}
+                            disabled={verifying}
+                            className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
+                          >
+                            Undo
+                          </button>
+                        </div>
+                      )}
+
+                      {/* Hints Input (shown when "Wrong Person" clicked) */}
+                      {showHintsInput && (
+                        <div className="mt-3 p-3 bg-zinc-800/50 rounded-lg border border-zinc-700/50">
+                          <label className="block text-xs text-zinc-400 mb-2">
+                            Add hints to find the right person:
+                          </label>
+                          <input
+                            type="text"
+                            value={hintsInput}
+                            onChange={(e) => setHintsInput(e.target.value)}
+                            placeholder="e.g., works at Orion Innovation, lives in Atlanta"
+                            className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-zinc-500 placeholder:text-zinc-600"
+                          />
+                          <div className="flex items-center gap-2 mt-2">
+                            <button
+                              onClick={handleWrongPerson}
+                              disabled={verifying || enriching}
+                              className="text-xs px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:bg-blue-600/50 text-white rounded-lg transition-colors flex items-center gap-1.5"
+                            >
+                              {enriching ? (
+                                <>
+                                  <span className="animate-spin">&#8635;</span>
+                                  Searching...
+                                </>
+                              ) : (
+                                <>
+                                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                                  </svg>
+                                  Search Again
+                                </>
+                              )}
+                            </button>
+                            <button
+                              onClick={() => {
+                                setShowHintsInput(false)
+                                setHintsInput('')
+                              }}
+                              className="text-xs text-zinc-400 hover:text-zinc-300 transition-colors"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                          {profile?.rejectedProfiles && profile.rejectedProfiles.length > 0 && (
+                            <p className="text-xs text-zinc-500 mt-2">
+                              {profile.rejectedProfiles.length} profile{profile.rejectedProfiles.length > 1 ? 's' : ''} already rejected
+                            </p>
+                          )}
+                        </div>
+                      )}
                     </div>
                   )}
 

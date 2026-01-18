@@ -287,14 +287,19 @@ async function searchWeb(query: string): Promise<WebSearchResult[]> {
 // Validate web result against speaker context using AI
 async function validateWebResult(
   context: SpeakerContext,
-  webResult: WebSearchResult
+  webResult: WebSearchResult,
+  humanHints?: string
 ): Promise<ValidationResult> {
+  const hintsSection = humanHints
+    ? `\n- HUMAN-PROVIDED HINTS (high priority): ${humanHints}`
+    : ''
+
   const prompt = `Given this context about a speaker from meeting transcripts:
 - Name: ${context.name}
 - Topics discussed: ${context.topics.join(', ') || 'Unknown'}
 - Companies mentioned: ${context.companies.join(', ') || 'Unknown'}
 - Role indicators: ${context.roleHints.join(', ') || 'Unknown'}
-- Keywords: ${context.contextKeywords.join(', ') || 'Unknown'}
+- Keywords: ${context.contextKeywords.join(', ') || 'Unknown'}${hintsSection}
 
 And this web search result:
 - Title: ${webResult.title}
@@ -311,6 +316,7 @@ Consider:
 - Company names matching is a strong positive signal
 - Topic/industry alignment increases confidence
 - Generic or common names require more corroborating evidence
+- HUMAN-PROVIDED HINTS should be weighted heavily - if the hint says "works at X company" and the result shows X company, that's a very strong match
 
 Return ONLY valid JSON:
 {
@@ -467,12 +473,39 @@ export async function POST(
 
     // Parse request body for options
     let forceRefresh = false
+    let hints = ''
+    let excludeUrls: string[] = []
     try {
       const body = await request.json()
       forceRefresh = body.forceRefresh === true
+      hints = body.hints || ''
+      excludeUrls = body.excludeUrls || []
     } catch {
       // No body or invalid JSON, use defaults
     }
+
+    // Load existing speaker data to get rejected profiles
+    let existingRejectedProfiles: string[] = []
+    let existingHints = ''
+    try {
+      const getCommand = new GetCommand({
+        TableName: SPEAKERS_TABLE,
+        Key: { name: speakerNameLower },
+      })
+      const existing = await dynamodb.send(getCommand)
+      if (existing.Item) {
+        existingRejectedProfiles = existing.Item.rejectedProfiles || []
+        existingHints = existing.Item.humanHints || ''
+      }
+    } catch {
+      // Continue without existing data
+    }
+
+    // Merge excluded URLs with previously rejected profiles
+    const allExcludedUrls = [...new Set([...excludeUrls, ...existingRejectedProfiles])]
+
+    // Combine existing hints with new hints
+    const combinedHints = [existingHints, hints].filter(Boolean).join('. ')
 
     // Check for cached enrichment (unless force refresh)
     if (!forceRefresh) {
@@ -495,9 +528,12 @@ export async function POST(
               reasoning: existing.Item.enrichedReasoning || '',
               sources: existing.Item.enrichedSources || [],
               enrichedAt: existing.Item.webEnrichedAt,
-              // Also return AI summary if available
               aiSummary: existing.Item.aiSummary,
               topics: existing.Item.topics || [],
+              humanHints: existing.Item.humanHints || null,
+              rejectedProfiles: existing.Item.rejectedProfiles || null,
+              humanVerified: existing.Item.humanVerified || false,
+              humanVerifiedAt: existing.Item.humanVerifiedAt || null,
             })
           }
         }
@@ -516,6 +552,15 @@ export async function POST(
 
     // Step 2: Build search query
     const searchTerms = [context.name]
+
+    // Include human-provided hints in search (high priority)
+    if (combinedHints) {
+      // Extract key terms from hints (company names, locations, titles)
+      const hintTerms = combinedHints.split(/[,.]/).map(t => t.trim()).filter(Boolean).slice(0, 3)
+      searchTerms.push(...hintTerms)
+    }
+
+    // Add context from transcripts
     if (context.companies.length > 0) {
       searchTerms.push(context.companies[0])
     }
@@ -531,14 +576,22 @@ export async function POST(
     console.log('Searching for:', searchQuery)
 
     // Step 3: Search the web
-    const webResults = await searchWeb(searchQuery)
+    let webResults = await searchWeb(searchQuery)
     console.log('Found', webResults.length, 'web results')
+
+    // Filter out previously rejected profiles
+    if (allExcludedUrls.length > 0) {
+      webResults = webResults.filter(result =>
+        !allExcludedUrls.some(excluded => result.url.includes(excluded) || excluded.includes(result.url))
+      )
+      console.log('After filtering rejected profiles:', webResults.length, 'results remain')
+    }
 
     // Step 4: Validate each result against context
     const validatedResults: Array<{ result: WebSearchResult; validation: ValidationResult }> = []
 
     for (const result of webResults.slice(0, 3)) {
-      const validation = await validateWebResult(context, result)
+      const validation = await validateWebResult(context, result, combinedHints)
       validatedResults.push({ result, validation })
     }
 
@@ -609,7 +662,9 @@ Return ONLY the summary text, no JSON.`
           #webEnrichedAt = :webEnrichedAt,
           #aiSummary = :aiSummary,
           #topics = :topics,
-          #enrichedAt = :enrichedAt`,
+          #enrichedAt = :enrichedAt,
+          #humanHints = :humanHints,
+          #rejectedProfiles = :rejectedProfiles`,
         ExpressionAttributeNames: {
           '#displayName': 'displayName',
           '#enrichedData': 'enrichedData',
@@ -620,6 +675,8 @@ Return ONLY the summary text, no JSON.`
           '#aiSummary': 'aiSummary',
           '#topics': 'topics',
           '#enrichedAt': 'enrichedAt',
+          '#humanHints': 'humanHints',
+          '#rejectedProfiles': 'rejectedProfiles',
         },
         ExpressionAttributeValues: {
           ':displayName': context.name,
@@ -631,6 +688,8 @@ Return ONLY the summary text, no JSON.`
           ':aiSummary': aiSummary,
           ':topics': topics,
           ':enrichedAt': new Date().toISOString(),
+          ':humanHints': combinedHints || null,
+          ':rejectedProfiles': allExcludedUrls.length > 0 ? allExcludedUrls : null,
         },
       })
       await dynamodb.send(updateCommand)
@@ -648,6 +707,8 @@ Return ONLY the summary text, no JSON.`
       enrichedAt: new Date().toISOString(),
       aiSummary,
       topics,
+      humanHints: combinedHints || null,
+      rejectedProfiles: allExcludedUrls.length > 0 ? allExcludedUrls : null,
       context: {
         transcriptCount: context.transcriptCount,
         companies: context.companies,

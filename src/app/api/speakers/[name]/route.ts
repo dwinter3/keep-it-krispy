@@ -53,6 +53,11 @@ interface SpeakerProfile {
   enrichedReasoning?: string
   enrichedSources?: string[]
   webEnrichedAt?: string
+  // Human feedback fields
+  humanVerified?: boolean
+  humanVerifiedAt?: string
+  humanHints?: string
+  rejectedProfiles?: string[]
 }
 
 // GET /api/speakers/[name] - Get speaker profile and meeting history
@@ -176,6 +181,11 @@ export async function GET(
       enrichedReasoning: profile?.enrichedReasoning,
       enrichedSources: profile?.enrichedSources,
       webEnrichedAt: profile?.webEnrichedAt,
+      // Human feedback fields
+      humanVerified: profile?.humanVerified || false,
+      humanVerifiedAt: profile?.humanVerifiedAt || null,
+      humanHints: profile?.humanHints || null,
+      rejectedProfiles: profile?.rejectedProfiles || null,
       stats: {
         meetingCount: meetings.length,
         totalDuration,
@@ -247,6 +257,102 @@ export async function PUT(
     })
   } catch (error) {
     console.error('Speaker profile update error:', error)
+    return NextResponse.json(
+      { error: 'Failed to update speaker profile', details: String(error) },
+      { status: 500 }
+    )
+  }
+}
+
+// PATCH /api/speakers/[name] - Partial updates (verification, hints, rejected profiles)
+export async function PATCH(
+  request: NextRequest,
+  { params }: { params: Promise<{ name: string }> }
+) {
+  try {
+    const { name } = await params
+    const speakerName = decodeURIComponent(name)
+    const speakerNameLower = speakerName.toLowerCase()
+    const body = await request.json()
+
+    const updateExpressions: string[] = []
+    const expressionAttributeNames: Record<string, string> = {}
+    const expressionAttributeValues: Record<string, unknown> = {}
+
+    // Handle humanVerified update
+    if (body.humanVerified !== undefined) {
+      updateExpressions.push('#humanVerified = :humanVerified')
+      expressionAttributeNames['#humanVerified'] = 'humanVerified'
+      expressionAttributeValues[':humanVerified'] = body.humanVerified
+
+      if (body.humanVerified) {
+        updateExpressions.push('#humanVerifiedAt = :humanVerifiedAt')
+        expressionAttributeNames['#humanVerifiedAt'] = 'humanVerifiedAt'
+        expressionAttributeValues[':humanVerifiedAt'] = new Date().toISOString()
+      }
+    }
+
+    // Handle hints update
+    if (body.humanHints !== undefined) {
+      updateExpressions.push('#humanHints = :humanHints')
+      expressionAttributeNames['#humanHints'] = 'humanHints'
+      expressionAttributeValues[':humanHints'] = body.humanHints || null
+    }
+
+    // Handle rejected profile (adds to list)
+    if (body.rejectProfile) {
+      // First get existing rejected profiles
+      const getCommand = new GetCommand({
+        TableName: SPEAKERS_TABLE,
+        Key: { name: speakerNameLower },
+      })
+      const existing = await dynamodb.send(getCommand)
+      const existingRejected = existing.Item?.rejectedProfiles || []
+      const newRejected = [...new Set([...existingRejected, body.rejectProfile])]
+
+      updateExpressions.push('#rejectedProfiles = :rejectedProfiles')
+      expressionAttributeNames['#rejectedProfiles'] = 'rejectedProfiles'
+      expressionAttributeValues[':rejectedProfiles'] = newRejected
+
+      // Also reset humanVerified since we're looking for a new match
+      updateExpressions.push('#humanVerified = :humanVerified')
+      expressionAttributeNames['#humanVerified'] = 'humanVerified'
+      expressionAttributeValues[':humanVerified'] = false
+    }
+
+    // Handle clearing rejected profiles (fresh start)
+    if (body.clearRejectedProfiles) {
+      updateExpressions.push('#rejectedProfiles = :rejectedProfiles')
+      expressionAttributeNames['#rejectedProfiles'] = 'rejectedProfiles'
+      expressionAttributeValues[':rejectedProfiles'] = null
+    }
+
+    if (updateExpressions.length === 0) {
+      return NextResponse.json({ error: 'No valid fields to update' }, { status: 400 })
+    }
+
+    // Always update timestamp
+    updateExpressions.push('#updatedAt = :updatedAt')
+    expressionAttributeNames['#updatedAt'] = 'updatedAt'
+    expressionAttributeValues[':updatedAt'] = new Date().toISOString()
+
+    const updateCommand = new UpdateCommand({
+      TableName: SPEAKERS_TABLE,
+      Key: { name: speakerNameLower },
+      UpdateExpression: `SET ${updateExpressions.join(', ')}`,
+      ExpressionAttributeNames: expressionAttributeNames,
+      ExpressionAttributeValues: expressionAttributeValues,
+      ReturnValues: 'ALL_NEW',
+    })
+
+    const result = await dynamodb.send(updateCommand)
+
+    return NextResponse.json({
+      success: true,
+      profile: result.Attributes,
+    })
+  } catch (error) {
+    console.error('Speaker profile patch error:', error)
     return NextResponse.json(
       { error: 'Failed to update speaker profile', details: String(error) },
       { status: 500 }
