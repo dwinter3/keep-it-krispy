@@ -66,6 +66,12 @@ export default function TranscriptsPage() {
   const [isDeleting, setIsDeleting] = useState(false)
   const [isUpdatingPrivacy, setIsUpdatingPrivacy] = useState(false)
 
+  // Multi-select state
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [isBulkDeleting, setIsBulkDeleting] = useState(false)
+  const [isBulkUpdatingPrivacy, setIsBulkUpdatingPrivacy] = useState(false)
+  const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false)
+
   // Filter and sort state
   const [dateFilter, setDateFilter] = useState<DateFilter>('all')
   const [speakerFilter, setSpeakerFilter] = useState<string>('all')
@@ -279,6 +285,107 @@ export default function TranscriptsPage() {
       setSelectedTranscript(prev => prev ? { ...prev, privacyDismissed: true } : null)
     } catch (err) {
       console.error('Error dismissing warning:', err)
+    }
+  }
+
+  // Multi-select handlers
+  function toggleSelection(meetingId: string) {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      if (next.has(meetingId)) {
+        next.delete(meetingId)
+      } else {
+        next.add(meetingId)
+      }
+      return next
+    })
+  }
+
+  function toggleSelectAll() {
+    if (selectedIds.size === filteredTranscripts.length) {
+      // Deselect all
+      setSelectedIds(new Set())
+    } else {
+      // Select all visible
+      setSelectedIds(new Set(filteredTranscripts.map(t => t.meetingId)))
+    }
+  }
+
+  function clearSelection() {
+    setSelectedIds(new Set())
+    setShowBulkDeleteConfirm(false)
+  }
+
+  async function handleBulkDelete() {
+    if (selectedIds.size === 0) return
+    setIsBulkDeleting(true)
+    try {
+      const res = await fetch('/api/transcripts/bulk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'delete',
+          meetingIds: Array.from(selectedIds),
+        }),
+      })
+      if (!res.ok) throw new Error('Failed to delete transcripts')
+
+      const data = await res.json()
+
+      // Remove deleted transcripts from local state
+      setTranscripts(prev => prev.filter(t => !data.results.success.includes(t.meetingId)))
+
+      // Clear selection and close detail panel if selected item was deleted
+      if (selectedTranscript && selectedIds.has(selectedTranscript.meetingId)) {
+        setSelectedTranscript(null)
+      }
+      clearSelection()
+
+      if (data.results.failed.length > 0) {
+        alert(`Deleted ${data.results.success.length} transcripts. ${data.results.failed.length} failed.`)
+      }
+    } catch (err) {
+      console.error('Error bulk deleting:', err)
+      alert('Failed to delete transcripts. Please try again.')
+    } finally {
+      setIsBulkDeleting(false)
+      setShowBulkDeleteConfirm(false)
+    }
+  }
+
+  async function handleBulkMarkPrivate() {
+    if (selectedIds.size === 0) return
+    setIsBulkUpdatingPrivacy(true)
+    try {
+      const res = await fetch('/api/transcripts/bulk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'markPrivate',
+          meetingIds: Array.from(selectedIds),
+        }),
+      })
+      if (!res.ok) throw new Error('Failed to mark transcripts as private')
+
+      const data = await res.json()
+
+      // Remove from view (private transcripts are hidden)
+      setTranscripts(prev => prev.filter(t => !data.results.success.includes(t.meetingId)))
+
+      // Clear selection and close detail panel if selected item was marked private
+      if (selectedTranscript && selectedIds.has(selectedTranscript.meetingId)) {
+        setSelectedTranscript(null)
+      }
+      clearSelection()
+
+      if (data.results.failed.length > 0) {
+        alert(`Marked ${data.results.success.length} transcripts as private. ${data.results.failed.length} failed.`)
+      }
+    } catch (err) {
+      console.error('Error marking private:', err)
+      alert('Failed to mark transcripts as private. Please try again.')
+    } finally {
+      setIsBulkUpdatingPrivacy(false)
     }
   }
 
@@ -659,41 +766,62 @@ export default function TranscriptsPage() {
                           <div
                             key={transcript.key}
                             onClick={() => viewTranscript(transcript)}
-                            className={`px-4 py-3 cursor-pointer transition-colors ${
-                              selectedTranscript?.key === transcript.key
-                                ? 'bg-primary-50 dark:bg-primary-900/20'
-                                : 'hover:bg-gray-50 dark:hover:bg-gray-700/50'
+                            className={`px-4 py-3 cursor-pointer transition-colors flex items-start gap-3 ${
+                              selectedIds.has(transcript.meetingId)
+                                ? 'bg-blue-50 dark:bg-blue-900/20'
+                                : selectedTranscript?.key === transcript.key
+                                  ? 'bg-primary-50 dark:bg-primary-900/20'
+                                  : 'hover:bg-gray-50 dark:hover:bg-gray-700/50'
                             }`}
                           >
-                            {/* Topic as main title if available, otherwise use meeting title */}
-                            <div className="font-medium text-gray-900 dark:text-white">
-                              {transcript.topic || transcript.title || 'Meeting'}
+                            {/* Checkbox */}
+                            <div
+                              className="flex-shrink-0 pt-0.5"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                toggleSelection(transcript.meetingId)
+                              }}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={selectedIds.has(transcript.meetingId)}
+                                onChange={() => {}}
+                                className="w-4 h-4 text-primary-600 bg-gray-100 dark:bg-gray-700 border-gray-300 dark:border-gray-600 rounded focus:ring-primary-500 focus:ring-2 cursor-pointer"
+                              />
                             </div>
 
-                            {/* Date and time row */}
-                            <div className="mt-1 flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
-                              <span>{formatFullDateTime(transcript.timestamp || transcript.date)}</span>
-                              <span className="text-gray-400 dark:text-gray-500">
-                                {formatRelativeTime(transcript.timestamp || transcript.date)}
-                              </span>
-                            </div>
+                            {/* Content */}
+                            <div className="flex-1 min-w-0">
+                              {/* Topic as main title if available, otherwise use meeting title */}
+                              <div className="font-medium text-gray-900 dark:text-white">
+                                {transcript.topic || transcript.title || 'Meeting'}
+                              </div>
 
-                            {/* Speakers and duration row */}
-                            <div className="mt-2 flex items-center justify-between">
-                              <div className="text-xs">
-                                {transcript.speakers.length > 0 && (
-                                  <ExpandableSpeakers
-                                    speakers={transcript.speakers}
-                                    speakerCorrections={transcript.speakerCorrections}
-                                    initialCount={2}
-                                  />
+                              {/* Date and time row */}
+                              <div className="mt-1 flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
+                                <span>{formatFullDateTime(transcript.timestamp || transcript.date)}</span>
+                                <span className="text-gray-400 dark:text-gray-500">
+                                  {formatRelativeTime(transcript.timestamp || transcript.date)}
+                                </span>
+                              </div>
+
+                              {/* Speakers and duration row */}
+                              <div className="mt-2 flex items-center justify-between">
+                                <div className="text-xs">
+                                  {transcript.speakers.length > 0 && (
+                                    <ExpandableSpeakers
+                                      speakers={transcript.speakers}
+                                      speakerCorrections={transcript.speakerCorrections}
+                                      initialCount={2}
+                                    />
+                                  )}
+                                </div>
+                                {transcript.duration > 0 && (
+                                  <span className="text-xs text-gray-500 dark:text-gray-400 flex-shrink-0 ml-2">
+                                    {formatDuration(transcript.duration)}
+                                  </span>
                                 )}
                               </div>
-                              {transcript.duration > 0 && (
-                                <span className="text-xs text-gray-500 dark:text-gray-400 flex-shrink-0 ml-2">
-                                  {formatDuration(transcript.duration)}
-                                </span>
-                              )}
                             </div>
                           </div>
                         ))}
@@ -719,6 +847,100 @@ export default function TranscriptsPage() {
                         'Load More Transcripts'
                       )}
                     </button>
+                  </div>
+                )}
+
+                {/* Bulk Action Bar */}
+                {selectedIds.size > 0 && (
+                  <div className="sticky bottom-0 p-3 border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-lg">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-3">
+                        {/* Select all checkbox */}
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={selectedIds.size === filteredTranscripts.length}
+                            ref={(el) => {
+                              if (el) {
+                                el.indeterminate = selectedIds.size > 0 && selectedIds.size < filteredTranscripts.length
+                              }
+                            }}
+                            onChange={toggleSelectAll}
+                            className="w-4 h-4 text-primary-600 bg-gray-100 dark:bg-gray-700 border-gray-300 dark:border-gray-600 rounded focus:ring-primary-500 focus:ring-2 cursor-pointer"
+                          />
+                          <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                            {selectedIds.size} selected
+                          </span>
+                        </label>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        {/* Mark Private Button */}
+                        <button
+                          onClick={handleBulkMarkPrivate}
+                          disabled={isBulkUpdatingPrivacy || isBulkDeleting}
+                          className="px-3 py-1.5 text-sm font-medium text-gray-700 dark:text-gray-200 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg disabled:opacity-50 flex items-center gap-1.5 transition-colors"
+                        >
+                          {isBulkUpdatingPrivacy ? (
+                            <>
+                              <div className="animate-spin rounded-full h-3.5 w-3.5 border-b-2 border-gray-600 dark:border-gray-300"></div>
+                              Processing...
+                            </>
+                          ) : (
+                            <>
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                              </svg>
+                              Mark Private
+                            </>
+                          )}
+                        </button>
+
+                        {/* Delete Button */}
+                        {!showBulkDeleteConfirm ? (
+                          <button
+                            onClick={() => setShowBulkDeleteConfirm(true)}
+                            disabled={isBulkUpdatingPrivacy || isBulkDeleting}
+                            className="px-3 py-1.5 text-sm font-medium text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 hover:bg-red-100 dark:hover:bg-red-900/40 rounded-lg disabled:opacity-50 flex items-center gap-1.5 transition-colors"
+                          >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                            </svg>
+                            Delete
+                          </button>
+                        ) : (
+                          <div className="flex items-center gap-2 px-3 py-1.5 bg-red-50 dark:bg-red-900/20 rounded-lg">
+                            <span className="text-sm text-red-600 dark:text-red-400">
+                              Delete {selectedIds.size} permanently?
+                            </span>
+                            <button
+                              onClick={handleBulkDelete}
+                              disabled={isBulkDeleting}
+                              className="px-2 py-0.5 text-sm font-medium bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50"
+                            >
+                              {isBulkDeleting ? 'Deleting...' : 'Yes'}
+                            </button>
+                            <button
+                              onClick={() => setShowBulkDeleteConfirm(false)}
+                              className="px-2 py-0.5 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200"
+                            >
+                              No
+                            </button>
+                          </div>
+                        )}
+
+                        {/* Clear Selection Button */}
+                        <button
+                          onClick={clearSelection}
+                          className="p-1.5 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors"
+                          title="Clear selection"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 )}
               </div>
