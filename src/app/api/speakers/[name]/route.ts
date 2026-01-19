@@ -300,33 +300,44 @@ export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ name: string }> }
 ) {
-  // Auth is optional for GET but needed for entity_id lookup
+  // Auth is required for user isolation
   const session = await auth()
-  const user = session?.user?.email ? await getUserByEmail(session.user.email) : null
-  const userId = user?.user_id
+  if (!session?.user?.email) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+  const user = await getUserByEmail(session.user.email)
+  if (!user) {
+    return NextResponse.json({ error: 'User not found' }, { status: 404 })
+  }
+  const userId = user.user_id
 
   try {
     const { name } = await params
     const speakerName = decodeURIComponent(name)
     const speakerNameLower = speakerName.toLowerCase()
 
-    // Scan all transcripts to find meetings with this speaker
+    // Query user's transcripts to find meetings with this speaker (user-isolated)
     const allItems: TranscriptItem[] = []
     let lastKey: Record<string, unknown> | undefined
 
     do {
-      const scanCommand = new ScanCommand({
+      const queryCommand = new QueryCommand({
         TableName: TABLE_NAME,
-        ProjectionExpression: 'meeting_id, s3_key, title, #date, #timestamp, #duration, speakers, speaker_corrections',
+        IndexName: 'user-index',
+        KeyConditionExpression: 'user_id = :userId',
+        ProjectionExpression: 'meeting_id, s3_key, title, topic, #date, #timestamp, #duration, speakers, speaker_corrections',
         ExpressionAttributeNames: {
           '#date': 'date',
           '#timestamp': 'timestamp',
           '#duration': 'duration',
         },
+        ExpressionAttributeValues: {
+          ':userId': userId,
+        },
         ...(lastKey && { ExclusiveStartKey: lastKey }),
       })
 
-      const response = await dynamodb.send(scanCommand)
+      const response = await dynamodb.send(queryCommand)
       if (response.Items) {
         allItems.push(...(response.Items as TranscriptItem[]))
       }
