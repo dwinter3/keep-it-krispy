@@ -34,6 +34,13 @@ interface UserProfile {
   }
 }
 
+interface TeamMember {
+  user_id: string
+  email: string
+  name: string
+  avatar?: string
+}
+
 export default function SettingsPage() {
   const { data: session, status } = useSession()
 
@@ -59,11 +66,20 @@ export default function SettingsPage() {
   const [inviteError, setInviteError] = useState<string | null>(null)
   const [loadingInvites, setLoadingInvites] = useState(true)
 
+  // Auto-Share state
+  const [autoShareUserIds, setAutoShareUserIds] = useState<string[]>([])
+  const [teamMembers, setTeamMembers] = useState<TeamMember[]>([])
+  const [loadingAutoShare, setLoadingAutoShare] = useState(true)
+  const [savingAutoShare, setSavingAutoShare] = useState(false)
+  const [autoShareSaved, setAutoShareSaved] = useState(false)
+  const [autoShareError, setAutoShareError] = useState<string | null>(null)
+
   useEffect(() => {
     if (status === 'authenticated') {
       loadProfile()
       loadApiKeys()
       loadInvites()
+      loadAutoShare()
     }
   }, [status])
 
@@ -287,6 +303,60 @@ export default function SettingsPage() {
     } catch (err) {
       setInviteError('Failed to resend invitation')
     }
+  }
+
+  async function loadAutoShare() {
+    setLoadingAutoShare(true)
+    try {
+      const res = await fetch('/api/settings/auto-share')
+      const data = await res.json()
+      if (data.userIds) {
+        setAutoShareUserIds(data.userIds)
+      }
+      if (data.teamMembers) {
+        setTeamMembers(data.teamMembers)
+      }
+    } catch (err) {
+      console.error('Failed to load auto-share settings:', err)
+    } finally {
+      setLoadingAutoShare(false)
+    }
+  }
+
+  async function saveAutoShare() {
+    setSavingAutoShare(true)
+    setAutoShareError(null)
+    setAutoShareSaved(false)
+
+    try {
+      const res = await fetch('/api/settings/auto-share', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userIds: autoShareUserIds }),
+      })
+      const data = await res.json()
+
+      if (data.success) {
+        setAutoShareSaved(true)
+        setTimeout(() => setAutoShareSaved(false), 3000)
+      } else {
+        setAutoShareError(data.error || 'Failed to save auto-share settings')
+      }
+    } catch (err) {
+      setAutoShareError('Failed to save auto-share settings')
+    } finally {
+      setSavingAutoShare(false)
+    }
+  }
+
+  function toggleAutoShareUser(userId: string) {
+    setAutoShareUserIds(prev => {
+      if (prev.includes(userId)) {
+        return prev.filter(id => id !== userId)
+      } else {
+        return [...prev, userId]
+      }
+    })
   }
 
   function getStatusBadge(status: string) {
@@ -515,6 +585,101 @@ export default function SettingsPage() {
                 </div>
               ))}
             </div>
+          )}
+        </section>
+
+        {/* Auto-Share Section */}
+        <section className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-6 mb-6">
+          <h2 className="text-lg font-semibold mb-4 text-gray-900 dark:text-white">Auto-Share New Transcripts</h2>
+          <p className="text-gray-600 dark:text-gray-300 text-sm mb-6">
+            When enabled, new transcripts will automatically be shared with selected team members.
+            This only affects future transcripts - existing transcripts are not changed.
+          </p>
+
+          {autoShareError && (
+            <div className="bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 px-4 py-2 rounded mb-4">
+              {autoShareError}
+            </div>
+          )}
+
+          {loadingAutoShare ? (
+            <p className="text-gray-500 dark:text-gray-400">Loading team members...</p>
+          ) : teamMembers.length === 0 ? (
+            <div className="text-center py-6">
+              <svg className="w-12 h-12 mx-auto text-gray-400 dark:text-gray-500 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+              </svg>
+              <p className="text-gray-500 dark:text-gray-400 mb-2">No team members yet</p>
+              <p className="text-sm text-gray-400 dark:text-gray-500">
+                Invite team members above to enable auto-sharing.
+              </p>
+            </div>
+          ) : (
+            <>
+              <div className="space-y-3 mb-6">
+                {teamMembers.map((member) => (
+                  <label
+                    key={member.user_id}
+                    className="flex items-center gap-3 p-3 bg-gray-50 dark:bg-gray-700 rounded-lg cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={autoShareUserIds.includes(member.user_id)}
+                      onChange={() => toggleAutoShareUser(member.user_id)}
+                      className="w-5 h-5 rounded border-gray-300 dark:border-gray-600 text-primary-600 focus:ring-primary-500 dark:bg-gray-800"
+                    />
+                    <div className="flex items-center gap-3 flex-1">
+                      {member.avatar ? (
+                        <img
+                          src={member.avatar}
+                          alt={member.name}
+                          className="w-8 h-8 rounded-full"
+                        />
+                      ) : (
+                        <div className="w-8 h-8 rounded-full bg-primary-100 dark:bg-primary-900/30 flex items-center justify-center">
+                          <span className="text-sm font-medium text-primary-600 dark:text-primary-400">
+                            {member.name.charAt(0).toUpperCase()}
+                          </span>
+                        </div>
+                      )}
+                      <div>
+                        <p className="font-medium text-gray-900 dark:text-white">{member.name}</p>
+                        <p className="text-sm text-gray-500 dark:text-gray-400">{member.email}</p>
+                      </div>
+                    </div>
+                  </label>
+                ))}
+              </div>
+
+              <div className="flex items-center justify-between">
+                <p className="text-sm text-gray-500 dark:text-gray-400">
+                  {autoShareUserIds.length === 0
+                    ? 'No team members selected'
+                    : `${autoShareUserIds.length} team member${autoShareUserIds.length === 1 ? '' : 's'} selected`}
+                </p>
+                <button
+                  onClick={saveAutoShare}
+                  disabled={savingAutoShare}
+                  className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                >
+                  {savingAutoShare ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                      Saving...
+                    </>
+                  ) : autoShareSaved ? (
+                    <>
+                      <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                      </svg>
+                      Saved
+                    </>
+                  ) : (
+                    'Save Changes'
+                  )}
+                </button>
+              </div>
+            </>
           )}
         </section>
 

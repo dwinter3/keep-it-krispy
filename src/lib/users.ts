@@ -51,6 +51,10 @@ export interface User {
   // OAuth tokens (encrypted in production)
   google_access_token?: string
   google_refresh_token?: string
+  // Auto-share settings: user IDs to automatically share new transcripts with
+  auto_share_user_ids?: string[]
+  // Avatar URL from Google
+  avatar?: string
 }
 
 export interface ApiKey {
@@ -405,4 +409,130 @@ export async function revokeApiKey(keyId: string, userId: string): Promise<boole
   }))
 
   return true
+}
+
+// ============= Auto-Share Settings =============
+
+/**
+ * Get auto-share settings for a user
+ * Returns the list of user IDs that new transcripts should be auto-shared with
+ */
+export async function getAutoShareSettings(userId: string): Promise<{ userIds: string[] }> {
+  const user = await getUser(userId)
+  if (!user) {
+    return { userIds: [] }
+  }
+  return { userIds: user.auto_share_user_ids || [] }
+}
+
+/**
+ * Update auto-share settings for a user
+ * @param userId - The user ID to update
+ * @param userIds - Array of user IDs to auto-share with (empty array disables auto-share)
+ */
+export async function updateAutoShareSettings(userId: string, userIds: string[]): Promise<void> {
+  await docClient.send(new UpdateCommand({
+    TableName: USERS_TABLE,
+    Key: { user_id: userId },
+    UpdateExpression: 'SET auto_share_user_ids = :userIds, updated_at = :now',
+    ExpressionAttributeValues: {
+      ':userIds': userIds,
+      ':now': new Date().toISOString(),
+    },
+  }))
+}
+
+/**
+ * Team member info for auto-share UI
+ */
+export interface TeamMember {
+  user_id: string
+  email: string
+  name: string
+  avatar?: string
+}
+
+/**
+ * Get team members for auto-share selection
+ * Returns users who:
+ * 1. Were invited by this user and accepted
+ * 2. Invited this user (and their invite was accepted)
+ */
+export async function getTeamMembers(userId: string): Promise<TeamMember[]> {
+  const teamMembers: TeamMember[] = []
+  const seenUserIds = new Set<string>()
+
+  try {
+    // Import invites module
+    const { QueryCommand: InviteQuery, ScanCommand } = await import('@aws-sdk/lib-dynamodb')
+    const INVITES_TABLE = 'krisp-invites'
+
+    // 1. Get users this person invited who accepted
+    const sentInvitesResult = await docClient.send(new InviteQuery({
+      TableName: INVITES_TABLE,
+      IndexName: 'inviter-index',
+      KeyConditionExpression: 'inviter_id = :inviterId',
+      FilterExpression: '#status = :accepted',
+      ExpressionAttributeNames: { '#status': 'status' },
+      ExpressionAttributeValues: {
+        ':inviterId': userId,
+        ':accepted': 'accepted',
+      },
+    }))
+
+    // For each accepted invite, find the user by email
+    for (const invite of sentInvitesResult.Items || []) {
+      const inviteeEmail = invite.invitee_email
+      const inviteeUserId = await getUserIdByEmail(inviteeEmail)
+      if (inviteeUserId && !seenUserIds.has(inviteeUserId)) {
+        const user = await getUser(inviteeUserId)
+        if (user) {
+          seenUserIds.add(inviteeUserId)
+          teamMembers.push({
+            user_id: user.user_id,
+            email: user.primary_email,
+            name: user.name,
+            avatar: user.avatar,
+          })
+        }
+      }
+    }
+
+    // 2. Get who invited this user (we need to find the invite by email)
+    const currentUser = await getUser(userId)
+    if (currentUser) {
+      const receivedInvitesResult = await docClient.send(new InviteQuery({
+        TableName: INVITES_TABLE,
+        IndexName: 'email-index',
+        KeyConditionExpression: 'invitee_email = :email',
+        FilterExpression: '#status = :accepted',
+        ExpressionAttributeNames: { '#status': 'status' },
+        ExpressionAttributeValues: {
+          ':email': currentUser.primary_email,
+          ':accepted': 'accepted',
+        },
+      }))
+
+      for (const invite of receivedInvitesResult.Items || []) {
+        const inviterId = invite.inviter_id
+        if (inviterId && !seenUserIds.has(inviterId)) {
+          const inviter = await getUser(inviterId)
+          if (inviter) {
+            seenUserIds.add(inviterId)
+            teamMembers.push({
+              user_id: inviter.user_id,
+              email: inviter.primary_email,
+              name: inviter.name,
+              avatar: inviter.avatar,
+            })
+          }
+        }
+      }
+    }
+  } catch (error) {
+    console.error('Error fetching team members:', error)
+  }
+
+  // Sort by name
+  return teamMembers.sort((a, b) => a.name.localeCompare(b.name))
 }

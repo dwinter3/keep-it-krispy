@@ -39,6 +39,9 @@ export type AuditEventType =
   | 'delete.item'      // User deletes transcript
   | 'update.privacy'   // Privacy setting changed
   | 'share.item'       // Manual share (future)
+  | 'share.enable_auto'  // User enables auto-share
+  | 'share.disable_auto' // User disables auto-share
+  | 'share.update_auto'  // User updates auto-share list
   | 'access.item'      // Export or privileged access
   | 'team.join'        // User joins team (future)
   | 'team.leave'       // User leaves team (future)
