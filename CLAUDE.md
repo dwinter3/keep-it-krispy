@@ -1,30 +1,22 @@
 # Keep It Krispy - Claude Code Context
 
-## Project Overview
+## Project Vision
 
-**Keep It Krispy** (repo: `krisp-buddy`) - AI-powered meeting memory that turns Krisp transcripts into a searchable knowledge base for Claude.
+**Keep It Krispy** transforms meeting transcripts into a **living knowledge graph** that connects people, companies, topics, content, and opportunities - giving users total recall of every professional interaction.
 
-- **Marketing Site**: https://krispy.alpha-pm.dev (S3 + CloudFront)
-- **SaaS Dashboard**: https://app.krispy.alpha-pm.dev (AWS Amplify)
-- **GitHub**: https://github.com/dwinter3/keep-it-krispy
+**Master Plan:** GitHub Issue #95 (Full Product Roadmap)
+**Phase 1 Plan:** GitHub Issue #94 (Secure SaaS + Knowledge Graph Foundation)
 
-## Architecture
+## URLs & Access
 
-### Data Flow
-1. **Krisp** sends webhook with transcript data to API Gateway
-2. **Lambda (handler.py)** receives webhook, stores raw JSON in S3
-3. **S3 Event** triggers **Processor Lambda** which:
-   - Parses transcript content
-   - Generates embeddings via Bedrock
-   - Stores vectors in S3 Vectors for semantic search
-   - Updates DynamoDB index with metadata
-4. **MCP Server** (Lambda) provides Claude with tools to search/query transcripts
-5. **Next.js Dashboard** (Amplify) provides web UI for browsing transcripts
-
-### Authentication
-- NextAuth.js with Google OAuth provider
-- User isolation via `user_id` field in DynamoDB
-- Session-based auth for API routes (`auth()` from `@/lib/auth`)
+| Environment | URL | Platform |
+|-------------|-----|----------|
+| Marketing Site | https://krispy.alpha-pm.dev | S3 + CloudFront |
+| SaaS Dashboard | https://app.krispy.alpha-pm.dev | AWS Amplify |
+| Amplify Default | https://main.dh65gpsgmkx3x.amplifyapp.com | AWS Amplify |
+| Webhook Endpoint | https://uuv3kmdcsulw2voxcvppbhyul40jfdio.lambda-url.us-east-1.on.aws/ | Lambda URL |
+| MCP Server | https://eneiq5vwovjqz7ahuwvu3ziwqi0bpttn.lambda-url.us-east-1.on.aws/ | Lambda URL |
+| GitHub | https://github.com/dwinter3/keep-it-krispy | GitHub |
 
 ## AWS Configuration
 
@@ -37,49 +29,98 @@ Always use this profile for AWS commands:
 aws <command> --profile krisp-buddy --region us-east-1
 ```
 
-### Key Resources
+### S3 Buckets
 
-| Resource | Name/ID |
+| Bucket | Purpose |
+|--------|---------|
+| `krisp-transcripts-754639201213` | Raw transcript JSON files |
+| `krisp-vectors-754639201213` | Vector embeddings (S3 Vectors) |
+| `keepitkrispy-website` | Marketing site static files |
+
+### DynamoDB Tables
+
+| Table | Purpose | PK |
+|-------|---------|-----|
+| `krisp-transcripts-index` | Transcript metadata | `meeting_id` |
+| `krisp-speakers` | Speaker profiles | `name` |
+| `krisp-users` | Platform users | `user_id` |
+| `krisp-api-keys` | User API keys | `api_key` |
+| `krisp-email-mapping` | Email → user mapping | `email` |
+
+**Planned Tables (Phase 1):**
+- `krisp-entities` - Universal entity store (Issue #90)
+- `krisp-relationships` - Graph edges (Issue #91)
+- `krisp-documents` - Files/artifacts (Issue #92)
+
+### Lambda Functions
+
+| Function | Runtime | Purpose |
+|----------|---------|---------|
+| `krisp-webhook-receiver` | Python 3.12 | Receives Krisp webhooks |
+| `krisp-transcript-processor` | Python 3.12 | Processes transcripts, generates embeddings |
+| `krisp-mcp-server` | Node.js 20.x | MCP server for Claude integration |
+
+### CloudWatch Log Groups
+
+| Log Group | Source |
+|-----------|--------|
+| `/aws/lambda/krisp-webhook-receiver` | Webhook Lambda |
+| `/aws/lambda/krisp-transcript-processor` | Processor Lambda |
+| `/aws/lambda/krisp-mcp-server` | MCP Server Lambda |
+| `/aws/amplify/dh65gpsgmkx3x` | Amplify builds |
+
+### Other AWS Resources
+
+| Resource | ID/Name |
 |----------|---------|
-| **SaaS Dashboard** | |
 | Amplify App | `dh65gpsgmkx3x` |
-| DynamoDB Table | `krisp-transcripts-index` |
-| S3 Transcripts | `krisp-transcripts-754639201213` |
-| S3 Vectors | `krisp-vectors-754639201213` |
-| Vector Index | `transcript-chunks` |
 | CloudFormation Stack | `krisp-buddy` |
-| **Marketing Site** | |
-| S3 Bucket | `keepitkrispy-website` |
 | CloudFront Distribution | `E29BWHIS0Y6I7T` |
 | CloudFront Domain | `d2jyxueb2eip8f.cloudfront.net` |
+| Route 53 Hosted Zone | `Z03566341KPFWJ5LEPWSY` (krispy.alpha-pm.dev) |
+| Vector Index | `transcript-chunks` |
 
-### Useful AWS Commands
+## DNS & Cloudflare
 
-```bash
-# Check DynamoDB table
-aws dynamodb scan --table-name krisp-transcripts-index --profile krisp-buddy --region us-east-1 | head -50
+**Domain**: `krispy.alpha-pm.dev` (subdomain of alpha-pm.dev)
+**DNS Provider**: Route 53 (hosted zone in AWS)
+**Parent Domain**: `alpha-pm.dev` (managed in Cloudflare)
 
-# List S3 transcripts
-aws s3 ls s3://krisp-transcripts-754639201213/ --profile krisp-buddy --region us-east-1
+| Subdomain | Target |
+|-----------|--------|
+| `krispy.alpha-pm.dev` | CloudFront `d2jyxueb2eip8f.cloudfront.net` |
+| `app.krispy.alpha-pm.dev` | Amplify (CNAME to Amplify domain) |
 
-# Query vectors (requires s3vectors CLI)
-aws s3vectors list-vectors --vector-bucket-name krisp-vectors-754639201213 --index-name transcript-chunks --profile krisp-buddy --region us-east-1
+## Architecture
 
-# Check Amplify build status
-aws amplify list-jobs --app-id dh65gpsgmkx3x --branch-name main --profile krisp-buddy --region us-east-1
-
-# View Lambda logs
-aws logs tail /aws/lambda/krisp-buddy-processor --profile krisp-buddy --region us-east-1 --follow
+### Data Flow
+```
+Krisp App → Webhook Lambda → S3 (raw JSON)
+                                   ↓
+                           Processor Lambda
+                                   ↓
+                    ┌──────────────┼──────────────┐
+                    ↓              ↓              ↓
+               DynamoDB      S3 Vectors      Bedrock
+              (metadata)    (embeddings)   (AI analysis)
+                    ↓              ↓
+                    └──────────────┼──────────────┘
+                                   ↓
+                           Next.js Dashboard
+                                   ↓
+                              MCP Server → Claude
 ```
 
-## Deployment
+### Authentication
+- NextAuth.js with Google OAuth provider
+- User isolation via `user_id` field in all tables
+- Session-based auth for API routes (`auth()` from `@/lib/auth`)
+
+## Deployment Commands
 
 ### Deploy Marketing Site (S3 + CloudFront)
 ```bash
-# Sync website folder to S3
 aws s3 sync website/ s3://keepitkrispy-website/ --profile krisp-buddy --region us-east-1 --delete
-
-# Invalidate CloudFront cache (required for changes to appear)
 aws cloudfront create-invalidation --distribution-id E29BWHIS0Y6I7T --paths "/*" --profile krisp-buddy --region us-east-1
 ```
 
@@ -94,126 +135,223 @@ aws amplify start-job --app-id dh65gpsgmkx3x --branch-name main --job-type RELEA
 aws cloudformation deploy --template-file cloudformation.yaml --stack-name krisp-buddy --capabilities CAPABILITY_NAMED_IAM --profile krisp-buddy --region us-east-1
 ```
 
-### Deploy Processor Lambda
+### Deploy Lambda Functions
 ```bash
-cd lambda/processor
-zip -r ../processor.zip .
-aws lambda update-function-code --function-name krisp-buddy-processor --zip-file fileb://../processor.zip --profile krisp-buddy --region us-east-1
+# Processor Lambda
+cd lambda/processor && zip -r function.zip handler.py requirements.txt
+aws lambda update-function-code --function-name krisp-transcript-processor --zip-file fileb://function.zip --profile krisp-buddy --region us-east-1
+
+# Webhook Lambda
+cd lambda && zip handler.zip handler.py
+aws lambda update-function-code --function-name krisp-webhook-receiver --zip-file fileb://handler.zip --profile krisp-buddy --region us-east-1
 ```
+
+## CloudWatch Logs
+
+### Viewing Logs
+```bash
+# Tail processor logs (live)
+aws logs tail /aws/lambda/krisp-transcript-processor --profile krisp-buddy --region us-east-1 --follow
+
+# Tail webhook logs
+aws logs tail /aws/lambda/krisp-webhook-receiver --profile krisp-buddy --region us-east-1 --follow
+
+# Search for errors in last hour
+aws logs filter-log-events --log-group-name /aws/lambda/krisp-transcript-processor --filter-pattern "ERROR" --start-time $(date -v-1H +%s)000 --profile krisp-buddy --region us-east-1
+```
+
+### TODO: Common Logging Function
+Create a shared logging utility that all Lambdas and API routes use:
+- Structured JSON logging
+- Correlation IDs across services
+- Log levels (DEBUG, INFO, WARN, ERROR)
+- Automatic context (user_id, request_id, function_name)
+- CloudWatch Insights compatible format
+
+See Issue #84 (Audit Logging Pipeline) for implementation.
+
+## Project Documentation
+
+| Document | Purpose |
+|----------|---------|
+| `docs/phase1-prd-v2.md` | Phase 1 Product Requirements |
+| `docs/entity-relationship-model.md` | Knowledge graph data model spec |
+| `docs/permissions-tenancy-spec.md` | Sharing & ownership rules |
+| `docs/soc2-type2-readiness.md` | Compliance requirements |
+| `docs/dynamics-integration-mvp.md` | Future CRM integration |
 
 ## GitHub Workflow
 
-- **Repository**: `dwinter3/keep-it-krispy`
+### Repository
+- **Repo**: `dwinter3/keep-it-krispy`
 - **Main Branch**: `main` (production)
-- **Issues**: GitHub Issues for backlog and bug tracking
-- **Commits**: Include `Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>` when Claude helps
+- **Issues**: GitHub Issues for backlog
 
-### Creating Issues
+### Commit Messages
+Always include co-author when Claude helps:
+```
+<summary>
+
+<description>
+
+Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>
+```
+
+### Issue Management
+
+**Reference Issues:**
+- #95 - Full Product Roadmap (all phases)
+- #94 - Phase 1 Master Plan
+
+**When completing work:**
+1. Update the relevant issue with a comment summarizing:
+   - What was implemented
+   - Files changed
+   - Test results (automated and manual)
+   - Any follow-up needed
+2. Check off completed items in epic checklists
+3. Close issues when fully complete
+4. Reference commits in issue comments
+
+**Creating Issues:**
 ```bash
 gh issue create --title "Title" --body "Description"
-gh issue list
-gh issue view <number>
+gh issue list --state open
+gh issue close <number> --comment "Completed in commit abc123"
 ```
+
+## Automated Testing
+
+### Philosophy
+- **Automate everything possible** - don't ask human for UI testing unless necessary
+- **Test before deploying** - run tests locally, verify in logs
+- **Log test results in issues** - document what was tested
+
+### Build Validation
+```bash
+# Always run before deploying
+npm run build
+
+# Check for TypeScript errors
+npx tsc --noEmit
+```
+
+### Lambda Testing
+```bash
+# Test Lambda locally with sample event
+cd lambda/processor
+python -c "
+import json
+from handler import handler
+event = {'Records': [{'s3': {'bucket': {'name': 'test'}, 'object': {'key': 'test.json'}}}]}
+print(handler(event, None))
+"
+
+# Invoke Lambda with test payload
+aws lambda invoke --function-name krisp-transcript-processor \
+  --payload '{"test": true}' \
+  --profile krisp-buddy --region us-east-1 \
+  output.json && cat output.json
+```
+
+### API Testing
+```bash
+# Test API endpoints (requires running dev server or deployed)
+# Health check
+curl -s https://app.krispy.alpha-pm.dev/api/transcripts | head -100
+
+# Test with auth (get cookie from browser)
+curl -s -H "Cookie: <session-cookie>" https://app.krispy.alpha-pm.dev/api/transcripts
+```
+
+### Integration Testing
+```bash
+# Verify DynamoDB after changes
+aws dynamodb scan --table-name krisp-transcripts-index \
+  --max-items 5 --profile krisp-buddy --region us-east-1
+
+# Verify S3 objects
+aws s3 ls s3://krisp-transcripts-754639201213/ --profile krisp-buddy --region us-east-1 | tail -10
+
+# Check CloudWatch for errors after deployment
+aws logs filter-log-events \
+  --log-group-name /aws/lambda/krisp-transcript-processor \
+  --filter-pattern "ERROR" \
+  --start-time $(date -v-5M +%s)000 \
+  --profile krisp-buddy --region us-east-1
+```
+
+### Test Checklist for PRs
+Before marking work complete:
+- [ ] `npm run build` passes
+- [ ] No TypeScript errors
+- [ ] Lambda tested locally or invoked successfully
+- [ ] API endpoints return expected responses
+- [ ] CloudWatch logs show no errors
+- [ ] DynamoDB data looks correct
+- [ ] UI works (if applicable - test in browser)
 
 ## Project Structure
 
 ```
-├── cloudformation.yaml          # AWS infrastructure (Lambda, API Gateway, S3, DynamoDB)
+├── cloudformation.yaml          # AWS infrastructure
+├── docs/                        # Specifications and planning
+│   ├── phase1-prd-v2.md
+│   ├── entity-relationship-model.md
+│   ├── permissions-tenancy-spec.md
+│   └── ...
 ├── lambda/
-│   ├── handler.py               # Webhook receiver Lambda
-│   ├── processor/               # S3 event processor (embeddings, vectors)
-│   ├── mcp-server/              # MCP server for Claude (Python)
-│   └── mcp-server-ts/           # MCP server for Claude (TypeScript)
-├── website/                     # Marketing site (S3 → krispy.alpha-pm.dev)
-├── scripts/                     # Backfill and maintenance scripts
-├── src/                         # Next.js web dashboard
+│   ├── handler.py               # Webhook receiver
+│   ├── processor/               # Transcript processor
+│   │   └── handler.py
+│   ├── mcp-server/              # MCP server (Python)
+│   └── mcp-server-ts/           # MCP server (TypeScript)
+├── website/                     # Marketing site (S3)
+├── scripts/                     # Maintenance scripts
+├── src/                         # Next.js dashboard
 │   ├── app/
-│   │   ├── api/                 # API routes (see below)
-│   │   ├── transcripts/         # Transcript browser
-│   │   ├── transcripts/private/ # Private transcripts view
-│   │   ├── speakers/            # Speakers directory
-│   │   ├── speakers/[name]/     # Speaker profile pages
-│   │   ├── topics/              # Topics overview
-│   │   ├── topics/[topic]/      # Topic detail pages
-│   │   ├── companies/           # Companies directory
+│   │   ├── api/                 # API routes
+│   │   ├── transcripts/         # Transcript pages
+│   │   ├── speakers/            # Speaker pages
+│   │   ├── topics/              # Topic pages
+│   │   ├── companies/           # Company pages
 │   │   ├── documents/           # Document library
-│   │   ├── search/              # Semantic search
-│   │   ├── settings/            # User settings (API keys)
-│   │   ├── upload/              # Manual upload
-│   │   └── login/               # Auth page
+│   │   ├── search/              # Search page
+│   │   └── settings/            # Settings
 │   ├── components/              # React components
-│   │   ├── Shell.tsx            # Main layout wrapper
-│   │   ├── ChatTranscript.tsx   # Chat bubble transcript view
-│   │   ├── SpeakerTalkTime.tsx  # Talk time visualization
-│   │   └── ...
 │   └── lib/                     # Utilities
-│       ├── auth.ts              # NextAuth configuration
-│       ├── users.ts             # User management (DynamoDB)
-│       ├── tenant.ts            # Multi-tenant isolation
-│       ├── transcriptParser.ts  # Parse raw transcript text
-│       └── documentParser.ts    # Parse uploaded documents
-└── infra/                       # Infrastructure config files
+│       ├── auth.ts              # NextAuth config
+│       ├── users.ts             # User management
+│       └── tenant.ts            # Multi-tenant isolation
+└── CLAUDE.md                    # This file
 ```
 
 ## API Endpoints
 
 ### Transcripts
-- `GET /api/transcripts` - List transcripts (cursor pagination)
-  - Query: `cursor`, `limit`, `key` (fetch specific), `action=stats`
-- `GET /api/transcripts/[id]` - Get transcript by meeting ID
-- `PATCH /api/transcripts/[id]` - Update transcript (privacy, dismiss warning)
-- `DELETE /api/transcripts/[id]` - Delete transcript (cascades to S3, vectors)
+- `GET /api/transcripts` - List (cursor pagination)
+- `GET /api/transcripts/[id]` - Get by ID
+- `PATCH /api/transcripts/[id]` - Update
+- `DELETE /api/transcripts/[id]` - Delete (cascades)
 - `POST /api/transcripts/bulk` - Bulk operations
-  - Body: `{ action: 'delete' | 'markPrivate', meetingIds: string[] }`
+- `POST /api/transcripts/[id]/summarize` - Generate AI summary
 
 ### Speakers
-- `GET /api/speakers` - List all speakers with stats
-- `GET /api/speakers/[name]` - Get speaker profile
-- `POST /api/speakers/[name]/enrich` - Trigger bio enrichment
-- `GET /api/speakers/[name]/context` - Get speaker context for AI
+- `GET /api/speakers` - List all
+- `GET /api/speakers/[name]` - Get profile
+- `POST /api/speakers/[name]/enrich` - Bio enrichment
+- `GET /api/speakers/[name]/context` - AI context
 
 ### Other
-- `GET /api/topics` - List topics with meeting counts
+- `GET /api/topics` - List topics
 - `GET /api/companies` - List companies
-- `GET /api/companies/[id]` - Get company details
 - `GET /api/documents` - List documents
-- `POST /api/documents/import-url` - Import document from URL
-- `GET /api/search` - Semantic search across transcripts
-- `GET /api/settings/api-keys` - Get user API key status
-- `POST /api/settings/api-keys` - Save API keys
-
-## Key Features
-
-### Transcript Management
-- Browse transcripts with date/speaker filters
-- Multi-select with bulk delete/mark private
-- Privacy detection (AI-classified private content warnings)
-- Chat bubble view with speaker talk time stats
-
-### Speaker Management
-- Auto-extracted speaker directory
-- Speaker corrections (rename misidentified speakers)
-- Bio enrichment via web search
-- LinkedIn profile linking
-- Speaker profile pages with meeting history
-
-### Topic Analysis
-- AI-generated topic classification
-- Topic-based transcript grouping
-- Topic detail pages
-
-## Build & Test
-
-```bash
-npm install              # Install dependencies
-npm run dev              # Local dev server (http://localhost:3000)
-npm run build            # Production build
-npm run lint             # Run linter
-```
+- `GET /api/search?q=<query>` - Semantic search
+- `GET/POST /api/settings/api-keys` - API key management
 
 ## Environment Variables
 
-Required in `.env.local` for local development:
+Required in `.env.local`:
 ```
 NEXTAUTH_SECRET=<secret>
 NEXTAUTH_URL=http://localhost:3000
@@ -223,7 +361,33 @@ KRISP_S3_BUCKET=krisp-transcripts-754639201213
 VECTOR_BUCKET=krisp-vectors-754639201213
 VECTOR_INDEX=transcript-chunks
 DYNAMODB_TABLE=krisp-transcripts-index
+SPEAKERS_TABLE=krisp-speakers
 APP_REGION=us-east-1
 S3_ACCESS_KEY_ID=<access-key>
 S3_SECRET_ACCESS_KEY=<secret-key>
+```
+
+## Build & Development
+
+```bash
+npm install              # Install dependencies
+npm run dev              # Local dev server (http://localhost:3000)
+npm run build            # Production build (ALWAYS run before deploy)
+npm run lint             # Run linter
+```
+
+## Quick Reference
+
+```bash
+# Deploy everything after changes
+npm run build && git add -A && git commit -m "message" && git push origin main
+
+# Check Amplify build status
+aws amplify list-jobs --app-id dh65gpsgmkx3x --branch-name main --profile krisp-buddy --region us-east-1 --max-items 1
+
+# View recent Lambda errors
+aws logs filter-log-events --log-group-name /aws/lambda/krisp-transcript-processor --filter-pattern "ERROR" --start-time $(date -v-1H +%s)000 --profile krisp-buddy --region us-east-1
+
+# List open issues
+gh issue list --repo dwinter3/keep-it-krispy --state open
 ```
