@@ -193,22 +193,48 @@ function calculateFileHash(content: string | Buffer): string {
 
 /**
  * Helper: Check if a document with the same hash already exists for this user
+ * Uses file_hash for deduplication - same content = same document
  */
 async function findDocumentByHash(userId: string, fileHash: string): Promise<Record<string, unknown> | null> {
   try {
-    const scanCommand = new ScanCommand({
+    // Use QueryCommand with user-index GSI and filter by hash
+    // This is more efficient than a full table scan
+    const queryCommand = new QueryCommand({
       TableName: TABLE_NAME,
-      FilterExpression: 'pk = :pk AND user_id = :userId AND file_hash = :fileHash',
+      IndexName: 'user-index',
+      KeyConditionExpression: 'user_id = :userId',
+      FilterExpression: 'pk = :pk AND file_hash = :fileHash',
       ExpressionAttributeValues: {
-        ':pk': 'DOCUMENT',
         ':userId': userId,
+        ':pk': 'DOCUMENT',
         ':fileHash': fileHash,
       },
+      Limit: 1,
     })
-    const response = await dynamodb.send(scanCommand)
-    return response.Items?.[0] || null
-  } catch {
+    const response = await dynamodb.send(queryCommand)
+    if (response.Items && response.Items.length > 0) {
+      return response.Items[0]
+    }
     return null
+  } catch (err) {
+    // Fall back to scan if GSI query fails
+    console.log('Falling back to scan for deduplication check:', err)
+    try {
+      const scanCommand = new ScanCommand({
+        TableName: TABLE_NAME,
+        FilterExpression: 'pk = :pk AND user_id = :userId AND file_hash = :fileHash',
+        ExpressionAttributeValues: {
+          ':pk': 'DOCUMENT',
+          ':userId': userId,
+          ':fileHash': fileHash,
+        },
+        Limit: 1,
+      })
+      const response = await dynamodb.send(scanCommand)
+      return response.Items?.[0] || null
+    } catch {
+      return null
+    }
   }
 }
 

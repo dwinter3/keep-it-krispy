@@ -22,6 +22,7 @@ interface Document {
 
 interface DocumentWithContent extends Document {
   content?: string
+  linkedTranscriptDetails?: LinkedTranscriptInfo[]
 }
 
 interface Transcript {
@@ -29,6 +30,13 @@ interface Transcript {
   title: string
   date: string
   timestamp: string
+  topic?: string
+}
+
+interface LinkedTranscriptInfo {
+  meetingId: string
+  title: string
+  date: string
   topic?: string
 }
 
@@ -120,10 +128,17 @@ export default function DocumentsPage() {
     setLoadingContent(true)
 
     try {
-      const res = await fetch(`/api/documents?id=${doc.documentId}`)
+      // Use the new /api/documents/[id] endpoint with content flag
+      const res = await fetch(`/api/documents/${doc.documentId}?content=true`)
       if (!res.ok) throw new Error('Failed to fetch document content')
       const data = await res.json()
-      setSelectedDocument({ ...doc, content: data.content })
+      setSelectedDocument({
+        ...doc,
+        content: data.content,
+        linkedTranscriptDetails: data.linkedTranscripts || [],
+        linkedTranscripts: (data.linkedTranscripts || []).map((t: LinkedTranscriptInfo) => t.meetingId),
+        linkedTranscriptCount: data.linkedTranscriptCount || 0,
+      })
     } catch (err) {
       console.error('Error loading document:', err)
     } finally {
