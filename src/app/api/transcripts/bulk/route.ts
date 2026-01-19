@@ -4,6 +4,7 @@ import { DynamoDBClient } from '@aws-sdk/client-dynamodb'
 import { DynamoDBDocumentClient, UpdateCommand, DeleteCommand, BatchGetCommand } from '@aws-sdk/lib-dynamodb'
 import { auth } from '@/lib/auth'
 import { getUserByEmail } from '@/lib/users'
+import { logAuditEvent, getClientInfo } from '@/lib/auditLog'
 
 const BUCKET_NAME = process.env.KRISP_S3_BUCKET || ''
 const TABLE_NAME = process.env.DYNAMODB_TABLE || 'krisp-transcripts-index'
@@ -95,6 +96,9 @@ export async function POST(request: NextRequest) {
       failed: [] as { id: string; error: string }[],
     }
 
+    // Get client info for audit logging
+    const { ipAddress, userAgent } = getClientInfo(request)
+
     if (action === 'delete') {
       for (const transcript of transcripts) {
         try {
@@ -118,6 +122,21 @@ export async function POST(request: NextRequest) {
             TableName: TABLE_NAME,
             Key: { meeting_id: transcript.meeting_id },
           }))
+
+          // Log audit event for deletion
+          await logAuditEvent({
+            actorId: userId,
+            actorEmail: session.user.email,
+            eventType: 'delete.item',
+            targetType: 'transcript',
+            targetId: transcript.meeting_id,
+            metadata: {
+              s3_key: transcript.s3_key,
+              bulk_operation: true,
+            },
+            ipAddress,
+            userAgent,
+          })
 
           results.success.push(transcript.meeting_id)
         } catch (error) {
@@ -146,6 +165,22 @@ export async function POST(request: NextRequest) {
             ExpressionAttributeNames: { '#isPrivate': 'isPrivate' },
             ExpressionAttributeValues: { ':isPrivate': true },
           }))
+
+          // Log audit event for privacy change
+          await logAuditEvent({
+            actorId: userId,
+            actorEmail: session.user.email,
+            eventType: 'update.privacy',
+            targetType: 'transcript',
+            targetId: transcript.meeting_id,
+            metadata: {
+              previous_privacy: false,
+              new_privacy: true,
+              bulk_operation: true,
+            },
+            ipAddress,
+            userAgent,
+          })
 
           results.success.push(transcript.meeting_id)
         } catch (error) {

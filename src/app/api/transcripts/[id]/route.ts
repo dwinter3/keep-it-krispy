@@ -7,6 +7,9 @@ import { promisify } from 'util'
 import * as fs from 'fs'
 import * as os from 'os'
 import * as path from 'path'
+import { auth } from '@/lib/auth'
+import { getUserByEmail } from '@/lib/users'
+import { logAuditEvent, getClientInfo } from '@/lib/auditLog'
 
 const execFileAsync = promisify(execFile)
 
@@ -49,6 +52,18 @@ export async function DELETE(
   const { id: meetingId } = await params
 
   try {
+    // Get authenticated user
+    const session = await auth()
+    if (!session?.user?.email) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+
+    // Get user's ID for tenant isolation
+    const user = await getUserByEmail(session.user.email)
+    if (!user) {
+      return NextResponse.json({ error: 'User not found' }, { status: 404 })
+    }
+
     // Get the transcript record from DynamoDB
     const getCommand = new GetCommand({
       TableName: TABLE_NAME,
@@ -85,6 +100,21 @@ export async function DELETE(
     }))
     console.log(`Deleted DynamoDB record: ${meetingId}`)
 
+    // Log audit event for deletion
+    const { ipAddress, userAgent } = getClientInfo(request)
+    await logAuditEvent({
+      actorId: user.user_id,
+      actorEmail: session.user.email,
+      eventType: 'delete.item',
+      targetType: 'transcript',
+      targetId: meetingId,
+      metadata: {
+        s3_key: transcript.s3_key,
+      },
+      ipAddress,
+      userAgent,
+    })
+
     return NextResponse.json({
       success: true,
       message: 'Transcript deleted successfully',
@@ -110,6 +140,18 @@ export async function PATCH(
   const { id: meetingId } = await params
 
   try {
+    // Get authenticated user
+    const session = await auth()
+    if (!session?.user?.email) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+
+    // Get user's ID for tenant isolation
+    const user = await getUserByEmail(session.user.email)
+    if (!user) {
+      return NextResponse.json({ error: 'User not found' }, { status: 404 })
+    }
+
     const body = await request.json()
     const { isPrivate, privacyDismissed, irrelevanceDismissed } = body
 
@@ -130,10 +172,22 @@ export async function PATCH(
     const expressionValues: Record<string, unknown> = {}
     const expressionNames: Record<string, string> = {}
 
+    // Track privacy changes for audit logging
+    let privacyChanged = false
+    let previousPrivacy: boolean | undefined
+    let newPrivacy: boolean | undefined
+
     if (typeof isPrivate === 'boolean') {
       updateParts.push('#isPrivate = :isPrivate')
       expressionNames['#isPrivate'] = 'isPrivate'
       expressionValues[':isPrivate'] = isPrivate
+
+      // Track for audit logging
+      if (isPrivate !== transcript.isPrivate) {
+        privacyChanged = true
+        previousPrivacy = transcript.isPrivate
+        newPrivacy = isPrivate
+      }
 
       // Handle vector cascade
       if (isPrivate && !transcript.isPrivate) {
@@ -175,6 +229,24 @@ export async function PATCH(
 
     const result = await dynamodb.send(updateCommand)
     console.log(`Updated transcript: ${meetingId}`)
+
+    // Log audit event for privacy changes
+    if (privacyChanged) {
+      const { ipAddress, userAgent } = getClientInfo(request)
+      await logAuditEvent({
+        actorId: user.user_id,
+        actorEmail: session.user.email,
+        eventType: 'update.privacy',
+        targetType: 'transcript',
+        targetId: meetingId,
+        metadata: {
+          previous_privacy: previousPrivacy,
+          new_privacy: newPrivacy,
+        },
+        ipAddress,
+        userAgent,
+      })
+    }
 
     return NextResponse.json({
       success: true,

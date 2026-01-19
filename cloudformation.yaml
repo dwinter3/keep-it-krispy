@@ -118,6 +118,201 @@ Resources:
           Projection:
             ProjectionType: ALL
 
+  # DynamoDB Table for Entities (Universal Entity Store)
+  EntitiesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: krisp-entities
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: entity_id
+          AttributeType: S
+        - AttributeName: user_id
+          AttributeType: S
+        - AttributeName: entity_type
+          AttributeType: S
+        - AttributeName: team_id
+          AttributeType: S
+        - AttributeName: canonical_name
+          AttributeType: S
+      KeySchema:
+        - AttributeName: entity_id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: user-type-index
+          KeySchema:
+            - AttributeName: user_id
+              KeyType: HASH
+            - AttributeName: entity_type
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: type-name-index
+          KeySchema:
+            - AttributeName: entity_type
+              KeyType: HASH
+            - AttributeName: canonical_name
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: team-type-index
+          KeySchema:
+            - AttributeName: team_id
+              KeyType: HASH
+            - AttributeName: entity_type
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+
+  # DynamoDB Table for Relationships (Graph Edges)
+  RelationshipsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: krisp-relationships
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: relationship_id
+          AttributeType: S
+        - AttributeName: from_entity_id
+          AttributeType: S
+        - AttributeName: to_entity_id
+          AttributeType: S
+        - AttributeName: rel_type
+          AttributeType: S
+        - AttributeName: user_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: relationship_id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: from-index
+          KeySchema:
+            - AttributeName: from_entity_id
+              KeyType: HASH
+            - AttributeName: rel_type
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: to-index
+          KeySchema:
+            - AttributeName: to_entity_id
+              KeyType: HASH
+            - AttributeName: rel_type
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: user-type-index
+          KeySchema:
+            - AttributeName: user_id
+              KeyType: HASH
+            - AttributeName: rel_type
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+
+  # DynamoDB Table for Documents
+  DocumentsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: krisp-documents
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: document_id
+          AttributeType: S
+        - AttributeName: user_id
+          AttributeType: S
+        - AttributeName: created_at
+          AttributeType: S
+        - AttributeName: file_hash
+          AttributeType: S
+      KeySchema:
+        - AttributeName: document_id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: user-index
+          KeySchema:
+            - AttributeName: user_id
+              KeyType: HASH
+            - AttributeName: created_at
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: hash-index
+          KeySchema:
+            - AttributeName: file_hash
+              KeyType: HASH
+          Projection:
+            ProjectionType: KEYS_ONLY
+
+  # DynamoDB Table for Invitations
+  InvitesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: krisp-invites
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: invite_token
+          AttributeType: S
+        - AttributeName: inviter_id
+          AttributeType: S
+        - AttributeName: invitee_email
+          AttributeType: S
+      KeySchema:
+        - AttributeName: invite_token
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: inviter-index
+          KeySchema:
+            - AttributeName: inviter_id
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+        - IndexName: email-index
+          KeySchema:
+            - AttributeName: invitee_email
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+
+  # DynamoDB Table for Audit Logs (SOC2 Compliance)
+  AuditLogsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: krisp-audit-logs
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: log_id
+          AttributeType: S
+        - AttributeName: actor_id
+          AttributeType: S
+        - AttributeName: target_id
+          AttributeType: S
+        - AttributeName: timestamp
+          AttributeType: S
+      KeySchema:
+        - AttributeName: log_id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: actor-index
+          KeySchema:
+            - AttributeName: actor_id
+              KeyType: HASH
+            - AttributeName: timestamp
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: target-index
+          KeySchema:
+            - AttributeName: target_id
+              KeyType: HASH
+            - AttributeName: timestamp
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+
   # IAM Role for Webhook Lambda
   WebhookLambdaRole:
     Type: AWS::IAM::Role
@@ -455,6 +650,26 @@ Outputs:
   CompaniesTable:
     Description: DynamoDB table for company data
     Value: !Ref CompaniesTable
+
+  EntitiesTable:
+    Description: DynamoDB table for universal entity store
+    Value: !Ref EntitiesTable
+
+  RelationshipsTable:
+    Description: DynamoDB table for graph relationships
+    Value: !Ref RelationshipsTable
+
+  DocumentsTable:
+    Description: DynamoDB table for documents
+    Value: !Ref DocumentsTable
+
+  AuditLogsTable:
+    Description: DynamoDB table for audit logs (SOC2 compliance)
+    Value: !Ref AuditLogsTable
+
+  InvitesTable:
+    Description: DynamoDB table for user invitations
+    Value: !Ref InvitesTable
 
   MCPServerConfig:
     Description: Environment variables for MCP server
