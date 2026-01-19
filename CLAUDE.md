@@ -220,6 +220,63 @@ gh issue list --state open
 gh issue close <number> --comment "Completed in commit abc123"
 ```
 
+## Parallel Development
+
+### Git Worktrees
+Use worktrees to work on multiple features simultaneously without branch switching:
+
+```bash
+# Create a worktree for a feature branch
+git worktree add ../krisp-buddy-feature-name feature/feature-name
+
+# List worktrees
+git worktree list
+
+# Remove worktree when done
+git worktree remove ../krisp-buddy-feature-name
+```
+
+**Worktree naming convention:** `krisp-buddy-<issue-number>` or `krisp-buddy-<feature-name>`
+
+### Subagents for Parallel Work
+When multiple independent tasks can be done simultaneously, use the Task tool to spawn subagents:
+
+```
+Example: Need to create 3 DynamoDB tables (#90, #91, #92)
+- These are independent and can be done in parallel
+- Spawn 3 subagents, each handling one table
+- Each subagent updates cloudformation.yaml (coordinate to avoid conflicts)
+- Or: one subagent per table's TypeScript types while another does CloudFormation
+```
+
+**When to use parallel subagents:**
+- Independent infrastructure changes (different tables, different Lambdas)
+- Research tasks (exploring different parts of codebase)
+- Testing multiple things simultaneously
+- Creating multiple GitHub issues
+
+**When NOT to parallelize:**
+- Changes to the same file (will conflict)
+- Sequential dependencies (B depends on A completing)
+- Database migrations that must be ordered
+
+### Parallel Development Strategy
+
+For large features, break work into parallel tracks:
+
+```
+Track A: Infrastructure     Track B: Backend          Track C: Frontend
+─────────────────────────   ─────────────────────     ─────────────────
+CloudFormation tables       API routes                UI components
+Lambda updates              TypeScript types          Pages
+DynamoDB indexes            Utility functions         State management
+```
+
+**Coordination:**
+- Use feature branches for large changes
+- Merge infrastructure first, then backend, then frontend
+- Run `npm run build` after merging to catch integration issues
+
 ## Automated Testing
 
 ### Philosophy
