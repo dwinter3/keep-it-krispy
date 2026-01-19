@@ -42,6 +42,7 @@ export type AuditEventType =
   | 'share.enable_auto'  // User enables auto-share
   | 'share.disable_auto' // User disables auto-share
   | 'share.update_auto'  // User updates auto-share list
+  | 'relinquish.item'  // User transfers ownership to team
   | 'access.item'      // Export or privileged access
   | 'team.join'        // User joins team (future)
   | 'team.leave'       // User leaves team (future)

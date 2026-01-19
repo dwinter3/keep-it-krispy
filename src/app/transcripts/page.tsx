@@ -9,6 +9,7 @@ import ChatTranscript from '@/components/ChatTranscript'
 import SpeakerEditModal from '@/components/SpeakerEditModal'
 import SpeakerInferenceModal from '@/components/SpeakerInferenceModal'
 import ShareModal from '@/components/ShareModal'
+import RelinquishModal from '@/components/RelinquishModal'
 import { parseTranscript, createSpeakerColorMap, type ParsedTranscript } from '@/lib/transcriptParser'
 
 interface SpeakerCorrection {
@@ -45,6 +46,10 @@ interface Transcript {
   visibility?: 'private' | 'team_shared' | 'team_owned'
   ownerId?: string
   ownerName?: string
+  // Team ownership properties
+  ownerType?: 'user' | 'team'
+  relinquishedBy?: string | null
+  relinquishedAt?: string | null
 }
 
 type OwnershipFilter = 'all' | 'owned' | 'shared'
@@ -104,6 +109,12 @@ export default function TranscriptsPage() {
 
   // Share modal state
   const [showShareModal, setShowShareModal] = useState(false)
+
+  // Relinquish modal state
+  const [showRelinquishModal, setShowRelinquishModal] = useState(false)
+
+  // Bulk relinquish state
+  const [isBulkRelinquishing, setIsBulkRelinquishing] = useState(false)
 
   // Ownership filter state
   const [ownershipFilter, setOwnershipFilter] = useState<OwnershipFilter>('all')
@@ -506,6 +517,51 @@ export default function TranscriptsPage() {
       alert('Failed to mark transcripts as private. Please try again.')
     } finally {
       setIsBulkUpdatingPrivacy(false)
+    }
+  }
+
+  async function handleBulkRelinquish() {
+    if (selectedIds.size === 0) return
+    setIsBulkRelinquishing(true)
+    try {
+      const res = await fetch('/api/transcripts/bulk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'relinquish',
+          meetingIds: Array.from(selectedIds),
+        }),
+      })
+      if (!res.ok) {
+        const errorData = await res.json()
+        throw new Error(errorData.error || 'Failed to transfer transcripts')
+      }
+
+      const data = await res.json()
+
+      // Update local state to reflect team ownership
+      setTranscripts(prev => prev.map(t => {
+        if (data.results.success.includes(t.meetingId)) {
+          return {
+            ...t,
+            ownerType: 'team' as const,
+            visibility: 'team_owned' as const,
+          }
+        }
+        return t
+      }))
+
+      // Clear selection
+      clearSelection()
+
+      if (data.results.failed.length > 0) {
+        alert(`Transferred ${data.results.success.length} transcripts to team. ${data.results.failed.length} failed.`)
+      }
+    } catch (err) {
+      console.error('Error relinquishing transcripts:', err)
+      alert(err instanceof Error ? err.message : 'Failed to transfer transcripts. Please try again.')
+    } finally {
+      setIsBulkRelinquishing(false)
     }
   }
 
@@ -929,10 +985,32 @@ export default function TranscriptsPage() {
                       </div>
 
                       <div className="flex items-center gap-2">
+                        {/* Transfer to Team Button */}
+                        <button
+                          onClick={handleBulkRelinquish}
+                          disabled={isBulkRelinquishing || isBulkUpdatingPrivacy || isBulkDeleting}
+                          className="px-3 py-1.5 text-sm font-medium text-purple-700 dark:text-purple-400 bg-purple-100 dark:bg-purple-900/30 hover:bg-purple-200 dark:hover:bg-purple-900/50 rounded-lg disabled:opacity-50 flex items-center gap-1.5 transition-colors"
+                          title="Transfer ownership to team"
+                        >
+                          {isBulkRelinquishing ? (
+                            <>
+                              <div className="animate-spin rounded-full h-3.5 w-3.5 border-b-2 border-purple-600 dark:border-purple-400"></div>
+                              Transferring...
+                            </>
+                          ) : (
+                            <>
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
+                              </svg>
+                              Transfer to Team
+                            </>
+                          )}
+                        </button>
+
                         {/* Hide from AI Button */}
                         <button
                           onClick={handleBulkMarkPrivate}
-                          disabled={isBulkUpdatingPrivacy || isBulkDeleting}
+                          disabled={isBulkUpdatingPrivacy || isBulkDeleting || isBulkRelinquishing}
                           className="px-3 py-1.5 text-sm font-medium text-amber-700 dark:text-amber-400 bg-amber-100 dark:bg-amber-900/30 hover:bg-amber-200 dark:hover:bg-amber-900/50 rounded-lg disabled:opacity-50 flex items-center gap-1.5 transition-colors"
                         >
                           {isBulkUpdatingPrivacy ? (
@@ -1059,8 +1137,17 @@ export default function TranscriptsPage() {
                                     Shared
                                   </span>
                                 )}
+                                {/* Team Owned indicator */}
+                                {transcript.ownerType === 'team' && (
+                                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400 text-xs rounded" title="Owned by your team">
+                                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
+                                    </svg>
+                                    Team Owned
+                                  </span>
+                                )}
                                 {/* Has shares indicator for owned transcripts */}
-                                {!transcript.isShared && transcript.sharedWithUserIds && transcript.sharedWithUserIds.length > 0 && (
+                                {!transcript.isShared && transcript.ownerType !== 'team' && transcript.sharedWithUserIds && transcript.sharedWithUserIds.length > 0 && (
                                   <span className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 text-xs rounded" title={`Shared with ${transcript.sharedWithUserIds.length} team member(s)`}>
                                     <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
@@ -1368,8 +1455,23 @@ export default function TranscriptsPage() {
                     </div>
                   )}
 
-                  {/* Share & Privacy & Delete Actions (only for owned transcripts) */}
-                  {!selectedTranscript.isShared && (
+                  {/* Team Owned Info (for team-owned transcripts) */}
+                  {selectedTranscript.ownerType === 'team' && (
+                    <div className="mb-4 p-3 bg-purple-50 dark:bg-purple-900/20 rounded-lg border border-purple-200 dark:border-purple-800">
+                      <div className="flex items-center gap-2 text-sm text-purple-700 dark:text-purple-400">
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
+                        </svg>
+                        <span><strong>Team Owned</strong> - This transcript belongs to the team</span>
+                      </div>
+                      <p className="mt-1 text-xs text-purple-600 dark:text-purple-500">
+                        You have read-only access to this transcript.
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Share & Privacy & Delete Actions (only for owned transcripts that are not team-owned) */}
+                  {!selectedTranscript.isShared && selectedTranscript.ownerType !== 'team' && (
                     <div className="mb-4 flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg border border-gray-100 dark:border-gray-600">
                       <div className="flex items-center gap-3">
                         {/* Share Button */}
@@ -1391,6 +1493,18 @@ export default function TranscriptsPage() {
                               : 'Share'
                             }
                           </span>
+                        </button>
+
+                        {/* Transfer to Team Button */}
+                        <button
+                          onClick={() => setShowRelinquishModal(true)}
+                          className="px-3 py-1.5 text-xs rounded-lg flex items-center gap-2 transition-colors bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400 border border-purple-200 dark:border-purple-800 hover:bg-purple-200 dark:hover:bg-purple-900/50"
+                          title="Transfer ownership to team (permanent)"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
+                          </svg>
+                          <span className="font-medium">Transfer to Team</span>
                         </button>
 
                         {/* Privacy Toggle */}
@@ -1503,6 +1617,29 @@ export default function TranscriptsPage() {
             viewTranscript(selectedTranscript)
             // Also refresh the list to update the shared indicator
             fetchTranscripts(undefined, ownershipFilter)
+          }}
+        />
+      )}
+
+      {/* Relinquish Modal */}
+      {selectedTranscript && (
+        <RelinquishModal
+          isOpen={showRelinquishModal}
+          meetingId={selectedTranscript.meetingId}
+          transcriptTitle={selectedTranscript.topic || selectedTranscript.title || 'Meeting'}
+          onClose={() => setShowRelinquishModal(false)}
+          onRelinquished={() => {
+            // Update local state to reflect team ownership
+            setSelectedTranscript(prev => prev ? {
+              ...prev,
+              ownerType: 'team',
+              visibility: 'team_owned',
+            } : null)
+            setTranscripts(prev => prev.map(t =>
+              t.meetingId === selectedTranscript.meetingId
+                ? { ...t, ownerType: 'team' as const, visibility: 'team_owned' as const }
+                : t
+            ))
           }}
         />
       )}

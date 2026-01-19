@@ -4,6 +4,7 @@ import { DynamoDBClient } from '@aws-sdk/client-dynamodb'
 import { DynamoDBDocumentClient, UpdateCommand, DeleteCommand, BatchGetCommand } from '@aws-sdk/lib-dynamodb'
 import { auth } from '@/lib/auth'
 import { getUserByEmail } from '@/lib/users'
+import { getTeamId, canRelinquishToTeam, getTeamMembers } from '@/lib/teams'
 import { logAuditEvent, getClientInfo } from '@/lib/auditLog'
 
 const BUCKET_NAME = process.env.KRISP_S3_BUCKET || ''
@@ -25,11 +26,13 @@ interface TranscriptRecord {
   s3_key: string
   user_id?: string
   isPrivate?: boolean
+  owner_type?: 'user' | 'team'
 }
 
 interface BulkRequest {
-  action: 'delete' | 'markPrivate'
+  action: 'delete' | 'markPrivate' | 'relinquish'
   meetingIds: string[]
+  teamId?: string
 }
 
 /**
@@ -52,11 +55,11 @@ export async function POST(request: NextRequest) {
     const userId = user.user_id
 
     const body: BulkRequest = await request.json()
-    const { action, meetingIds } = body
+    const { action, meetingIds, teamId } = body
 
     if (!action || !meetingIds || !Array.isArray(meetingIds) || meetingIds.length === 0) {
       return NextResponse.json(
-        { error: 'Invalid request. Required: action (delete|markPrivate), meetingIds (array)' },
+        { error: 'Invalid request. Required: action (delete|markPrivate|relinquish), meetingIds (array)' },
         { status: 400 }
       )
     }
@@ -190,9 +193,102 @@ export async function POST(request: NextRequest) {
           })
         }
       }
+    } else if (action === 'relinquish') {
+      // Determine target team
+      const targetTeamId = teamId || await getTeamId(userId)
+
+      if (!targetTeamId) {
+        return NextResponse.json(
+          { error: 'No team specified and user has no default team' },
+          { status: 400 }
+        )
+      }
+
+      // Validate user can relinquish to this team
+      const canRelinquish = await canRelinquishToTeam(userId, targetTeamId)
+      if (!canRelinquish) {
+        return NextResponse.json(
+          { error: 'You are not a member of the specified team' },
+          { status: 403 }
+        )
+      }
+
+      // Get all team member IDs for shared_with_user_ids
+      const teamMembers = await getTeamMembers(targetTeamId)
+      const teamMemberIds = teamMembers.map(m => m.user_id)
+
+      const now = new Date().toISOString()
+
+      for (const transcript of transcripts) {
+        try {
+          // Skip if already team-owned
+          if (transcript.owner_type === 'team') {
+            results.failed.push({
+              id: transcript.meeting_id,
+              error: 'Already team-owned',
+            })
+            continue
+          }
+
+          // Build list of users who should have read access
+          const allWithAccess = new Set([
+            ...teamMemberIds,
+            userId, // Original owner keeps read access
+            targetTeamId, // Team lead
+          ])
+          // Remove the team owner since they have full access via owner_id
+          allWithAccess.delete(targetTeamId)
+
+          // Update DynamoDB
+          await dynamodb.send(new UpdateCommand({
+            TableName: TABLE_NAME,
+            Key: { meeting_id: transcript.meeting_id },
+            UpdateExpression: `
+              SET owner_type = :ownerType,
+                  owner_id = :ownerId,
+                  visibility = :visibility,
+                  relinquished_by = :relinquishedBy,
+                  relinquished_at = :relinquishedAt,
+                  shared_with_user_ids = :sharedWith
+            `,
+            ExpressionAttributeValues: {
+              ':ownerType': 'team',
+              ':ownerId': targetTeamId,
+              ':visibility': 'team_owned',
+              ':relinquishedBy': userId,
+              ':relinquishedAt': now,
+              ':sharedWith': Array.from(allWithAccess),
+            },
+          }))
+
+          // Log audit event for relinquish
+          await logAuditEvent({
+            actorId: userId,
+            actorEmail: session.user.email,
+            eventType: 'relinquish.item',
+            targetType: 'transcript',
+            targetId: transcript.meeting_id,
+            teamId: targetTeamId,
+            metadata: {
+              original_owner: userId,
+              team_id: targetTeamId,
+              bulk_operation: true,
+            },
+            ipAddress,
+            userAgent,
+          })
+
+          results.success.push(transcript.meeting_id)
+        } catch (error) {
+          results.failed.push({
+            id: transcript.meeting_id,
+            error: String(error),
+          })
+        }
+      }
     } else {
       return NextResponse.json(
-        { error: 'Invalid action. Must be "delete" or "markPrivate"' },
+        { error: 'Invalid action. Must be "delete", "markPrivate", or "relinquish"' },
         { status: 400 }
       )
     }

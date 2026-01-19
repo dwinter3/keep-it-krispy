@@ -49,13 +49,16 @@ export async function GET(request: NextRequest) {
         const getCommand = new GetCommand({
           TableName: TABLE_NAME,
           Key: { meeting_id: meetingId },
-          ProjectionExpression: 'user_id, shared_with_user_ids',
+          ProjectionExpression: 'user_id, shared_with_user_ids, owner_type, owner_id',
         })
         const accessCheck = await dynamodb.send(getCommand)
         const isOwner = accessCheck.Item?.user_id === userId
         const isSharedWith = accessCheck.Item?.shared_with_user_ids?.includes(userId)
+        // For team-owned transcripts, check if user is in shared_with_user_ids or is the team owner
+        const isTeamOwned = accessCheck.Item?.owner_type === 'team'
+        const isTeamOwner = isTeamOwned && accessCheck.Item?.owner_id === userId
 
-        if (accessCheck.Item?.user_id && !isOwner && !isSharedWith) {
+        if (accessCheck.Item?.user_id && !isOwner && !isSharedWith && !isTeamOwner) {
           return NextResponse.json({ error: 'Access denied' }, { status: 403 })
         }
       }
@@ -139,6 +142,10 @@ export async function GET(request: NextRequest) {
       sharedWithUserIds: item.shared_with_user_ids || [],
       visibility: item.visibility || 'private',
       ownerId: item.user_id,
+      // Team ownership info
+      ownerType: item.owner_type || 'user',
+      relinquishedBy: item.relinquished_by || null,
+      relinquishedAt: item.relinquished_at || null,
     })
 
     // For shared-only, we need to scan for transcripts shared with this user

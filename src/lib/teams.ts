@@ -163,3 +163,73 @@ export async function getUsersById(userIds: string[]): Promise<Array<{ user_id: 
 
   return users
 }
+
+/**
+ * Get the team ID for a user
+ *
+ * For now, teams are implicit based on invites:
+ * - If user was invited by someone, team_id = inviter's user_id
+ * - If user is an inviter (has invited others), team_id = their own user_id
+ * - If user has no team relationships, returns null
+ */
+export async function getTeamId(userId: string): Promise<string | null> {
+  try {
+    // First check if user was invited by someone
+    const user = await getUser(userId)
+    if (!user) return null
+
+    const invitesToMe = await docClient.send(new QueryCommand({
+      TableName: INVITES_TABLE,
+      IndexName: 'email-index',
+      KeyConditionExpression: 'invitee_email = :email',
+      FilterExpression: '#status = :accepted',
+      ExpressionAttributeNames: { '#status': 'status' },
+      ExpressionAttributeValues: {
+        ':email': user.primary_email?.toLowerCase() || '',
+        ':accepted': 'accepted',
+      },
+    }))
+
+    const myInvite = invitesToMe.Items?.[0]
+    if (myInvite?.inviter_id) {
+      // User was invited, team_id is the inviter's user_id
+      return myInvite.inviter_id as string
+    }
+
+    // Check if user has invited anyone (making them a team lead)
+    const myInvites = await docClient.send(new QueryCommand({
+      TableName: INVITES_TABLE,
+      IndexName: 'inviter-index',
+      KeyConditionExpression: 'inviter_id = :inviterId',
+      FilterExpression: '#status = :accepted',
+      ExpressionAttributeNames: { '#status': 'status' },
+      ExpressionAttributeValues: {
+        ':inviterId': userId,
+        ':accepted': 'accepted',
+      },
+      Limit: 1,
+    }))
+
+    if (myInvites.Items && myInvites.Items.length > 0) {
+      // User has invited others, they are the team lead
+      return userId
+    }
+
+    // User has no team relationships
+    return null
+  } catch (error) {
+    console.error('Error getting team ID:', error)
+    return null
+  }
+}
+
+/**
+ * Validate that a user can relinquish to a specific team
+ * Returns true if the user is a member of the team
+ */
+export async function canRelinquishToTeam(userId: string, teamId: string): Promise<boolean> {
+  const teamMembers = await getTeamMembers(userId)
+  // User can relinquish to their own team (team they belong to)
+  const userTeamId = await getTeamId(userId)
+  return userTeamId === teamId || teamMembers.some(m => m.user_id === teamId)
+}
