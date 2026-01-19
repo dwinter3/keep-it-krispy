@@ -299,6 +299,11 @@ export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ name: string }> }
 ) {
+  // Auth is optional for GET but needed for entity_id lookup
+  const session = await auth()
+  const user = session?.user?.email ? await getUserByEmail(session.user.email) : null
+  const userId = user?.user_id
+
   try {
     const { name } = await params
     const speakerName = decodeURIComponent(name)
@@ -404,9 +409,17 @@ export async function GET(
     const verifiedFullName = profile?.verifiedFullName
     const displayName = verifiedFullName || canonicalName
 
+    // Look up entity_id from krisp-entities (if user is authenticated)
+    let entityId: string | null = null
+    if (userId) {
+      const speakerEntity = await findSpeakerEntity(userId, displayName)
+      entityId = speakerEntity?.entity_id || null
+    }
+
     return NextResponse.json({
       name: displayName,
       originalName: canonicalName,  // Keep original for reference
+      entityId,  // Entity ID from krisp-entities (if exists)
       verifiedFullName: verifiedFullName || null,
       bio: profile?.bio,
       linkedin: linkedin || profile?.linkedin,

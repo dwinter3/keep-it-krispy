@@ -3,6 +3,7 @@
 import { useState, useEffect, use } from 'react'
 import Link from 'next/link'
 import Shell from '@/components/Shell'
+import EntityMergeModal from '@/components/EntityMergeModal'
 
 interface Meeting {
   meetingId: string
@@ -26,6 +27,7 @@ interface EnrichedData {
 interface SpeakerProfile {
   name: string
   originalName?: string
+  entityId?: string | null
   verifiedFullName?: string
   bio?: string
   linkedin?: string
@@ -95,6 +97,7 @@ export default function SpeakerProfilePage({ params }: { params: Promise<{ name:
     company: '',
     role: '',
   })
+  const [showMergeModal, setShowMergeModal] = useState(false)
 
   useEffect(() => {
     async function fetchProfile() {
@@ -436,7 +439,7 @@ export default function SpeakerProfilePage({ params }: { params: Promise<{ name:
                   </div>
                 </div>
 
-                {/* Edit button */}
+                {/* Action buttons */}
                 <div className="flex flex-col gap-2">
                   <button
                     onClick={() => setEditing(!editing)}
@@ -447,6 +450,17 @@ export default function SpeakerProfilePage({ params }: { params: Promise<{ name:
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
                     </svg>
                   </button>
+                  {profile.entityId && (
+                    <button
+                      onClick={() => setShowMergeModal(true)}
+                      className="text-zinc-400 hover:text-white transition-colors p-2"
+                      title="Merge with another speaker"
+                    >
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
+                      </svg>
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -865,6 +879,24 @@ export default function SpeakerProfilePage({ params }: { params: Promise<{ name:
           </>
         )}
       </div>
+
+      {/* Merge Modal */}
+      {profile && profile.entityId && (
+        <EntityMergeModal
+          isOpen={showMergeModal}
+          entityType="speaker"
+          currentEntity={{
+            id: profile.entityId,
+            name: profile.name,
+            aliases: [],
+          }}
+          onClose={() => setShowMergeModal(false)}
+          onMergeComplete={() => {
+            // Refresh the page after merge
+            window.location.reload()
+          }}
+        />
+      )}
     </Shell>
   )
 }
