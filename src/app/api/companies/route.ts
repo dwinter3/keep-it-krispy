@@ -1,89 +1,154 @@
 import { NextResponse } from 'next/server'
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb'
-import { DynamoDBDocumentClient, ScanCommand, QueryCommand } from '@aws-sdk/lib-dynamodb'
+import { DynamoDBDocumentClient, QueryCommand, ScanCommand } from '@aws-sdk/lib-dynamodb'
+import { auth } from '@/lib/auth'
+import { getUserByEmail } from '@/lib/users'
+import type { CompanyEntity, CompanyMetadata } from '@/lib/entities'
 
-const COMPANIES_TABLE = process.env.COMPANIES_TABLE || 'krisp-companies'
+const ENTITIES_TABLE = 'krisp-entities'
+const RELATIONSHIPS_TABLE = 'krisp-relationships'
 const AWS_REGION = process.env.APP_REGION || 'us-east-1'
 
-const credentials = process.env.S3_ACCESS_KEY_ID ? {
-  accessKeyId: process.env.S3_ACCESS_KEY_ID,
-  secretAccessKey: process.env.S3_SECRET_ACCESS_KEY || '',
-} : undefined
+const credentials = process.env.S3_ACCESS_KEY_ID
+  ? {
+      accessKeyId: process.env.S3_ACCESS_KEY_ID,
+      secretAccessKey: process.env.S3_SECRET_ACCESS_KEY || '',
+    }
+  : undefined
 
 const dynamoClient = new DynamoDBClient({ region: AWS_REGION, credentials })
 const dynamodb = DynamoDBDocumentClient.from(dynamoClient)
 
-interface CompanyItem {
+interface CompanyResponse {
   id: string
   name: string
-  type: 'customer' | 'prospect' | 'partner' | 'vendor' | 'competitor' | 'internal' | 'unknown'
+  type: string
   confidence: number
   mentionCount: number
-  firstMentioned: string
-  lastMentioned: string
-  transcriptMentions?: string[]
-  employees?: string[]
+  firstMentioned?: string
+  lastMentioned?: string
+  lastMentionedFormatted: string
+  employeeCount: number
+  website?: string
+  description?: string
 }
 
-// GET /api/companies - List all companies
+// GET /api/companies - List all companies for the user
 export async function GET() {
+  const session = await auth()
+  if (!session?.user?.email) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
+  const user = await getUserByEmail(session.user.email)
+  if (!user) {
+    return NextResponse.json({ error: 'User not found' }, { status: 404 })
+  }
+  const userId = user.user_id
+
   try {
-    // Query using the all-companies-index GSI for sorted results by mention count
-    const allCompanies: CompanyItem[] = []
+    // Query company entities for this user using GSI
+    const allCompanies: CompanyEntity[] = []
     let lastKey: Record<string, unknown> | undefined
 
-    // Try using the GSI first
+    // Try using user-type-index GSI first
     try {
       const queryCommand = new QueryCommand({
-        TableName: COMPANIES_TABLE,
-        IndexName: 'all-companies-index',
-        KeyConditionExpression: 'pk = :pk',
-        ExpressionAttributeValues: { ':pk': 'COMPANY' },
-        ScanIndexForward: false, // Descending by mentionCount
+        TableName: ENTITIES_TABLE,
+        IndexName: 'user-type-index',
+        KeyConditionExpression: 'user_id = :userId AND entity_type = :type',
+        FilterExpression: '#status = :active',
+        ExpressionAttributeNames: {
+          '#status': 'status',
+        },
+        ExpressionAttributeValues: {
+          ':userId': userId,
+          ':type': 'company',
+          ':active': 'active',
+        },
       })
 
       const response = await dynamodb.send(queryCommand)
       if (response.Items) {
-        allCompanies.push(...(response.Items as CompanyItem[]))
+        allCompanies.push(...(response.Items as CompanyEntity[]))
       }
     } catch {
-      // GSI might not exist yet, fallback to scan
+      // GSI might not exist, fallback to scan
       do {
         const scanCommand = new ScanCommand({
-          TableName: COMPANIES_TABLE,
+          TableName: ENTITIES_TABLE,
+          FilterExpression: 'user_id = :userId AND entity_type = :type AND #status = :active',
+          ExpressionAttributeNames: {
+            '#status': 'status',
+          },
+          ExpressionAttributeValues: {
+            ':userId': userId,
+            ':type': 'company',
+            ':active': 'active',
+          },
           ...(lastKey && { ExclusiveStartKey: lastKey }),
         })
 
         const response = await dynamodb.send(scanCommand)
         if (response.Items) {
-          allCompanies.push(...(response.Items as CompanyItem[]))
+          allCompanies.push(...(response.Items as CompanyEntity[]))
         }
         lastKey = response.LastEvaluatedKey
       } while (lastKey)
-
-      // Sort by mention count (descending)
-      allCompanies.sort((a, b) => (b.mentionCount || 0) - (a.mentionCount || 0))
     }
 
+    // Get employee counts for each company via relationships
+    const employeeCounts = new Map<string, number>()
+    for (const company of allCompanies) {
+      try {
+        const relCommand = new QueryCommand({
+          TableName: RELATIONSHIPS_TABLE,
+          IndexName: 'to-index',
+          KeyConditionExpression: 'to_entity_id = :companyId',
+          FilterExpression: 'rel_type = :relType AND user_id = :userId',
+          ExpressionAttributeValues: {
+            ':companyId': company.entity_id,
+            ':relType': 'works_at',
+            ':userId': userId,
+          },
+        })
+        const relResponse = await dynamodb.send(relCommand)
+        employeeCounts.set(company.entity_id, relResponse.Items?.length || 0)
+      } catch {
+        employeeCounts.set(company.entity_id, 0)
+      }
+    }
+
+    // Sort by name alphabetically
+    allCompanies.sort((a, b) => a.name.localeCompare(b.name))
+
     // Format companies for response
-    const companies = allCompanies.map(company => ({
-      id: company.id,
-      name: company.name,
-      type: company.type || 'unknown',
-      confidence: company.confidence || 0,
-      mentionCount: company.mentionCount || 0,
-      firstMentioned: company.firstMentioned,
-      lastMentioned: company.lastMentioned,
-      lastMentionedFormatted: formatLastSeen(company.lastMentioned),
-      employeeCount: company.employees?.length || 0,
-    }))
+    const companies: CompanyResponse[] = allCompanies.map((entity) => {
+      const metadata = entity.metadata as CompanyMetadata
+      return {
+        id: entity.entity_id,
+        name: entity.name,
+        type: metadata?.type || 'other',
+        confidence: entity.confidence || 0,
+        mentionCount: 0, // TODO: Calculate from relationships
+        firstMentioned: entity.created_at,
+        lastMentioned: entity.updated_at,
+        lastMentionedFormatted: formatLastSeen(entity.updated_at),
+        employeeCount: employeeCounts.get(entity.entity_id) || 0,
+        website: metadata?.website,
+        description: metadata?.description,
+      }
+    })
 
     // Group by type for stats
-    const typeStats = companies.reduce((acc, company) => {
-      const type = company.type || 'unknown'
-      acc[type] = (acc[type] || 0) + 1
-      return acc
-    }, {} as Record<string, number>)
+    const typeStats = companies.reduce(
+      (acc, company) => {
+        const type = company.type || 'other'
+        acc[type] = (acc[type] || 0) + 1
+        return acc
+      },
+      {} as Record<string, number>
+    )
 
     return NextResponse.json({
       count: companies.length,

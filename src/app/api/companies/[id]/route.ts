@@ -1,36 +1,31 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb'
-import { DynamoDBDocumentClient, GetCommand, ScanCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb'
+import {
+  DynamoDBDocumentClient,
+  GetCommand,
+  QueryCommand,
+  UpdateCommand,
+  BatchGetCommand,
+} from '@aws-sdk/lib-dynamodb'
+import { auth } from '@/lib/auth'
+import { getUserByEmail } from '@/lib/users'
+import type { CompanyEntity, SpeakerEntity, CompanyMetadata, SpeakerMetadata } from '@/lib/entities'
+import type { Relationship } from '@/lib/relationships'
 
-const TABLE_NAME = process.env.DYNAMODB_TABLE || 'krisp-transcripts-index'
-const COMPANIES_TABLE = process.env.COMPANIES_TABLE || 'krisp-companies'
-const SPEAKERS_TABLE = process.env.SPEAKERS_TABLE || 'krisp-speakers'
+const ENTITIES_TABLE = 'krisp-entities'
+const RELATIONSHIPS_TABLE = 'krisp-relationships'
+const TRANSCRIPTS_TABLE = process.env.DYNAMODB_TABLE || 'krisp-transcripts-index'
 const AWS_REGION = process.env.APP_REGION || 'us-east-1'
 
-const credentials = process.env.S3_ACCESS_KEY_ID ? {
-  accessKeyId: process.env.S3_ACCESS_KEY_ID,
-  secretAccessKey: process.env.S3_SECRET_ACCESS_KEY || '',
-} : undefined
+const credentials = process.env.S3_ACCESS_KEY_ID
+  ? {
+      accessKeyId: process.env.S3_ACCESS_KEY_ID,
+      secretAccessKey: process.env.S3_SECRET_ACCESS_KEY || '',
+    }
+  : undefined
 
 const dynamoClient = new DynamoDBClient({ region: AWS_REGION, credentials })
 const dynamodb = DynamoDBDocumentClient.from(dynamoClient)
-
-interface CompanyItem {
-  id: string
-  name: string
-  nameLower: string
-  type: 'customer' | 'prospect' | 'partner' | 'vendor' | 'competitor' | 'internal' | 'unknown'
-  confidence: number
-  mentionCount: number
-  firstMentioned: string
-  lastMentioned: string
-  transcriptMentions?: string[]
-  employees?: string[]
-  aliases?: string[]
-  description?: string
-  website?: string
-  notes?: string
-}
 
 interface TranscriptItem {
   meeting_id: string
@@ -40,17 +35,6 @@ interface TranscriptItem {
   timestamp: string
   duration?: number
   speakers?: string[]
-  companies?: string[]
-  companyNames?: string[]
-}
-
-interface SpeakerItem {
-  name: string
-  displayName?: string
-  company?: string
-  enrichedData?: {
-    company?: string
-  }
 }
 
 // GET /api/companies/[id] - Get company details
@@ -58,38 +42,134 @@ export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const session = await auth()
+  if (!session?.user?.email) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
+  const user = await getUserByEmail(session.user.email)
+  if (!user) {
+    return NextResponse.json({ error: 'User not found' }, { status: 404 })
+  }
+  const userId = user.user_id
+
   try {
     const { id } = await params
     const companyId = decodeURIComponent(id)
 
-    // Get company from companies table
+    // Get company entity
     const getCommand = new GetCommand({
-      TableName: COMPANIES_TABLE,
-      Key: { id: companyId },
+      TableName: ENTITIES_TABLE,
+      Key: { entity_id: companyId },
     })
 
     const companyResult = await dynamodb.send(getCommand)
-    const company = companyResult.Item as CompanyItem | undefined
+    const company = companyResult.Item as CompanyEntity | undefined
 
-    if (!company) {
-      return NextResponse.json(
-        { error: 'Company not found' },
-        { status: 404 }
-      )
+    if (!company || company.user_id !== userId || company.entity_type !== 'company') {
+      return NextResponse.json({ error: 'Company not found' }, { status: 404 })
     }
 
-    // Get transcripts that mention this company
-    const transcripts: TranscriptItem[] = []
-    const transcriptMentions = company.transcriptMentions || []
+    const metadata = company.metadata as CompanyMetadata
 
-    // If we have transcript IDs, fetch them
-    if (transcriptMentions.length > 0) {
-      for (const meetingId of transcriptMentions.slice(0, 50)) {
+    // Get employees via works_at relationships (speaker -> company)
+    const employees: Array<{
+      id: string
+      name: string
+      displayName: string
+      role?: string
+      linkedin?: string
+    }> = []
+
+    try {
+      const relCommand = new QueryCommand({
+        TableName: RELATIONSHIPS_TABLE,
+        IndexName: 'to-index',
+        KeyConditionExpression: 'to_entity_id = :companyId',
+        FilterExpression: 'rel_type = :relType AND user_id = :userId',
+        ExpressionAttributeValues: {
+          ':companyId': companyId,
+          ':relType': 'works_at',
+          ':userId': userId,
+        },
+      })
+
+      const relResponse = await dynamodb.send(relCommand)
+      const relationships = (relResponse.Items || []) as Relationship[]
+
+      // Get speaker entities for each relationship
+      if (relationships.length > 0) {
+        const speakerIds = relationships.map((r) => r.from_entity_id)
+        const uniqueIds = [...new Set(speakerIds)]
+
+        // Batch get speakers (max 100 at a time)
+        for (let i = 0; i < uniqueIds.length; i += 100) {
+          const batch = uniqueIds.slice(i, i + 100)
+          const batchCommand = new BatchGetCommand({
+            RequestItems: {
+              [ENTITIES_TABLE]: {
+                Keys: batch.map((id) => ({ entity_id: id })),
+              },
+            },
+          })
+
+          const batchResult = await dynamodb.send(batchCommand)
+          const speakers = (batchResult.Responses?.[ENTITIES_TABLE] || []) as SpeakerEntity[]
+
+          for (const speaker of speakers) {
+            const rel = relationships.find((r) => r.from_entity_id === speaker.entity_id)
+            const speakerMeta = speaker.metadata as SpeakerMetadata
+            employees.push({
+              id: speaker.entity_id,
+              name: speaker.canonical_name,
+              displayName: speaker.name,
+              role: rel?.role || speakerMeta?.role,
+              linkedin: speakerMeta?.linkedin,
+            })
+          }
+        }
+      }
+    } catch (err) {
+      console.error('Error fetching employees:', err)
+    }
+
+    // Get transcripts where this company's employees participated
+    const transcripts: TranscriptItem[] = []
+    const transcriptIds = new Set<string>()
+
+    try {
+      // Get participant relationships for all employees
+      for (const employee of employees) {
+        const participantCommand = new QueryCommand({
+          TableName: RELATIONSHIPS_TABLE,
+          IndexName: 'from-index',
+          KeyConditionExpression: 'from_entity_id = :speakerId',
+          FilterExpression: 'rel_type = :relType AND user_id = :userId',
+          ExpressionAttributeValues: {
+            ':speakerId': employee.id,
+            ':relType': 'participant',
+            ':userId': userId,
+          },
+        })
+
+        const participantResult = await dynamodb.send(participantCommand)
+        for (const rel of (participantResult.Items || []) as Relationship[]) {
+          if (rel.to_entity_type === 'transcript') {
+            transcriptIds.add(rel.to_entity_id)
+          }
+        }
+      }
+
+      // Fetch transcript details (limit to 50)
+      const transcriptIdList = Array.from(transcriptIds).slice(0, 50)
+      for (const meetingId of transcriptIdList) {
         try {
-          const transcriptResult = await dynamodb.send(new GetCommand({
-            TableName: TABLE_NAME,
-            Key: { meeting_id: meetingId },
-          }))
+          const transcriptResult = await dynamodb.send(
+            new GetCommand({
+              TableName: TRANSCRIPTS_TABLE,
+              Key: { meeting_id: meetingId },
+            })
+          )
           if (transcriptResult.Item) {
             transcripts.push(transcriptResult.Item as TranscriptItem)
           }
@@ -97,55 +177,8 @@ export async function GET(
           // Skip if transcript not found
         }
       }
-    }
-
-    // Find employees (speakers associated with this company)
-    const employees: Array<{ name: string; displayName: string; linkedin?: string }> = []
-
-    // Scan speakers table for company matches
-    try {
-      let lastKey: Record<string, unknown> | undefined
-
-      do {
-        const scanCommand = new ScanCommand({
-          TableName: SPEAKERS_TABLE,
-          FilterExpression: 'contains(#company, :companyName) OR contains(#enrichedCompany, :companyName)',
-          ExpressionAttributeNames: {
-            '#company': 'company',
-            '#enrichedCompany': 'enrichedData',
-          },
-          ExpressionAttributeValues: {
-            ':companyName': company.name,
-          },
-          ...(lastKey && { ExclusiveStartKey: lastKey }),
-        })
-
-        const response = await dynamodb.send(scanCommand)
-        if (response.Items) {
-          for (const item of response.Items as SpeakerItem[]) {
-            const speakerCompany = item.company || item.enrichedData?.company || ''
-            // Check if company name matches (case-insensitive)
-            if (speakerCompany.toLowerCase().includes(company.name.toLowerCase()) ||
-                company.name.toLowerCase().includes(speakerCompany.toLowerCase())) {
-              employees.push({
-                name: item.name,
-                displayName: item.displayName || item.name,
-              })
-            }
-          }
-        }
-        lastKey = response.LastEvaluatedKey
-      } while (lastKey)
-    } catch {
-      // Speakers table might not exist
-    }
-
-    // Also check transcript speakers who mentioned this company
-    const speakerSet = new Set<string>()
-    for (const transcript of transcripts) {
-      for (const speaker of transcript.speakers || []) {
-        speakerSet.add(speaker.toLowerCase())
-      }
+    } catch (err) {
+      console.error('Error fetching transcripts:', err)
     }
 
     // Sort transcripts by date (newest first)
@@ -156,21 +189,23 @@ export async function GET(
     })
 
     return NextResponse.json({
-      id: company.id,
+      id: company.entity_id,
       name: company.name,
-      type: company.type || 'unknown',
+      type: metadata?.type || 'other',
       confidence: company.confidence || 0,
-      mentionCount: company.mentionCount || 0,
-      firstMentioned: company.firstMentioned,
-      lastMentioned: company.lastMentioned,
-      firstMentionedFormatted: formatDate(company.firstMentioned),
-      lastMentionedFormatted: formatDate(company.lastMentioned),
+      mentionCount: transcripts.length,
+      firstMentioned: company.created_at,
+      lastMentioned: company.updated_at,
+      firstMentionedFormatted: formatDate(company.created_at),
+      lastMentionedFormatted: formatDate(company.updated_at),
       aliases: company.aliases || [],
-      description: company.description,
-      website: company.website,
-      notes: company.notes,
+      description: metadata?.description,
+      website: metadata?.website,
+      industry: metadata?.industry,
+      location: metadata?.location,
+      notes: metadata?.notes,
       employees: employees.slice(0, 20),
-      transcripts: transcripts.map(t => ({
+      transcripts: transcripts.map((t) => ({
         meetingId: t.meeting_id,
         key: t.s3_key,
         title: t.title || 'Untitled Meeting',
@@ -180,7 +215,7 @@ export async function GET(
         durationFormatted: formatDuration(t.duration || 0),
         speakers: t.speakers || [],
       })),
-      speakersInvolved: Array.from(speakerSet).slice(0, 20),
+      speakersInvolved: employees.map((e) => e.displayName).slice(0, 20),
     })
   } catch (error) {
     console.error('Company detail API error:', error)
@@ -196,40 +231,72 @@ export async function PUT(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const session = await auth()
+  if (!session?.user?.email) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
+  const user = await getUserByEmail(session.user.email)
+  if (!user) {
+    return NextResponse.json({ error: 'User not found' }, { status: 404 })
+  }
+  const userId = user.user_id
+
   try {
     const { id } = await params
     const companyId = decodeURIComponent(id)
     const body = await request.json()
 
-    const { type, description, website, notes, aliases } = body
+    // Verify ownership
+    const getCommand = new GetCommand({
+      TableName: ENTITIES_TABLE,
+      Key: { entity_id: companyId },
+    })
 
-    // Build update expression dynamically
-    const updateParts: string[] = []
-    const exprNames: Record<string, string> = {}
-    const exprValues: Record<string, unknown> = {}
+    const existing = await dynamodb.send(getCommand)
+    if (!existing.Item || existing.Item.user_id !== userId) {
+      return NextResponse.json({ error: 'Company not found' }, { status: 404 })
+    }
+
+    const { type, description, website, industry, location, notes, aliases } = body
+    const now = new Date().toISOString()
+
+    // Build the current metadata
+    const currentMetadata = (existing.Item.metadata as CompanyMetadata) || {}
+    const newMetadata: CompanyMetadata = {
+      ...currentMetadata,
+    }
 
     if (type !== undefined) {
-      updateParts.push('#type = :type')
-      exprNames['#type'] = 'type'
-      exprValues[':type'] = type
+      newMetadata.type = type
     }
-
     if (description !== undefined) {
-      updateParts.push('#description = :description')
-      exprNames['#description'] = 'description'
-      exprValues[':description'] = description || null
+      newMetadata.description = description || undefined
     }
-
     if (website !== undefined) {
-      updateParts.push('#website = :website')
-      exprNames['#website'] = 'website'
-      exprValues[':website'] = website || null
+      newMetadata.website = website || undefined
+    }
+    if (industry !== undefined) {
+      newMetadata.industry = industry || undefined
+    }
+    if (location !== undefined) {
+      newMetadata.location = location || undefined
+    }
+    if (notes !== undefined) {
+      newMetadata.notes = notes || undefined
     }
 
-    if (notes !== undefined) {
-      updateParts.push('#notes = :notes')
-      exprNames['#notes'] = 'notes'
-      exprValues[':notes'] = notes || null
+    // Build update expression
+    const updateParts: string[] = ['#metadata = :metadata', '#updated_at = :updated_at', '#updated_by = :updated_by']
+    const exprNames: Record<string, string> = {
+      '#metadata': 'metadata',
+      '#updated_at': 'updated_at',
+      '#updated_by': 'updated_by',
+    }
+    const exprValues: Record<string, unknown> = {
+      ':metadata': newMetadata,
+      ':updated_at': now,
+      ':updated_by': userId,
     }
 
     if (aliases !== undefined) {
@@ -238,18 +305,9 @@ export async function PUT(
       exprValues[':aliases'] = aliases || []
     }
 
-    // Always update updatedAt
-    updateParts.push('#updatedAt = :updatedAt')
-    exprNames['#updatedAt'] = 'updatedAt'
-    exprValues[':updatedAt'] = new Date().toISOString()
-
-    if (updateParts.length === 0) {
-      return NextResponse.json({ error: 'No fields to update' }, { status: 400 })
-    }
-
     const updateCommand = new UpdateCommand({
-      TableName: COMPANIES_TABLE,
-      Key: { id: companyId },
+      TableName: ENTITIES_TABLE,
+      Key: { entity_id: companyId },
       UpdateExpression: `SET ${updateParts.join(', ')}`,
       ExpressionAttributeNames: exprNames,
       ExpressionAttributeValues: exprValues,
