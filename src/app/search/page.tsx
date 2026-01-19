@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, Suspense } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import Shell from '@/components/Shell'
+import { getDisplayTitle } from '@/lib/formatting'
 
 interface SearchResult {
   meetingId: string
@@ -605,10 +606,7 @@ function SearchResultCard({
         <div className="flex-1 min-w-0">
           <div className="flex items-start justify-between mb-2">
             <div>
-              <h3 className="font-medium text-white mb-1">{result.topic || result.title}</h3>
-              <div className="flex flex-wrap items-center gap-2 text-sm text-zinc-500 mb-1">
-                <span>{result.title}</span>
-              </div>
+              <h3 className="font-medium text-white mb-1">{getDisplayTitle(result.topic, result.title)}</h3>
               <div className="flex flex-wrap items-center gap-2 text-sm text-zinc-500">
                 <span>{formatDate(result.date)}</span>
                 {result.duration > 0 && (

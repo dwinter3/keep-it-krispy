@@ -4,11 +4,13 @@ import { useState, useEffect, use } from 'react'
 import Link from 'next/link'
 import Shell from '@/components/Shell'
 import EntityMergeModal from '@/components/EntityMergeModal'
+import { getDisplayTitle } from '@/lib/formatting'
 
 interface Meeting {
   meetingId: string
   key: string
   title: string
+  topic?: string | null
   date: string
   timestamp: string
   duration: number
@@ -862,7 +864,7 @@ export default function SpeakerProfilePage({ params }: { params: Promise<{ name:
                                 <span className="text-zinc-500 text-sm mr-2">
                                   {formatTime(meeting.timestamp)}
                                 </span>
-                                <span className="text-white">{meeting.title}</span>
+                                <span className="text-white">{getDisplayTitle(meeting.topic, meeting.title)}</span>
                               </div>
                               <span className="text-zinc-500 text-sm">
                                 {meeting.durationFormatted}

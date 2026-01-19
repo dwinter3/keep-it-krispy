@@ -3,11 +3,13 @@
 import { useState, useEffect, use } from 'react'
 import Link from 'next/link'
 import Shell from '@/components/Shell'
+import { getDisplayTitle } from '@/lib/formatting'
 
 interface Transcript {
   meetingId: string
   key: string
   title: string
+  topic?: string | null
   date: string
   timestamp: string
   duration: number
@@ -412,7 +414,7 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
                                 <span className="text-zinc-500 text-sm mr-2">
                                   {formatTime(transcript.timestamp)}
                                 </span>
-                                <span className="text-white">{transcript.title}</span>
+                                <span className="text-white">{getDisplayTitle(transcript.topic, transcript.title)}</span>
                               </div>
                               <span className="text-zinc-500 text-sm">
                                 {transcript.durationFormatted}

@@ -27,6 +27,7 @@ interface TranscriptItem {
   meeting_id: string
   s3_key: string
   title: string
+  topic?: string
   date: string
   timestamp: string
   duration?: number
@@ -337,6 +338,7 @@ export async function GET(
       meetingId: string
       key: string
       title: string
+      topic: string | null
       date: string
       timestamp: string
       duration: number
@@ -362,6 +364,7 @@ export async function GET(
             meetingId: item.meeting_id,
             key: item.s3_key,
             title: item.title || 'Untitled Meeting',
+            topic: item.topic || null,
             date: item.date,
             timestamp: item.timestamp,
             duration: item.duration || 0,
@@ -450,6 +453,7 @@ export async function GET(
         meetingId: m.meetingId,
         key: m.key,
         title: m.title,
+        topic: m.topic,
         date: m.date,
         timestamp: m.timestamp,
         duration: m.duration,
