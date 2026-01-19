@@ -3,11 +3,14 @@ import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3'
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb'
 import { DynamoDBDocumentClient, ScanCommand, QueryCommand, UpdateCommand, GetCommand } from '@aws-sdk/lib-dynamodb'
 import { auth } from '@/lib/auth'
-import { getUserByEmail } from '@/lib/users'
+import { getUserByEmail, getUser } from '@/lib/users'
 
 const BUCKET_NAME = process.env.KRISP_S3_BUCKET || ''  // Required: set via environment variable
 const TABLE_NAME = process.env.DYNAMODB_TABLE || 'krisp-transcripts-index'
 const AWS_REGION = process.env.APP_REGION || 'us-east-1'
+
+// Ownership filter types for transcript listing
+type OwnershipFilter = 'owned' | 'shared' | 'all'
 
 // AWS clients with custom credentials for Amplify
 const credentials = process.env.S3_ACCESS_KEY_ID ? {
@@ -38,18 +41,21 @@ export async function GET(request: NextRequest) {
   const userId = user.user_id
 
   try {
-    // If key provided, fetch specific transcript from S3 (with ownership check)
+    // If key provided, fetch specific transcript from S3 (with ownership/sharing check)
     if (key) {
-      // First check ownership in DynamoDB
+      // First check ownership or sharing in DynamoDB
       const meetingId = key.split('/').pop()?.replace('.json', '')
       if (meetingId) {
         const getCommand = new GetCommand({
           TableName: TABLE_NAME,
           Key: { meeting_id: meetingId },
-          ProjectionExpression: 'user_id',
+          ProjectionExpression: 'user_id, shared_with_user_ids',
         })
-        const ownerCheck = await dynamodb.send(getCommand)
-        if (ownerCheck.Item?.user_id && ownerCheck.Item.user_id !== userId) {
+        const accessCheck = await dynamodb.send(getCommand)
+        const isOwner = accessCheck.Item?.user_id === userId
+        const isSharedWith = accessCheck.Item?.shared_with_user_ids?.includes(userId)
+
+        if (accessCheck.Item?.user_id && !isOwner && !isSharedWith) {
           return NextResponse.json({ error: 'Access denied' }, { status: 403 })
         }
       }
@@ -107,36 +113,10 @@ export async function GET(request: NextRequest) {
     const limit = Math.min(parseInt(searchParams.get('limit') || '25'), 100)
     const includePrivate = searchParams.get('includePrivate') === 'true'
     const onlyPrivate = searchParams.get('onlyPrivate') === 'true'
+    const ownership = (searchParams.get('ownership') || 'all') as OwnershipFilter
 
-    // Build filter expression for privacy
-    let filterExpression: string | undefined
-    const expressionAttrValues: Record<string, unknown> = { ':userId': userId }
-
-    if (onlyPrivate) {
-      filterExpression = 'isPrivate = :isPrivate'
-      expressionAttrValues[':isPrivate'] = true
-    } else if (!includePrivate) {
-      // By default, exclude private transcripts
-      filterExpression = 'attribute_not_exists(isPrivate) OR isPrivate = :isPrivate'
-      expressionAttrValues[':isPrivate'] = false
-    }
-
-    const queryCommand = new QueryCommand({
-      TableName: TABLE_NAME,
-      IndexName: 'user-index',
-      KeyConditionExpression: 'user_id = :userId',
-      ExpressionAttributeValues: expressionAttrValues,
-      ...(filterExpression && { FilterExpression: filterExpression }),
-      ScanIndexForward: false, // Newest first (descending by timestamp)
-      Limit: limit,
-      ...(cursor && { ExclusiveStartKey: JSON.parse(Buffer.from(cursor, 'base64').toString('utf-8')) }),
-    })
-
-    const response = await dynamodb.send(queryCommand)
-    const items = response.Items || []
-
-    // Format for frontend
-    const transcripts = items.map(item => ({
+    // Format transcript item for API response
+    const formatTranscript = (item: Record<string, unknown>, isShared: boolean = false) => ({
       key: item.s3_key,
       meetingId: item.meeting_id,
       title: item.title || 'Untitled Meeting',
@@ -154,14 +134,135 @@ export async function GET(request: NextRequest) {
       privacyConfidence: item.privacy_confidence || null,
       privacyWorkPercent: item.privacy_work_percent || null,
       privacyDismissed: item.privacy_dismissed || false,
-    }))
+      // Sharing info
+      isShared,
+      sharedWithUserIds: item.shared_with_user_ids || [],
+      visibility: item.visibility || 'private',
+      ownerId: item.user_id,
+    })
 
-    // Build next cursor if there are more results
+    // For shared-only, we need to scan for transcripts shared with this user
+    // This is less efficient but necessary until we add a GSI for shared_with_user_ids
+    if (ownership === 'shared') {
+      // Scan for transcripts where user is in shared_with_user_ids
+      const scanCommand = new ScanCommand({
+        TableName: TABLE_NAME,
+        FilterExpression: 'contains(shared_with_user_ids, :userId)',
+        ExpressionAttributeValues: { ':userId': userId },
+        Limit: limit,
+        ...(cursor && { ExclusiveStartKey: JSON.parse(Buffer.from(cursor, 'base64').toString('utf-8')) }),
+      })
+
+      const scanResponse = await dynamodb.send(scanCommand)
+      const sharedItems = scanResponse.Items || []
+
+      // Get owner names for shared transcripts
+      const ownerIds = [...new Set(sharedItems.map(item => item.user_id as string))]
+      const ownerNames: Record<string, string> = {}
+      for (const ownerId of ownerIds) {
+        const owner = await getUser(ownerId)
+        if (owner) {
+          ownerNames[ownerId] = owner.name
+        }
+      }
+
+      const transcripts = sharedItems.map(item => ({
+        ...formatTranscript(item, true),
+        ownerName: ownerNames[item.user_id as string] || 'Unknown',
+      }))
+
+      // Sort by timestamp descending
+      transcripts.sort((a, b) => {
+        const dateA = new Date((a.timestamp || a.date) as string | number).getTime()
+        const dateB = new Date((b.timestamp || b.date) as string | number).getTime()
+        return dateB - dateA
+      })
+
+      const nextCursor = scanResponse.LastEvaluatedKey
+        ? Buffer.from(JSON.stringify(scanResponse.LastEvaluatedKey)).toString('base64')
+        : null
+
+      return NextResponse.json({ transcripts, nextCursor })
+    }
+
+    // Build filter expression for privacy (for owned transcripts)
+    let filterExpression: string | undefined
+    const expressionAttrValues: Record<string, unknown> = { ':userId': userId }
+
+    if (onlyPrivate) {
+      filterExpression = 'isPrivate = :isPrivate'
+      expressionAttrValues[':isPrivate'] = true
+    } else if (!includePrivate) {
+      // By default, exclude private transcripts
+      filterExpression = 'attribute_not_exists(isPrivate) OR isPrivate = :isPrivate'
+      expressionAttrValues[':isPrivate'] = false
+    }
+
+    // Query owned transcripts
+    const queryCommand = new QueryCommand({
+      TableName: TABLE_NAME,
+      IndexName: 'user-index',
+      KeyConditionExpression: 'user_id = :userId',
+      ExpressionAttributeValues: expressionAttrValues,
+      ...(filterExpression && { FilterExpression: filterExpression }),
+      ScanIndexForward: false, // Newest first (descending by timestamp)
+      Limit: ownership === 'owned' ? limit : Math.ceil(limit * 0.75), // Leave room for shared if 'all'
+      ...(cursor && !cursor.startsWith('shared:') && { ExclusiveStartKey: JSON.parse(Buffer.from(cursor, 'base64').toString('utf-8')) }),
+    })
+
+    const response = await dynamodb.send(queryCommand)
+    const ownedItems = response.Items || []
+    const ownedTranscripts = ownedItems.map(item => formatTranscript(item, false))
+
+    // If ownership is 'all', also fetch shared transcripts
+    let sharedTranscripts: Array<ReturnType<typeof formatTranscript> & { ownerName?: string }> = []
+    let sharedNextKey: Record<string, unknown> | undefined
+
+    if (ownership === 'all') {
+      const sharedLimit = limit - ownedTranscripts.length
+      if (sharedLimit > 0) {
+        const scanCommand = new ScanCommand({
+          TableName: TABLE_NAME,
+          FilterExpression: 'contains(shared_with_user_ids, :userId)',
+          ExpressionAttributeValues: { ':userId': userId },
+          Limit: sharedLimit,
+        })
+
+        const scanResponse = await dynamodb.send(scanCommand)
+        const sharedItems = scanResponse.Items || []
+        sharedNextKey = scanResponse.LastEvaluatedKey
+
+        // Get owner names
+        const ownerIds = [...new Set(sharedItems.map(item => item.user_id as string))]
+        const ownerNames: Record<string, string> = {}
+        for (const ownerId of ownerIds) {
+          const owner = await getUser(ownerId)
+          if (owner) {
+            ownerNames[ownerId] = owner.name
+          }
+        }
+
+        sharedTranscripts = sharedItems.map(item => ({
+          ...formatTranscript(item, true),
+          ownerName: ownerNames[item.user_id as string] || 'Unknown',
+        }))
+      }
+    }
+
+    // Combine and sort all transcripts
+    const allTranscripts = [...ownedTranscripts, ...sharedTranscripts]
+    allTranscripts.sort((a, b) => {
+      const dateA = new Date((a.timestamp || a.date) as string | number).getTime()
+      const dateB = new Date((b.timestamp || b.date) as string | number).getTime()
+      return dateB - dateA
+    })
+
+    // Build next cursor
     const nextCursor = response.LastEvaluatedKey
       ? Buffer.from(JSON.stringify(response.LastEvaluatedKey)).toString('base64')
       : null
 
-    return NextResponse.json({ transcripts, nextCursor })
+    return NextResponse.json({ transcripts: allTranscripts, nextCursor })
   } catch (error) {
     console.error('API error:', error)
     return NextResponse.json(

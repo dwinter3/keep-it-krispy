@@ -8,6 +8,7 @@ import SpeakerTalkTime from '@/components/SpeakerTalkTime'
 import ChatTranscript from '@/components/ChatTranscript'
 import SpeakerEditModal from '@/components/SpeakerEditModal'
 import SpeakerInferenceModal from '@/components/SpeakerInferenceModal'
+import ShareModal from '@/components/ShareModal'
 import { parseTranscript, createSpeakerColorMap, type ParsedTranscript } from '@/lib/transcriptParser'
 
 interface SpeakerCorrection {
@@ -38,7 +39,15 @@ interface Transcript {
   irrelevanceReason?: string | null
   irrelevanceConfidence?: number | null
   irrelevanceDismissed?: boolean
+  // Sharing properties
+  isShared?: boolean
+  sharedWithUserIds?: string[]
+  visibility?: 'private' | 'team_shared' | 'team_owned'
+  ownerId?: string
+  ownerName?: string
 }
+
+type OwnershipFilter = 'all' | 'owned' | 'shared'
 
 type DateFilter = 'all' | 'today' | 'week' | 'month'
 type SortOption = 'newest' | 'oldest' | 'longest'
@@ -93,18 +102,25 @@ export default function TranscriptsPage() {
   // Speaker inference modal state
   const [showInferenceModal, setShowInferenceModal] = useState(false)
 
-  useEffect(() => {
-    fetchTranscripts()
-  }, [])
+  // Share modal state
+  const [showShareModal, setShowShareModal] = useState(false)
 
-  async function fetchTranscripts(cursor?: string) {
+  // Ownership filter state
+  const [ownershipFilter, setOwnershipFilter] = useState<OwnershipFilter>('all')
+
+  useEffect(() => {
+    fetchTranscripts(undefined, ownershipFilter)
+  }, [ownershipFilter])
+
+  async function fetchTranscripts(cursor?: string, ownership: OwnershipFilter = 'all') {
     try {
       if (cursor) {
         setLoadingMore(true)
       }
-      const url = cursor
-        ? `/api/transcripts?cursor=${encodeURIComponent(cursor)}`
-        : '/api/transcripts'
+      const params = new URLSearchParams()
+      if (cursor) params.set('cursor', cursor)
+      params.set('ownership', ownership)
+      const url = `/api/transcripts?${params.toString()}`
       const res = await fetch(url)
       if (!res.ok) throw new Error('Failed to fetch')
       const data = await res.json()
@@ -735,6 +751,45 @@ export default function TranscriptsPage() {
           </span>
         </div>
 
+        {/* Ownership Tabs */}
+        {!loading && (
+          <div className="mb-4 flex items-center gap-1 bg-gray-100 dark:bg-gray-800 p-1 rounded-lg w-fit">
+            <button
+              onClick={() => setOwnershipFilter('all')}
+              className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+                ownershipFilter === 'all'
+                  ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
+                  : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
+              }`}
+            >
+              All
+            </button>
+            <button
+              onClick={() => setOwnershipFilter('owned')}
+              className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+                ownershipFilter === 'owned'
+                  ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
+                  : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
+              }`}
+            >
+              My Transcripts
+            </button>
+            <button
+              onClick={() => setOwnershipFilter('shared')}
+              className={`px-4 py-2 text-sm font-medium rounded-md transition-colors flex items-center gap-1.5 ${
+                ownershipFilter === 'shared'
+                  ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
+                  : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
+              }`}
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
+              </svg>
+              Shared with Me
+            </button>
+          </div>
+        )}
+
         {/* Filter Bar */}
         {!loading && transcripts.length > 0 && (
           <div className="mb-4 flex flex-wrap items-center gap-3 p-3 bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700">
@@ -991,9 +1046,36 @@ export default function TranscriptsPage() {
                             {/* Content */}
                             <div className="flex-1 min-w-0">
                               {/* Topic as main title if available, otherwise use meeting title */}
-                              <div className="font-medium text-gray-900 dark:text-white">
-                                {transcript.topic || transcript.title || 'Meeting'}
+                              <div className="flex items-center gap-2">
+                                <span className="font-medium text-gray-900 dark:text-white">
+                                  {transcript.topic || transcript.title || 'Meeting'}
+                                </span>
+                                {/* Shared indicator */}
+                                {transcript.isShared && (
+                                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 text-xs rounded" title={`Shared by ${transcript.ownerName}`}>
+                                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
+                                    </svg>
+                                    Shared
+                                  </span>
+                                )}
+                                {/* Has shares indicator for owned transcripts */}
+                                {!transcript.isShared && transcript.sharedWithUserIds && transcript.sharedWithUserIds.length > 0 && (
+                                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 text-xs rounded" title={`Shared with ${transcript.sharedWithUserIds.length} team member(s)`}>
+                                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
+                                    </svg>
+                                    {transcript.sharedWithUserIds.length}
+                                  </span>
+                                )}
                               </div>
+
+                              {/* Shared by indicator */}
+                              {transcript.isShared && transcript.ownerName && (
+                                <div className="mt-0.5 text-xs text-blue-600 dark:text-blue-400">
+                                  Shared by {transcript.ownerName}
+                                </div>
+                              )}
 
                               {/* Date and time row */}
                               <div className="mt-1 flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
@@ -1032,7 +1114,7 @@ export default function TranscriptsPage() {
                 {nextCursor && (
                   <div className="p-4 border-t border-gray-200 dark:border-gray-700">
                     <button
-                      onClick={() => fetchTranscripts(nextCursor)}
+                      onClick={() => fetchTranscripts(nextCursor, ownershipFilter)}
                       disabled={loadingMore}
                       className="w-full py-2 px-4 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 disabled:bg-gray-100 dark:disabled:bg-gray-700 disabled:opacity-50 rounded-lg text-sm text-gray-700 dark:text-gray-300 transition-colors flex items-center justify-center gap-2"
                     >
@@ -1271,65 +1353,101 @@ export default function TranscriptsPage() {
                     </div>
                   )}
 
-                  {/* Privacy & Delete Actions */}
-                  <div className="mb-4 flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg border border-gray-100 dark:border-gray-600">
-                    <div className="flex items-center gap-3">
-                      <button
-                        onClick={() => handlePrivacyToggle(!selectedTranscript.isPrivate)}
-                        disabled={isUpdatingPrivacy}
-                        className={`px-3 py-1.5 text-xs rounded-lg flex items-center gap-2 transition-colors disabled:opacity-50 ${
-                          selectedTranscript.isPrivate
-                            ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800'
-                            : 'bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400 border border-green-200 dark:border-green-800 hover:bg-green-100 dark:hover:bg-green-900/30'
-                        }`}
-                        title={selectedTranscript.isPrivate
-                          ? 'This transcript is hidden from AI search. Click to make searchable.'
-                          : 'This transcript is searchable by AI. Click to hide it.'}
-                      >
+                  {/* Sharing Info (for shared transcripts) */}
+                  {selectedTranscript.isShared && (
+                    <div className="mb-4 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
+                      <div className="flex items-center gap-2 text-sm text-blue-700 dark:text-blue-400">
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          {selectedTranscript.isPrivate ? (
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
-                          ) : (
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                          )}
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
                         </svg>
-                        <span className="font-medium">
-                          {selectedTranscript.isPrivate ? 'Hidden from AI' : 'Searchable by AI'}
-                        </span>
-                      </button>
-                      <span className="text-xs text-gray-400 dark:text-gray-500">
-                        {selectedTranscript.isPrivate ? 'Click to make searchable' : 'Click to hide'}
-                      </span>
+                        <span>Shared with you by <strong>{selectedTranscript.ownerName}</strong></span>
+                      </div>
+                      <p className="mt-1 text-xs text-blue-600 dark:text-blue-500">
+                        You have view-only access to this transcript.
+                      </p>
                     </div>
-                    {!showDeleteConfirm ? (
-                      <button
-                        onClick={() => setShowDeleteConfirm(true)}
-                        className="text-xs text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 flex items-center gap-1"
-                      >
-                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                        </svg>
-                        Delete
-                      </button>
-                    ) : (
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs text-red-600 dark:text-red-400">Delete permanently?</span>
+                  )}
+
+                  {/* Share & Privacy & Delete Actions (only for owned transcripts) */}
+                  {!selectedTranscript.isShared && (
+                    <div className="mb-4 flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg border border-gray-100 dark:border-gray-600">
+                      <div className="flex items-center gap-3">
+                        {/* Share Button */}
                         <button
-                          onClick={handleDelete}
-                          disabled={isDeleting}
-                          className="text-xs px-2 py-1 bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50"
+                          onClick={() => setShowShareModal(true)}
+                          className={`px-3 py-1.5 text-xs rounded-lg flex items-center gap-2 transition-colors ${
+                            selectedTranscript.sharedWithUserIds && selectedTranscript.sharedWithUserIds.length > 0
+                              ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 border border-blue-200 dark:border-blue-800'
+                              : 'bg-gray-100 dark:bg-gray-600 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-500 hover:bg-gray-200 dark:hover:bg-gray-500'
+                          }`}
+                          title="Share this transcript with team members"
                         >
-                          {isDeleting ? 'Deleting...' : 'Yes'}
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
+                          </svg>
+                          <span className="font-medium">
+                            {selectedTranscript.sharedWithUserIds && selectedTranscript.sharedWithUserIds.length > 0
+                              ? `Shared (${selectedTranscript.sharedWithUserIds.length})`
+                              : 'Share'
+                            }
+                          </span>
                         </button>
+
+                        {/* Privacy Toggle */}
                         <button
-                          onClick={() => setShowDeleteConfirm(false)}
-                          className="text-xs px-2 py-1 text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200"
+                          onClick={() => handlePrivacyToggle(!selectedTranscript.isPrivate)}
+                          disabled={isUpdatingPrivacy}
+                          className={`px-3 py-1.5 text-xs rounded-lg flex items-center gap-2 transition-colors disabled:opacity-50 ${
+                            selectedTranscript.isPrivate
+                              ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800'
+                              : 'bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400 border border-green-200 dark:border-green-800 hover:bg-green-100 dark:hover:bg-green-900/30'
+                          }`}
+                          title={selectedTranscript.isPrivate
+                            ? 'This transcript is hidden from AI search. Click to make searchable.'
+                            : 'This transcript is searchable by AI. Click to hide it.'}
                         >
-                          No
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            {selectedTranscript.isPrivate ? (
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
+                            ) : (
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                            )}
+                          </svg>
+                          <span className="font-medium">
+                            {selectedTranscript.isPrivate ? 'Hidden' : 'Visible'}
+                          </span>
                         </button>
                       </div>
-                    )}
-                  </div>
+                      {!showDeleteConfirm ? (
+                        <button
+                          onClick={() => setShowDeleteConfirm(true)}
+                          className="text-xs text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 flex items-center gap-1"
+                        >
+                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                          </svg>
+                          Delete
+                        </button>
+                      ) : (
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-red-600 dark:text-red-400">Delete permanently?</span>
+                          <button
+                            onClick={handleDelete}
+                            disabled={isDeleting}
+                            className="text-xs px-2 py-1 bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50"
+                          >
+                            {isDeleting ? 'Deleting...' : 'Yes'}
+                          </button>
+                          <button
+                            onClick={() => setShowDeleteConfirm(false)}
+                            className="text-xs px-2 py-1 text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200"
+                          >
+                            No
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   {loadingContent && (
                     <div className="flex items-center justify-center py-8">
@@ -1370,6 +1488,22 @@ export default function TranscriptsPage() {
           meetingId={selectedTranscript.meetingId}
           onClose={() => setShowInferenceModal(false)}
           onApply={handleApplyInferences}
+        />
+      )}
+
+      {/* Share Modal */}
+      {selectedTranscript && (
+        <ShareModal
+          isOpen={showShareModal}
+          meetingId={selectedTranscript.meetingId}
+          transcriptTitle={selectedTranscript.topic || selectedTranscript.title || 'Meeting'}
+          onClose={() => setShowShareModal(false)}
+          onShareChange={() => {
+            // Refresh the current transcript to show updated sharing info
+            viewTranscript(selectedTranscript)
+            // Also refresh the list to update the shared indicator
+            fetchTranscripts(undefined, ownershipFilter)
+          }}
         />
       )}
     </Shell>
