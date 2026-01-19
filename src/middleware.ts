@@ -18,7 +18,9 @@ const protectedRoutes = [
 const publicRoutes = [
   '/',
   '/login',
+  '/invite', // Invite landing page
   '/api/auth',
+  '/api/invites', // Invite validation endpoint (public for token validation)
 ]
 
 export async function middleware(request: NextRequest) {
