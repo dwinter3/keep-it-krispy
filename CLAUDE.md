@@ -65,6 +65,7 @@ aws <command> --profile krisp-buddy --region us-east-1
 | `krisp-buddy-morning-briefing` | Python 3.12 | Daily briefing generation (7am UTC) |
 | `krisp-buddy-speaker-enrichment` | Python 3.12 | Speaker bio enrichment (2am UTC) |
 | `krisp-mcp-server` | Node.js 20.x | MCP server for Claude integration |
+| `krisp-voice-print-processor` | Python 3.12 | Speaker diarization & voice print extraction |
 
 ### CloudWatch Log Groups
 

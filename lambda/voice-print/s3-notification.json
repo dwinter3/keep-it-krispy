@@ -1,0 +1,80 @@
+{
+  "LambdaFunctionConfigurations": [
+    {
+      "Id": "VoicePrintProcessorTrigger",
+      "LambdaFunctionArn": "arn:aws:lambda:us-east-1:754639201213:function:krisp-voice-print-processor",
+      "Events": ["s3:ObjectCreated:*"],
+      "Filter": {
+        "Key": {
+          "FilterRules": [
+            {
+              "Name": "prefix",
+              "Value": "users/"
+            },
+            {
+              "Name": "suffix",
+              "Value": ".mp3"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "Id": "VoicePrintProcessorTriggerWav",
+      "LambdaFunctionArn": "arn:aws:lambda:us-east-1:754639201213:function:krisp-voice-print-processor",
+      "Events": ["s3:ObjectCreated:*"],
+      "Filter": {
+        "Key": {
+          "FilterRules": [
+            {
+              "Name": "prefix",
+              "Value": "users/"
+            },
+            {
+              "Name": "suffix",
+              "Value": ".wav"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "Id": "VoicePrintProcessorTriggerM4a",
+      "LambdaFunctionArn": "arn:aws:lambda:us-east-1:754639201213:function:krisp-voice-print-processor",
+      "Events": ["s3:ObjectCreated:*"],
+      "Filter": {
+        "Key": {
+          "FilterRules": [
+            {
+              "Name": "prefix",
+              "Value": "users/"
+            },
+            {
+              "Name": "suffix",
+              "Value": ".m4a"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "Id": "VoicePrintProcessorTriggerOgg",
+      "LambdaFunctionArn": "arn:aws:lambda:us-east-1:754639201213:function:krisp-voice-print-processor",
+      "Events": ["s3:ObjectCreated:*"],
+      "Filter": {
+        "Key": {
+          "FilterRules": [
+            {
+              "Name": "prefix",
+              "Value": "users/"
+            },
+            {
+              "Name": "suffix",
+              "Value": ".ogg"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}
