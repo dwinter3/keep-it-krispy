@@ -630,6 +630,126 @@ Resources:
       SourceArn: !GetAtt TranscriptsBucket.Arn
       SourceAccount: !Ref AWS::AccountId
 
+  # DynamoDB Table for Morning Briefings
+  BriefingsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: krisp-briefings
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: briefing_id
+          AttributeType: S
+        - AttributeName: user_id
+          AttributeType: S
+        - AttributeName: date
+          AttributeType: S
+      KeySchema:
+        - AttributeName: briefing_id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: user-date-index
+          KeySchema:
+            - AttributeName: user_id
+              KeyType: HASH
+            - AttributeName: date
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+
+  # IAM Role for Morning Briefing Lambda
+  MorningBriefingLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${ProjectName}-morning-briefing-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: MorningBriefingAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                Resource: !Sub '${TranscriptsBucket.Arn}/*'
+              - Effect: Allow
+                Action:
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                Resource:
+                  - !GetAtt TranscriptsIndex.Arn
+                  - !Sub '${TranscriptsIndex.Arn}/index/*'
+              - Effect: Allow
+                Action:
+                  - dynamodb:Scan
+                Resource:
+                  - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/krisp-users'
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                  - dynamodb:GetItem
+                  - dynamodb:Query
+                Resource:
+                  - !GetAtt BriefingsTable.Arn
+                  - !Sub '${BriefingsTable.Arn}/index/*'
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                Resource:
+                  - !Sub 'arn:aws:bedrock:${AWS::Region}::foundation-model/amazon.nova-lite-v1:0'
+
+  # Morning Briefing Lambda Function
+  MorningBriefingFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${ProjectName}-morning-briefing'
+      Runtime: python3.12
+      Handler: handler.handler
+      Role: !GetAtt MorningBriefingLambdaRole.Arn
+      Timeout: 300
+      MemorySize: 512
+      Environment:
+        Variables:
+          KRISP_S3_BUCKET: !Ref TranscriptsBucket
+          DYNAMODB_TABLE: !Ref TranscriptsIndex
+          BRIEFINGS_TABLE: !Ref BriefingsTable
+          USERS_TABLE: krisp-users
+          BRIEFING_MODEL_ID: amazon.nova-lite-v1:0
+      Code:
+        ZipFile: |
+          # Placeholder - deploy full code from lambda/morning-briefing/handler.py
+          def handler(event, context):
+              print("Morning briefing triggered - deploy full code from repo")
+              return {"status": "placeholder"}
+
+  # CloudWatch Events Rule for Daily Morning Briefing (7am UTC)
+  MorningBriefingSchedule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub '${ProjectName}-morning-briefing-schedule'
+      Description: Trigger morning briefing generation at 7am UTC daily
+      ScheduleExpression: 'cron(0 7 * * ? *)'
+      State: ENABLED
+      Targets:
+        - Id: MorningBriefingTarget
+          Arn: !GetAtt MorningBriefingFunction.Arn
+
+  # Permission for CloudWatch Events to invoke Morning Briefing Lambda
+  MorningBriefingSchedulePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref MorningBriefingFunction
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt MorningBriefingSchedule.Arn
+
 Outputs:
   WebhookUrl:
     Description: Krisp Webhook URL - configure this in Krisp settings
@@ -670,6 +790,10 @@ Outputs:
   InvitesTable:
     Description: DynamoDB table for user invitations
     Value: !Ref InvitesTable
+
+  BriefingsTable:
+    Description: DynamoDB table for morning briefings
+    Value: !Ref BriefingsTable
 
   MCPServerConfig:
     Description: Environment variables for MCP server
