@@ -7,6 +7,7 @@
 
 import 'aws-lambda'; // Import for awslambda global types
 import { S3TranscriptClient } from './s3-client.js';
+import { DynamoTranscriptClient } from './dynamo-client.js';
 import { getUserContext, UserContext, debugAuthContext } from './auth.js';
 
 interface FunctionUrlEvent {
@@ -42,8 +43,9 @@ interface JsonRpcResponse {
   id: number | string | null;
 }
 
-// Initialize S3 client outside handler for reuse
+// Initialize clients outside handler for reuse
 const s3Client = new S3TranscriptClient();
+const dynamoClient = new DynamoTranscriptClient();
 
 /**
  * Extract API key from request headers.
@@ -126,6 +128,61 @@ const TOOLS = [
         },
       },
       required: ['keys'],
+    },
+  },
+  {
+    name: 'list_linkedin_connections',
+    description: 'List LinkedIn connections imported by the user. These are 1st-degree connections that can be matched to meeting speakers.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        limit: { type: 'number', description: 'Maximum connections to return (default: 50)' },
+        search: { type: 'string', description: 'Search by name (partial match)' },
+      },
+    },
+  },
+  {
+    name: 'match_linkedin_connection',
+    description: 'Find a LinkedIn 1st-degree connection that matches a speaker name. Useful for identifying meeting attendees.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        speaker_name: { type: 'string', description: 'Speaker name to match against LinkedIn connections' },
+        company_hint: { type: 'string', description: 'Optional company name to improve matching accuracy' },
+      },
+      required: ['speaker_name'],
+    },
+  },
+  {
+    name: 'get_speaker_context',
+    description: 'Get comprehensive context about a speaker including their enriched profile, LinkedIn match, and meeting history.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        speaker_name: { type: 'string', description: 'Name of the speaker to get context for' },
+      },
+      required: ['speaker_name'],
+    },
+  },
+  {
+    name: 'list_speakers',
+    description: 'List known speakers from meetings. Returns speaker entities with their metadata.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        limit: { type: 'number', description: 'Maximum speakers to return (default: 50)' },
+        company: { type: 'string', description: 'Filter by company name' },
+      },
+    },
+  },
+  {
+    name: 'list_companies',
+    description: 'List known companies from meetings. Returns company entities with their metadata.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        limit: { type: 'number', description: 'Maximum companies to return (default: 50)' },
+      },
     },
   },
 ];
@@ -251,6 +308,186 @@ async function handleMcpRequest(request: JsonRpcRequest, userContext: UserContex
                       action_items: t.actionItems,
                       speakers: t.speakers,
                     }),
+                  }, null, 2),
+                }],
+              },
+              id,
+            };
+          }
+
+          case 'list_linkedin_connections': {
+            const limit = (toolArgs.limit as number) || 50;
+            const search = toolArgs.search as string | undefined;
+
+            const stats = await dynamoClient.getLinkedInStats(userId);
+            const connections = await dynamoClient.listLinkedInConnections(userId, { limit, search });
+
+            return {
+              jsonrpc: '2.0',
+              result: {
+                content: [{
+                  type: 'text',
+                  text: JSON.stringify({
+                    stats: {
+                      totalConnections: stats.totalConnections,
+                      lastImportAt: stats.lastImportAt,
+                      importSource: stats.importSource,
+                    },
+                    count: connections.length,
+                    connections: connections.map(c => ({
+                      fullName: c.fullName,
+                      company: c.company,
+                      position: c.position,
+                      email: c.email,
+                      connectedOn: c.connectedOn,
+                    })),
+                  }, null, 2),
+                }],
+              },
+              id,
+            };
+          }
+
+          case 'match_linkedin_connection': {
+            const speakerName = toolArgs.speaker_name as string;
+            const companyHint = toolArgs.company_hint as string | undefined;
+
+            const match = await dynamoClient.matchLinkedInConnection(
+              userId,
+              speakerName,
+              companyHint ? { companies: [companyHint] } : undefined
+            );
+
+            if (!match) {
+              return {
+                jsonrpc: '2.0',
+                result: {
+                  content: [{
+                    type: 'text',
+                    text: JSON.stringify({
+                      found: false,
+                      speakerName,
+                      message: 'No matching LinkedIn connection found. The speaker may not be a 1st-degree connection.',
+                    }, null, 2),
+                  }],
+                },
+                id,
+              };
+            }
+
+            return {
+              jsonrpc: '2.0',
+              result: {
+                content: [{
+                  type: 'text',
+                  text: JSON.stringify({
+                    found: true,
+                    speakerName,
+                    match: {
+                      fullName: match.fullName,
+                      company: match.company,
+                      position: match.position,
+                      email: match.email,
+                      connectedOn: match.connectedOn,
+                      confidence: match.confidence,
+                      matchReason: match.matchReason,
+                    },
+                  }, null, 2),
+                }],
+              },
+              id,
+            };
+          }
+
+          case 'get_speaker_context': {
+            const speakerName = toolArgs.speaker_name as string;
+            const context = await dynamoClient.getSpeakerContext(userId, speakerName);
+
+            return {
+              jsonrpc: '2.0',
+              result: {
+                content: [{
+                  type: 'text',
+                  text: JSON.stringify({
+                    speakerName,
+                    profile: context.profile ? {
+                      displayName: context.profile.displayName,
+                      role: context.profile.role,
+                      company: context.profile.company,
+                      linkedin: context.profile.linkedin,
+                      aiSummary: context.profile.aiSummary,
+                      topics: context.profile.topics,
+                      enrichedAt: context.profile.enrichedAt,
+                      confidence: context.profile.enrichedConfidence,
+                    } : null,
+                    linkedInMatch: context.linkedInMatch ? {
+                      fullName: context.linkedInMatch.fullName,
+                      company: context.linkedInMatch.company,
+                      position: context.linkedInMatch.position,
+                      confidence: context.linkedInMatch.confidence,
+                      matchReason: context.linkedInMatch.matchReason,
+                    } : null,
+                    entity: context.entity ? {
+                      entityId: context.entity.entity_id,
+                      canonicalName: context.entity.canonical_name,
+                      aliases: context.entity.aliases,
+                    } : null,
+                    transcriptCount: context.transcriptCount,
+                  }, null, 2),
+                }],
+              },
+              id,
+            };
+          }
+
+          case 'list_speakers': {
+            const limit = (toolArgs.limit as number) || 50;
+            const company = toolArgs.company as string | undefined;
+
+            const speakers = await dynamoClient.listSpeakers(userId, { limit, company });
+
+            return {
+              jsonrpc: '2.0',
+              result: {
+                content: [{
+                  type: 'text',
+                  text: JSON.stringify({
+                    count: speakers.length,
+                    speakers: speakers.map(s => ({
+                      entityId: s.entity_id,
+                      name: s.canonical_name,
+                      aliases: s.aliases,
+                      metadata: s.metadata,
+                      createdAt: s.created_at,
+                      updatedAt: s.updated_at,
+                    })),
+                  }, null, 2),
+                }],
+              },
+              id,
+            };
+          }
+
+          case 'list_companies': {
+            const limit = (toolArgs.limit as number) || 50;
+
+            const companies = await dynamoClient.listCompanies(userId, { limit });
+
+            return {
+              jsonrpc: '2.0',
+              result: {
+                content: [{
+                  type: 'text',
+                  text: JSON.stringify({
+                    count: companies.length,
+                    companies: companies.map(c => ({
+                      entityId: c.entity_id,
+                      name: c.canonical_name,
+                      aliases: c.aliases,
+                      metadata: c.metadata,
+                      createdAt: c.created_at,
+                      updatedAt: c.updated_at,
+                    })),
                   }, null, 2),
                 }],
               },
