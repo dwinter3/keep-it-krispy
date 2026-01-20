@@ -295,53 +295,81 @@ export async function PATCH(request: NextRequest) {
   }
   const userId = user.user_id
 
+  // Parse body once and store for retry logic
+  let body: { meetingId?: string; speakerCorrection?: { originalName?: string; correctedName?: string } }
   try {
-    const body = await request.json()
-    const { meetingId, speakerCorrection } = body
+    body = await request.json()
+  } catch {
+    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 })
+  }
 
-    if (!meetingId || !speakerCorrection) {
-      return NextResponse.json(
-        { error: 'Missing required fields: meetingId and speakerCorrection' },
-        { status: 400 }
-      )
-    }
+  const { meetingId, speakerCorrection } = body
 
+  if (!meetingId || !speakerCorrection) {
+    return NextResponse.json(
+      { error: 'Missing required fields: meetingId and speakerCorrection' },
+      { status: 400 }
+    )
+  }
+
+  const { originalName, correctedName } = speakerCorrection
+
+  if (!originalName || !correctedName) {
+    return NextResponse.json(
+      { error: 'speakerCorrection must have originalName and correctedName' },
+      { status: 400 }
+    )
+  }
+
+  try {
     // Verify ownership before update
     const getCommand = new GetCommand({
       TableName: TABLE_NAME,
       Key: { meeting_id: meetingId },
-      ProjectionExpression: 'user_id',
+      ProjectionExpression: 'user_id, speaker_corrections',
     })
-    const ownerCheck = await dynamodb.send(getCommand)
-    if (ownerCheck.Item?.user_id && ownerCheck.Item.user_id !== userId) {
+    const existingItem = await dynamodb.send(getCommand)
+
+    if (existingItem.Item?.user_id && existingItem.Item.user_id !== userId) {
       return NextResponse.json({ error: 'Access denied' }, { status: 403 })
     }
 
-    const { originalName, correctedName } = speakerCorrection
-
-    if (!originalName || !correctedName) {
-      return NextResponse.json(
-        { error: 'speakerCorrection must have originalName and correctedName' },
-        { status: 400 }
-      )
-    }
-
-    // Update the speaker_corrections map in DynamoDB
     // The key is the lowercase original name for consistent lookups
     const correctionKey = originalName.toLowerCase()
 
-    const updateCommand = new UpdateCommand({
-      TableName: TABLE_NAME,
-      Key: { meeting_id: meetingId },
-      UpdateExpression: 'SET speaker_corrections.#speakerKey = :correction',
-      ExpressionAttributeNames: {
-        '#speakerKey': correctionKey,
-      },
-      ExpressionAttributeValues: {
-        ':correction': { name: correctedName },
-      },
-      ReturnValues: 'ALL_NEW',
-    })
+    // Check if speaker_corrections map already exists
+    const existingCorrections = existingItem.Item?.speaker_corrections
+
+    let updateCommand: UpdateCommand
+
+    if (existingCorrections) {
+      // Update existing map - can use nested path
+      updateCommand = new UpdateCommand({
+        TableName: TABLE_NAME,
+        Key: { meeting_id: meetingId },
+        UpdateExpression: 'SET speaker_corrections.#speakerKey = :correction',
+        ExpressionAttributeNames: {
+          '#speakerKey': correctionKey,
+        },
+        ExpressionAttributeValues: {
+          ':correction': { name: correctedName },
+        },
+        ReturnValues: 'ALL_NEW',
+      })
+    } else {
+      // Create new map - speaker_corrections doesn't exist yet
+      updateCommand = new UpdateCommand({
+        TableName: TABLE_NAME,
+        Key: { meeting_id: meetingId },
+        UpdateExpression: 'SET speaker_corrections = :corrections',
+        ExpressionAttributeValues: {
+          ':corrections': {
+            [correctionKey]: { name: correctedName },
+          },
+        },
+        ReturnValues: 'ALL_NEW',
+      })
+    }
 
     const result = await dynamodb.send(updateCommand)
 
@@ -351,39 +379,6 @@ export async function PATCH(request: NextRequest) {
     })
   } catch (error) {
     console.error('PATCH error:', error)
-
-    // Handle case where speaker_corrections doesn't exist yet
-    // Need to create the map first
-    try {
-      const body = await request.json().catch(() => ({}))
-      const { meetingId, speakerCorrection } = body
-
-      if (meetingId && speakerCorrection) {
-        const correctionKey = speakerCorrection.originalName.toLowerCase()
-
-        const createMapCommand = new UpdateCommand({
-          TableName: TABLE_NAME,
-          Key: { meeting_id: meetingId },
-          UpdateExpression: 'SET speaker_corrections = :corrections',
-          ExpressionAttributeValues: {
-            ':corrections': {
-              [correctionKey]: { name: speakerCorrection.correctedName },
-            },
-          },
-          ReturnValues: 'ALL_NEW',
-        })
-
-        const result = await dynamodb.send(createMapCommand)
-
-        return NextResponse.json({
-          success: true,
-          speakerCorrections: result.Attributes?.speaker_corrections || {},
-        })
-      }
-    } catch (retryError) {
-      console.error('Retry error:', retryError)
-    }
-
     return NextResponse.json(
       { error: 'Failed to update speaker correction', details: String(error) },
       { status: 500 }
