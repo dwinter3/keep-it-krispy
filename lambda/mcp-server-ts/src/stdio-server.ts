@@ -189,6 +189,40 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           required: ['entity_id'],
         },
       },
+      {
+        name: 'list_linkedin_connections',
+        description: 'List LinkedIn connections imported by the user. These are 1st-degree connections that can be matched to meeting speakers.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            limit: { type: 'number', description: 'Maximum connections to return (default: 50)' },
+            search: { type: 'string', description: 'Search by name (partial match)' },
+          },
+        },
+      },
+      {
+        name: 'match_linkedin_connection',
+        description: 'Find a LinkedIn 1st-degree connection that matches a speaker name. Useful for identifying meeting attendees.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            speaker_name: { type: 'string', description: 'Speaker name to match against LinkedIn connections' },
+            company_hint: { type: 'string', description: 'Optional company name to improve matching accuracy' },
+          },
+          required: ['speaker_name'],
+        },
+      },
+      {
+        name: 'get_speaker_context',
+        description: 'Get comprehensive context about a speaker including their enriched profile, LinkedIn match, and meeting history.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            speaker_name: { type: 'string', description: 'Name of the speaker to get context for' },
+          },
+          required: ['speaker_name'],
+        },
+      },
     ],
   };
 });
@@ -591,6 +625,128 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               entity_type: entity.entity_type,
               count: enrichedRelationships.length,
               relationships: enrichedRelationships,
+            }, null, 2),
+          }],
+        };
+      }
+
+      case 'list_linkedin_connections': {
+        const limit = (args?.limit as number) || 50;
+        const search = args?.search as string | undefined;
+
+        debug('list_linkedin_connections: querying', { limit, search, userId });
+
+        const stats = await dynamoClient.getLinkedInStats(userId);
+        const connections = await dynamoClient.listLinkedInConnections(userId, { limit, search });
+
+        debug(`list_linkedin_connections: found ${connections.length} connections in ${Date.now() - startTime}ms`);
+
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              stats: {
+                totalConnections: stats.totalConnections,
+                lastImportAt: stats.lastImportAt,
+                importSource: stats.importSource,
+              },
+              count: connections.length,
+              connections: connections.map(c => ({
+                fullName: c.fullName,
+                company: c.company,
+                position: c.position,
+                email: c.email,
+                connectedOn: c.connectedOn,
+              })),
+            }, null, 2),
+          }],
+        };
+      }
+
+      case 'match_linkedin_connection': {
+        const speakerName = args?.speaker_name as string;
+        const companyHint = args?.company_hint as string | undefined;
+
+        debug('match_linkedin_connection: searching', { speakerName, companyHint, userId });
+
+        const match = await dynamoClient.matchLinkedInConnection(
+          userId,
+          speakerName,
+          companyHint ? { companies: [companyHint] } : undefined
+        );
+
+        debug(`match_linkedin_connection: ${match ? 'found match' : 'no match'} in ${Date.now() - startTime}ms`);
+
+        if (!match) {
+          return {
+            content: [{
+              type: 'text',
+              text: JSON.stringify({
+                found: false,
+                speakerName,
+                message: 'No matching LinkedIn connection found. The speaker may not be a 1st-degree connection.',
+              }, null, 2),
+            }],
+          };
+        }
+
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              found: true,
+              speakerName,
+              match: {
+                fullName: match.fullName,
+                company: match.company,
+                position: match.position,
+                email: match.email,
+                connectedOn: match.connectedOn,
+                confidence: match.confidence,
+                matchReason: match.matchReason,
+              },
+            }, null, 2),
+          }],
+        };
+      }
+
+      case 'get_speaker_context': {
+        const speakerName = args?.speaker_name as string;
+
+        debug('get_speaker_context: getting context', { speakerName, userId });
+
+        const context = await dynamoClient.getSpeakerContext(userId, speakerName);
+
+        debug(`get_speaker_context: completed in ${Date.now() - startTime}ms`);
+
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              speakerName,
+              profile: context.profile ? {
+                displayName: context.profile.displayName,
+                role: context.profile.role,
+                company: context.profile.company,
+                linkedin: context.profile.linkedin,
+                aiSummary: context.profile.aiSummary,
+                topics: context.profile.topics,
+                enrichedAt: context.profile.enrichedAt,
+                confidence: context.profile.enrichedConfidence,
+              } : null,
+              linkedInMatch: context.linkedInMatch ? {
+                fullName: context.linkedInMatch.fullName,
+                company: context.linkedInMatch.company,
+                position: context.linkedInMatch.position,
+                confidence: context.linkedInMatch.confidence,
+                matchReason: context.linkedInMatch.matchReason,
+              } : null,
+              entity: context.entity ? {
+                entityId: context.entity.entity_id,
+                canonicalName: context.entity.canonical_name,
+                aliases: context.entity.aliases,
+              } : null,
+              transcriptCount: context.transcriptCount,
             }, null, 2),
           }],
         };
