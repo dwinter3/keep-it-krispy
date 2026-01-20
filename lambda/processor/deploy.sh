@@ -12,7 +12,7 @@ echo "Creating deployment package..."
 rm -rf package
 mkdir -p package
 pip install -r requirements.txt -t package --quiet
-cp handler.py package/
+cp handler.py embeddings.py vectors.py package/
 cd package
 zip -r ../deployment.zip . -q
 cd ..
