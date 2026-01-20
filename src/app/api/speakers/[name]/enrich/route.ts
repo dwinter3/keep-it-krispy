@@ -1,12 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb'
-import { DynamoDBDocumentClient, ScanCommand, GetCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb'
+import { DynamoDBDocumentClient, ScanCommand, GetCommand, UpdateCommand, QueryCommand, PutCommand } from '@aws-sdk/lib-dynamodb'
 import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3'
 import { BedrockRuntimeClient, InvokeModelCommand } from '@aws-sdk/client-bedrock-runtime'
 import { SpeakerContext } from '../context/route'
+import { auth } from '@/lib/auth'
+import { getUserByEmail } from '@/lib/users'
 
 const TABLE_NAME = process.env.DYNAMODB_TABLE || 'krisp-transcripts-index'
 const SPEAKERS_TABLE = process.env.SPEAKERS_TABLE || 'krisp-speakers'
+const ENTITIES_TABLE = 'krisp-entities'
+const RELATIONSHIPS_TABLE = 'krisp-relationships'
 const BUCKET_NAME = process.env.KRISP_S3_BUCKET || ''
 const AWS_REGION = process.env.APP_REGION || 'us-east-1'
 
@@ -373,7 +377,7 @@ async function searchWeb(query: string): Promise<WebSearchResult[]> {
 
 // Validate web result against speaker context using AI
 async function validateWebResult(
-  context: SpeakerContext,
+  context: ExtendedSpeakerContext,
   webResult: WebSearchResult,
   humanHints?: string
 ): Promise<ValidationResult> {
@@ -381,12 +385,27 @@ async function validateWebResult(
     ? `\n- HUMAN-PROVIDED HINTS (high priority): ${humanHints}`
     : ''
 
+  // Get substantial dialogue snippets (>30 chars) for validation
+  const dialogueSnippets = (context.speakerDialogue || [])
+    .filter(d => d.length > 30)
+    .slice(0, 5)
+    .map((d, i) => `  ${i + 1}. "${d.slice(0, 200)}${d.length > 200 ? '...' : ''}"`)
+    .join('\n')
+
+  const dialogueSection = dialogueSnippets
+    ? `\n\nACTUAL STATEMENTS by this speaker (use to corroborate identity):\n${dialogueSnippets}`
+    : ''
+
+  const otherSpeakersSection = (context.otherSpeakers || []).length > 0
+    ? `\n- Frequently interacts with: ${context.otherSpeakers.slice(0, 5).join(', ')}`
+    : ''
+
   const prompt = `Given this context about a speaker from meeting transcripts:
 - Name: ${context.name}
 - Topics discussed: ${context.topics.join(', ') || 'Unknown'}
 - Companies mentioned: ${context.companies.join(', ') || 'Unknown'}
 - Role indicators: ${context.roleHints.join(', ') || 'Unknown'}
-- Keywords: ${context.contextKeywords.join(', ') || 'Unknown'}${hintsSection}
+- Keywords: ${context.contextKeywords.join(', ') || 'Unknown'}${otherSpeakersSection}${hintsSection}${dialogueSection}
 
 And this web search result:
 - Title: ${webResult.title}
@@ -398,12 +417,23 @@ Evaluate:
 2. What evidence supports or contradicts this match?
 3. Any red flags? (e.g., completely different industry, wrong location, different career level)
 
+CONFIDENCE SCORING GUIDELINES:
+- Start at 50% for a name match on LinkedIn
+- ADD +20% if dialogue mentions company from web result
+- ADD +15% if dialogue discusses topics matching their job title/role
+- ADD +10% if multiple transcripts corroborate (roleHints, companies)
+- ADD +10% if human hints match web result
+- SUBTRACT -20% for industry mismatch
+- SUBTRACT -15% for career level mismatch (e.g., intern vs VP)
+- Common names (John, David, etc.) need more corroborating evidence - start at 30% instead
+
 Consider:
 - LinkedIn profiles are strong indicators if the name and context match
 - Company names matching is a strong positive signal
 - Topic/industry alignment increases confidence
 - Generic or common names require more corroborating evidence
 - HUMAN-PROVIDED HINTS should be weighted heavily - if the hint says "works at X company" and the result shows X company, that's a very strong match
+- If the speaker's ACTUAL STATEMENTS mention the company or role from the web result, that's very strong evidence (+20%)
 
 Return ONLY valid JSON:
 {
@@ -553,11 +583,181 @@ Return ONLY valid JSON.`
   }
 }
 
+// Helper to canonicalize name for consistent lookups
+function canonicalizeName(name: string): string {
+  return name
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9\s]/g, '')
+    .replace(/\s+/g, ' ')
+}
+
+// Generate entity ID
+function generateEntityId(): string {
+  const chars = 'abcdefghijklmnopqrstuvwxyz0123456789'
+  let id = 'ent_'
+  for (let i = 0; i < 12; i++) {
+    id += chars[Math.floor(Math.random() * chars.length)]
+  }
+  return id
+}
+
+// Find existing speaker entity by name
+async function findSpeakerEntityByName(
+  userId: string,
+  speakerName: string
+): Promise<{ entity_id: string; metadata?: Record<string, unknown> } | null> {
+  const canonical = canonicalizeName(speakerName)
+  const queryCommand = new QueryCommand({
+    TableName: ENTITIES_TABLE,
+    IndexName: 'type-name-index',
+    KeyConditionExpression: 'entity_type = :type AND canonical_name = :name',
+    FilterExpression: 'user_id = :userId',
+    ExpressionAttributeValues: {
+      ':type': 'speaker',
+      ':name': canonical,
+      ':userId': userId,
+    },
+    Limit: 1,
+  })
+
+  const response = await dynamodb.send(queryCommand)
+  if (response.Items && response.Items.length > 0) {
+    return response.Items[0] as { entity_id: string; metadata?: Record<string, unknown> }
+  }
+  return null
+}
+
+// Find or create company entity
+async function findOrCreateCompanyEntity(
+  userId: string,
+  companyName: string
+): Promise<string> {
+  const canonical = canonicalizeName(companyName)
+
+  // Try to find existing company entity
+  const queryCommand = new QueryCommand({
+    TableName: ENTITIES_TABLE,
+    IndexName: 'type-name-index',
+    KeyConditionExpression: 'entity_type = :type AND canonical_name = :name',
+    FilterExpression: 'user_id = :userId',
+    ExpressionAttributeValues: {
+      ':type': 'company',
+      ':name': canonical,
+      ':userId': userId,
+    },
+    Limit: 1,
+  })
+
+  const response = await dynamodb.send(queryCommand)
+  if (response.Items && response.Items.length > 0) {
+    return response.Items[0].entity_id as string
+  }
+
+  // Create new company entity
+  const now = new Date().toISOString()
+  const entityId = generateEntityId()
+
+  const putCommand = new PutCommand({
+    TableName: ENTITIES_TABLE,
+    Item: {
+      entity_id: entityId,
+      entity_type: 'company',
+      user_id: userId,
+      name: companyName,
+      canonical_name: canonical,
+      status: 'active',
+      metadata: {},
+      confidence: 70,
+      enrichment_source: 'speaker_enrichment',
+      created_at: now,
+      created_by: userId,
+      updated_at: now,
+      updated_by: userId,
+    },
+  })
+  await dynamodb.send(putCommand)
+  console.log(`Created company entity ${entityId} for "${companyName}"`)
+  return entityId
+}
+
+// Create works_at relationship
+async function createWorksAtRelationship(
+  userId: string,
+  speakerEntityId: string,
+  companyEntityId: string
+): Promise<void> {
+  const relationshipId = `rel_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+  const now = new Date().toISOString()
+
+  // Check if relationship already exists
+  const queryCommand = new QueryCommand({
+    TableName: RELATIONSHIPS_TABLE,
+    IndexName: 'source-type-index',
+    KeyConditionExpression: 'source_entity_id = :source AND relationship_type = :type',
+    FilterExpression: 'target_entity_id = :target',
+    ExpressionAttributeValues: {
+      ':source': speakerEntityId,
+      ':type': 'works_at',
+      ':target': companyEntityId,
+    },
+    Limit: 1,
+  })
+
+  const existing = await dynamodb.send(queryCommand)
+  if (existing.Items && existing.Items.length > 0) {
+    // Update existing relationship
+    const updateCommand = new UpdateCommand({
+      TableName: RELATIONSHIPS_TABLE,
+      Key: { relationship_id: existing.Items[0].relationship_id },
+      UpdateExpression: 'SET updated_at = :now, updated_by = :userId',
+      ExpressionAttributeValues: {
+        ':now': now,
+        ':userId': userId,
+      },
+    })
+    await dynamodb.send(updateCommand)
+    return
+  }
+
+  // Create new relationship
+  const putCommand = new PutCommand({
+    TableName: RELATIONSHIPS_TABLE,
+    Item: {
+      relationship_id: relationshipId,
+      relationship_type: 'works_at',
+      source_entity_id: speakerEntityId,
+      target_entity_id: companyEntityId,
+      user_id: userId,
+      status: 'active',
+      metadata: {},
+      confidence: 70,
+      created_at: now,
+      created_by: userId,
+      updated_at: now,
+      updated_by: userId,
+    },
+  })
+  await dynamodb.send(putCommand)
+  console.log(`Created works_at relationship between speaker ${speakerEntityId} and company ${companyEntityId}`)
+}
+
 // POST /api/speakers/[name]/enrich - Enrich speaker profile with web search and AI validation
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ name: string }> }
 ) {
+  // Auth is required for entity updates
+  const session = await auth()
+  if (!session?.user?.email) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+  const user = await getUserByEmail(session.user.email)
+  if (!user) {
+    return NextResponse.json({ error: 'User not found' }, { status: 404 })
+  }
+  const userId = user.user_id
+
   try {
     const { name } = await params
     const speakerName = decodeURIComponent(name)
@@ -836,6 +1036,70 @@ Return ONLY the text, no JSON.`
       await dynamodb.send(updateCommand)
     } catch (err) {
       console.error('Error caching enrichment:', err)
+    }
+
+    // Step 7: Update entity with enrichment data
+    // This flows the enrichment to krisp-entities for the knowledge graph
+    try {
+      const speakerEntity = await findSpeakerEntityByName(userId, context.name)
+      if (speakerEntity) {
+        const now = new Date().toISOString()
+
+        // Update the speaker entity with enrichment data
+        const entityUpdateCommand = new UpdateCommand({
+          TableName: ENTITIES_TABLE,
+          Key: { entity_id: speakerEntity.entity_id },
+          UpdateExpression: `SET
+            #name = :displayName,
+            #metadata.#linkedin = :linkedin,
+            #metadata.#role = :role,
+            #metadata.#company_name = :company,
+            #metadata.#bio = :bio,
+            enriched_at = :enrichedAt,
+            confidence = :confidence,
+            enrichment_source = :source,
+            updated_at = :updatedAt,
+            updated_by = :updatedBy`,
+          ExpressionAttributeNames: {
+            '#name': 'name',
+            '#metadata': 'metadata',
+            '#linkedin': 'linkedin',
+            '#role': 'role',
+            '#company_name': 'company_name',
+            '#bio': 'bio',
+          },
+          ExpressionAttributeValues: {
+            ':displayName': enrichedData.fullName || context.name,
+            ':linkedin': enrichedData.linkedinUrl || null,
+            ':role': enrichedData.title || null,
+            ':company': enrichedData.company || null,
+            ':bio': enrichedData.summary || aiSummary || null,
+            ':enrichedAt': now,
+            ':confidence': bestConfidence,
+            ':source': 'web_enrichment',
+            ':updatedAt': now,
+            ':updatedBy': userId,
+          },
+        })
+        await dynamodb.send(entityUpdateCommand)
+        console.log(`Updated speaker entity ${speakerEntity.entity_id} with enrichment data`)
+
+        // If confidence >= 50% and there's a company, create company entity and works_at relationship
+        if (bestConfidence >= 50 && enrichedData.company) {
+          try {
+            const companyEntityId = await findOrCreateCompanyEntity(userId, enrichedData.company)
+            await createWorksAtRelationship(userId, speakerEntity.entity_id, companyEntityId)
+          } catch (relErr) {
+            console.error('Error creating company entity/relationship:', relErr)
+            // Don't fail the whole enrichment for this
+          }
+        }
+      } else {
+        console.log(`No speaker entity found for "${context.name}" - entity will be created on next speaker correction`)
+      }
+    } catch (entityErr) {
+      console.error('Error updating entity with enrichment:', entityErr)
+      // Don't fail the whole enrichment for entity update issues
     }
 
     return NextResponse.json({

@@ -356,6 +356,53 @@ async function createSpeakerEntity(
   return entityId
 }
 
+// Fire-and-forget enrichment trigger for newly created speaker entities
+// This is intentionally non-blocking to avoid slowing down the speaker correction flow
+async function triggerSpeakerEnrichment(
+  speakerName: string,
+  request: NextRequest
+): Promise<void> {
+  try {
+    // Construct the enrichment URL from the current request
+    const baseUrl = new URL(request.url).origin
+    const enrichUrl = `${baseUrl}/api/speakers/${encodeURIComponent(speakerName)}/enrich`
+
+    // Fire-and-forget with short timeout
+    // We don't await the response - just fire the request
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 5000) // 5 second timeout
+
+    fetch(enrichUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        // Forward cookies for auth
+        'Cookie': request.headers.get('Cookie') || '',
+      },
+      body: JSON.stringify({ forceRefresh: false }),
+      signal: controller.signal,
+    })
+      .then(response => {
+        clearTimeout(timeoutId)
+        if (response.ok) {
+          console.log(`Auto-enrichment triggered for speaker: ${speakerName}`)
+        } else {
+          console.log(`Auto-enrichment returned ${response.status} for speaker: ${speakerName}`)
+        }
+      })
+      .catch(err => {
+        clearTimeout(timeoutId)
+        // AbortError is expected on timeout - don't log it as an error
+        if (err.name !== 'AbortError') {
+          console.error(`Auto-enrichment failed for speaker ${speakerName}:`, err.message)
+        }
+      })
+  } catch (err) {
+    // Don't fail the main flow for enrichment errors
+    console.error('Error triggering speaker enrichment:', err)
+  }
+}
+
 /**
  * PATCH - Update speaker corrections for a transcript
  * Also creates speaker entities for new names
@@ -421,6 +468,7 @@ export async function PATCH(request: NextRequest) {
 
     // Determine entity ID: use provided, find existing, or create new
     let entityId = providedEntityId
+    let isNewlyCreatedEntity = false
 
     if (!entityId) {
       // Check if an entity already exists for this name
@@ -430,7 +478,12 @@ export async function PATCH(request: NextRequest) {
       } else {
         // Create new speaker entity for this name
         entityId = await createSpeakerEntity(userId, correctedName)
+        isNewlyCreatedEntity = true
         console.log(`Created new speaker entity ${entityId} for "${correctedName}"`)
+
+        // Fire-and-forget enrichment for newly created entity
+        // This runs in the background without blocking the response
+        triggerSpeakerEnrichment(correctedName, request)
       }
     }
 
@@ -483,6 +536,7 @@ export async function PATCH(request: NextRequest) {
       success: true,
       speakerCorrections: result.Attributes?.speaker_corrections || {},
       entityId,  // Return the entity ID so frontend knows it was created/linked
+      entityCreated: isNewlyCreatedEntity,  // Indicates if enrichment was triggered
     })
   } catch (error) {
     console.error('PATCH error:', error)

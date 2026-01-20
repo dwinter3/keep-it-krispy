@@ -750,6 +750,102 @@ Resources:
       Principal: events.amazonaws.com
       SourceArn: !GetAtt MorningBriefingSchedule.Arn
 
+  # Speaker Enrichment Lambda Role
+  SpeakerEnrichmentLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${ProjectName}-speaker-enrichment-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: SpeakerEnrichmentAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                Resource: !Sub '${TranscriptsBucket.Arn}/*'
+              - Effect: Allow
+                Action:
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                Resource:
+                  - !GetAtt TranscriptsIndex.Arn
+                  - !Sub '${TranscriptsIndex.Arn}/index/*'
+              - Effect: Allow
+                Action:
+                  - dynamodb:Scan
+                  - dynamodb:GetItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:PutItem
+                Resource:
+                  - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/krisp-speakers'
+              - Effect: Allow
+                Action:
+                  - dynamodb:Query
+                  - dynamodb:UpdateItem
+                Resource:
+                  - !GetAtt EntitiesTable.Arn
+                  - !Sub '${EntitiesTable.Arn}/index/*'
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                Resource:
+                  - !Sub 'arn:aws:bedrock:${AWS::Region}::foundation-model/amazon.nova-lite-v1:0'
+
+  # Speaker Enrichment Lambda Function
+  SpeakerEnrichmentFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${ProjectName}-speaker-enrichment'
+      Runtime: python3.12
+      Handler: handler.handler
+      Role: !GetAtt SpeakerEnrichmentLambdaRole.Arn
+      Timeout: 600
+      MemorySize: 512
+      Environment:
+        Variables:
+          KRISP_S3_BUCKET: !Ref TranscriptsBucket
+          DYNAMODB_TABLE: !Ref TranscriptsIndex
+          SPEAKERS_TABLE: krisp-speakers
+          ENTITIES_TABLE: !Ref EntitiesTable
+          MODEL_ID: amazon.nova-lite-v1:0
+      Code:
+        ZipFile: |
+          # Placeholder - deploy full code from lambda/speaker-enrichment/handler.py
+          def handler(event, context):
+              print("Speaker enrichment triggered - deploy full code from repo")
+              return {"status": "placeholder"}
+
+  # CloudWatch Events Rule for Nightly Speaker Enrichment (2am UTC)
+  SpeakerEnrichmentSchedule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub '${ProjectName}-speaker-enrichment-schedule'
+      Description: Trigger speaker enrichment at 2am UTC daily
+      ScheduleExpression: 'cron(0 2 * * ? *)'
+      State: ENABLED
+      Targets:
+        - Id: SpeakerEnrichmentTarget
+          Arn: !GetAtt SpeakerEnrichmentFunction.Arn
+
+  # Permission for CloudWatch Events to invoke Speaker Enrichment Lambda
+  SpeakerEnrichmentSchedulePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref SpeakerEnrichmentFunction
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt SpeakerEnrichmentSchedule.Arn
+
 Outputs:
   WebhookUrl:
     Description: Krisp Webhook URL - configure this in Krisp settings

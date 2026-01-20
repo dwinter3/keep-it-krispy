@@ -119,6 +119,44 @@ export default function SpeakerProfilePage({ params }: { params: Promise<{ name:
     role: '',
   })
   const [showMergeModal, setShowMergeModal] = useState(false)
+  const [showAllSources, setShowAllSources] = useState(false)
+
+  // Helper to format source URL for display
+  function formatSourceDisplay(url: string): { title: string; preview: string } {
+    try {
+      const parsed = new URL(url)
+      const hostname = parsed.hostname.replace('www.', '')
+
+      // Special handling for LinkedIn
+      if (hostname.includes('linkedin.com')) {
+        const pathParts = parsed.pathname.split('/').filter(Boolean)
+        if (pathParts[0] === 'in' && pathParts[1]) {
+          return {
+            title: 'LinkedIn Profile',
+            preview: `/${pathParts.slice(0, 2).join('/')}`,
+          }
+        } else if (pathParts[0] === 'company' && pathParts[1]) {
+          return {
+            title: 'LinkedIn Company',
+            preview: `/${pathParts.slice(0, 2).join('/')}`,
+          }
+        }
+        return { title: 'LinkedIn', preview: parsed.pathname.slice(0, 30) }
+      }
+
+      // Get meaningful path preview
+      const pathPreview = parsed.pathname.length > 1
+        ? parsed.pathname.slice(0, 40) + (parsed.pathname.length > 40 ? '...' : '')
+        : ''
+
+      return {
+        title: hostname,
+        preview: pathPreview,
+      }
+    } catch {
+      return { title: url, preview: '' }
+    }
+  }
 
   useEffect(() => {
     async function fetchProfile() {
@@ -595,20 +633,47 @@ export default function SpeakerProfilePage({ params }: { params: Promise<{ name:
                       {/* Sources */}
                       {((enrichmentResult?.sources?.length ?? 0) > 0 || (profile?.enrichedSources?.length ?? 0) > 0) && (
                         <div className="text-xs">
-                          <span className="text-zinc-500">Sources: </span>
-                          {(enrichmentResult?.sources || profile?.enrichedSources)?.map((source, i) => (
-                            <span key={i}>
-                              {i > 0 && ', '}
-                              <a
-                                href={source}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-blue-400 hover:text-blue-300 transition-colors"
+                          <span className="text-zinc-500 block mb-1">Sources:</span>
+                          <div className="flex flex-wrap gap-2">
+                            {(enrichmentResult?.sources || profile?.enrichedSources)
+                              ?.slice(0, showAllSources ? undefined : 5)
+                              .map((source, i) => {
+                                const { title, preview } = formatSourceDisplay(source)
+                                return (
+                                  <a
+                                    key={i}
+                                    href={source}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="inline-flex items-center gap-1 px-2 py-1 bg-zinc-800 hover:bg-zinc-700 rounded transition-colors text-blue-400 hover:text-blue-300"
+                                    title={source}
+                                  >
+                                    {title.includes('LinkedIn') && (
+                                      <svg className="w-3 h-3 flex-shrink-0" fill="currentColor" viewBox="0 0 24 24">
+                                        <path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433c-1.144 0-2.063-.926-2.063-2.065 0-1.138.92-2.063 2.063-2.063 1.14 0 2.064.925 2.064 2.063 0 1.139-.925 2.065-2.064 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z" />
+                                      </svg>
+                                    )}
+                                    <span>{title}</span>
+                                    {preview && (
+                                      <span className="text-zinc-500 truncate max-w-[150px]">{preview}</span>
+                                    )}
+                                    <svg className="w-3 h-3 flex-shrink-0 text-zinc-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                                    </svg>
+                                  </a>
+                                )
+                              })}
+                            {((enrichmentResult?.sources || profile?.enrichedSources)?.length ?? 0) > 5 && (
+                              <button
+                                onClick={() => setShowAllSources(!showAllSources)}
+                                className="px-2 py-1 text-zinc-400 hover:text-zinc-300 transition-colors"
                               >
-                                {new URL(source).hostname}
-                              </a>
-                            </span>
-                          ))}
+                                {showAllSources
+                                  ? 'Show less'
+                                  : `+${((enrichmentResult?.sources || profile?.enrichedSources)?.length ?? 0) - 5} more...`}
+                              </button>
+                            )}
+                          </div>
                         </div>
                       )}
 
