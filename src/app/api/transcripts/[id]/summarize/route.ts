@@ -226,7 +226,11 @@ Example: "Q4 2025 Financial Review - Revenue targets, margin analysis, and 2026 
         })
         const topicResponse = await bedrock.send(topicCommand)
         const topicBody = JSON.parse(new TextDecoder().decode(topicResponse.body))
-        const generatedTopic = topicBody.output?.message?.content?.[0]?.text?.trim() || ''
+        let generatedTopic = topicBody.output?.message?.content?.[0]?.text?.trim() || ''
+        // Strip surrounding quotes if AI wrapped the response in them
+        if (generatedTopic.startsWith('"') && generatedTopic.endsWith('"')) {
+          generatedTopic = generatedTopic.slice(1, -1)
+        }
         if (generatedTopic && generatedTopic.length <= 150) {
           topic = generatedTopic
         }
