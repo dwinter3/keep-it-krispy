@@ -5,10 +5,14 @@
 🌐 **Website:** [krispy.alpha-pm.dev](https://krispy.alpha-pm.dev)
 📊 **Dashboard:** [app.krispy.alpha-pm.dev](https://app.krispy.alpha-pm.dev)
 
-```bash
-# One-line install (deploys to your AWS account)
-curl -fsSL https://krispy.alpha-pm.dev/install.sh | bash
-```
+## Quick Start
+
+1. **Sign up:** [app.krispy.alpha-pm.dev](https://app.krispy.alpha-pm.dev)
+2. **Install MCP server:**
+   ```bash
+   curl -fsSL https://krispy.alpha-pm.dev/install.sh | bash
+   ```
+3. **Configure Krisp webhook** with your API key from the dashboard
 
 ---
 
@@ -26,29 +30,20 @@ The platform runs as an MCP server + web dashboard, giving Claude native access 
 
 ---
 
-## The Stack
+## How It Works
 
 ```
-Krisp App → Webhook Lambda → S3 (raw JSON) → DynamoDB (instant writes)
-                                   ↓
-                           S3 Event Trigger
-                                   ↓
-                          Processing Lambda
-                                   ↓
-                   ┌───────────────┼───────────────┐
-                   ↓               ↓               ↓
-              DynamoDB      Bedrock Titan      S3 Vectors
-             (metadata)     (embeddings)    (semantic index)
-                   └───────────────┴───────────────┘
-                                   ↓
-                        MCP Server (stdio)
-                                   ↓
-                   ┌───────────────┴───────────────┐
-                   ↓                               ↓
-            Claude Desktop                   Claude Code
+Krisp App → Keep It Krispy Cloud → MCP Server → Claude
+   │                  │                           │
+   │   [webhook]      │                           │
+   └──────────────────┤                           │
+                      ├── Transcript Storage      │
+                      ├── Semantic Search         │
+                      ├── Knowledge Graph         │
+                      └── AI Enrichment ──────────┘
 ```
 
-**Total AWS cost: < $2/month.** No OpenSearch cluster burning $350/month. Pure serverless.
+Your transcripts are securely stored and indexed. The MCP server runs locally and connects Claude to your meeting data.
 
 ---
 
@@ -82,69 +77,39 @@ The dashboard runs on AWS Amplify and reads from the same DynamoDB/S3 backend as
 
 ---
 
-## Quick Start
+## Installation
 
 ### Prerequisites
-- [Krisp.ai Pro](https://krisp.ai) with webhook access
-- AWS account
-- Node.js 18+, Python 3.11+, AWS CLI
+- [Krisp.ai](https://krisp.ai) desktop app
+- Node.js 18+
+- Claude Desktop or Claude Code
 
-### Install
+### Step 1: Create Account
+
+Sign in at [app.krispy.alpha-pm.dev](https://app.krispy.alpha-pm.dev) to get your:
+- **User ID** — for MCP authentication
+- **API Key** — for Krisp webhook authentication
+- **Webhook URL** — where Krisp sends transcripts
+
+### Step 2: Install MCP Server
 
 ```bash
 curl -fsSL https://krispy.alpha-pm.dev/install.sh | bash
 ```
 
-The installer:
-1. Deploys AWS infrastructure (S3, DynamoDB, Lambda)
-2. Builds the MCP server locally
-3. Prints your webhook URL and MCP config
+The installer will:
+1. Clone the repository
+2. Build the MCP server
+3. Ask for your User ID
+4. Configure Claude Desktop and/or Claude Code
 
-### Configure Krisp
+### Step 3: Configure Krisp Webhook
 
-Add your webhook URL to Krisp:
-1. Krisp app → Settings → Integrations → Webhooks
-2. Paste the webhook URL from the installer
-3. Done — every call is now automatically captured
-
-### Configure Claude
-
-**Claude Desktop** — Edit `~/Library/Application Support/Claude/claude_desktop_config.json`:
-
-```json
-{
-  "mcpServers": {
-    "krisp": {
-      "command": "node",
-      "args": ["~/keep-it-krispy/lambda/mcp-server-ts/dist/stdio-server.cjs"],
-      "env": {
-        "AWS_REGION": "us-east-1",
-        "KRISP_S3_BUCKET": "krisp-transcripts-{account-id}",
-        "DYNAMODB_TABLE": "krisp-transcripts-index",
-        "VECTOR_BUCKET": "krisp-vectors-{account-id}",
-        "VECTOR_INDEX": "transcript-chunks",
-        "AWS_PROFILE": "default",
-        "KRISP_USER_ID": "{your-user-id}"
-      }
-    }
-  }
-}
-```
-
-> **Note:** Get your `KRISP_USER_ID` from the dashboard settings page.
-
-**Claude Code**:
-
-```bash
-claude mcp add --transport stdio \
-  --env AWS_REGION=us-east-1 \
-  --env KRISP_S3_BUCKET=krisp-transcripts-{account-id} \
-  --env DYNAMODB_TABLE=krisp-transcripts-index \
-  --env VECTOR_BUCKET=krisp-vectors-{account-id} \
-  --env VECTOR_INDEX=transcript-chunks \
-  --scope user \
-  krisp -- node ~/keep-it-krispy/lambda/mcp-server-ts/dist/stdio-server.cjs
-```
+1. Open Krisp → Settings → Integrations → Webhooks
+2. **Webhook URL:** Copy from your dashboard settings
+3. **Headers:** Add `X-API-Key` with your API key
+4. Select "Transcript created" as trigger
+5. Save
 
 ---
 
@@ -182,16 +147,9 @@ claude mcp add --transport stdio \
 
 ---
 
-## Cost Breakdown
+## Pricing
 
-| Component | Monthly Cost |
-|-----------|--------------|
-| DynamoDB | Free tier |
-| S3 Storage | ~$0.02 |
-| S3 Vectors | ~$0.01 |
-| Bedrock Embeddings | ~$0.05 (one-time) |
-| Lambda | Free tier |
-| **Total** | **< $2/month** |
+Keep It Krispy is **free during beta**. Sign up now to lock in early adopter pricing.
 
 ---
 
@@ -199,7 +157,7 @@ claude mcp add --transport stdio \
 
 [Krisp.ai](https://krisp.ai) is a desktop app that provides real-time transcription for any meeting — Zoom, Teams, Meet, phone calls, anything with audio.
 
-**Why Krisp Pro?** The free tier does transcription, but **webhooks require Pro or Business**. Webhooks are the unlock — they automatically send transcripts to your infrastructure the moment a call ends.
+**Note:** Webhooks require Krisp Pro or Business. Webhooks are the key — they automatically send transcripts to Keep It Krispy the moment a call ends.
 
 ---
 
