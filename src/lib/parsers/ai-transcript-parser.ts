@@ -11,13 +11,45 @@ import {
   InvokeModelCommand,
 } from '@aws-sdk/client-bedrock-runtime'
 
-const bedrock = new BedrockRuntimeClient({
-  region: process.env.APP_REGION || 'us-east-1',
-  credentials: {
-    accessKeyId: process.env.S3_ACCESS_KEY_ID || '',
-    secretAccessKey: process.env.S3_SECRET_ACCESS_KEY || '',
-  },
-})
+// Lazy-loaded Bedrock client (created on first use)
+let bedrockClient: BedrockRuntimeClient | null = null
+
+// Create Bedrock client with credentials from env vars or AWS profile
+async function getBedrockClient(): Promise<BedrockRuntimeClient> {
+  if (bedrockClient) return bedrockClient
+
+  const region = process.env.APP_REGION || 'us-east-1'
+
+  // If explicit credentials are provided (production/Amplify), use them
+  if (process.env.S3_ACCESS_KEY_ID && process.env.S3_SECRET_ACCESS_KEY) {
+    bedrockClient = new BedrockRuntimeClient({
+      region,
+      credentials: {
+        accessKeyId: process.env.S3_ACCESS_KEY_ID,
+        secretAccessKey: process.env.S3_SECRET_ACCESS_KEY,
+      },
+    })
+    return bedrockClient
+  }
+
+  // On server-side (Node.js), try AWS CLI profile for local development
+  if (typeof window === 'undefined') {
+    try {
+      const { fromIni } = await import('@aws-sdk/credential-providers')
+      bedrockClient = new BedrockRuntimeClient({
+        region,
+        credentials: fromIni({ profile: 'krisp-buddy' }),
+      })
+      return bedrockClient
+    } catch {
+      // Fall through to default credential chain
+    }
+  }
+
+  // Fallback to default credential chain
+  bedrockClient = new BedrockRuntimeClient({ region })
+  return bedrockClient
+}
 
 export interface AIParserResult {
   /** Detected transcript format description */
@@ -126,6 +158,7 @@ IMPORTANT:
 - If the content isn't a transcript at all, set confidence to 0`
 
   try {
+    const bedrock = await getBedrockClient()
     const response = await bedrock.send(
       new InvokeModelCommand({
         modelId: 'amazon.nova-lite-v1:0',
@@ -133,7 +166,7 @@ IMPORTANT:
         accept: 'application/json',
         body: JSON.stringify({
           inferenceConfig: {
-            max_new_tokens: 16000,
+            max_new_tokens: 8000,
             temperature: 0.1,
           },
           messages: [
@@ -199,8 +232,11 @@ export async function parseTranscriptWithAIFallback(
     duration: number
     rawContent: string
     warnings: string[]
-  }
+  },
+  options: { forceAI?: boolean } = {}
 ): Promise<AIParserResult & { usedAI: boolean }> {
+  const { forceAI = false } = options
+
   // Calculate confidence for rule-based result
   let ruleBasedConfidence = 100
 
@@ -221,8 +257,8 @@ export async function parseTranscriptWithAIFallback(
       ruleBasedConfidence -= 30
     }
 
-    // If rule-based is confident enough, return it
-    if (ruleBasedConfidence >= 70) {
+    // If rule-based is confident enough AND not forcing AI, return it
+    if (!forceAI && ruleBasedConfidence >= 70) {
       return {
         formatDescription: 'Standard format (rule-based)',
         speakers: ruleBasedResult.speakers,
@@ -235,12 +271,12 @@ export async function parseTranscriptWithAIFallback(
     }
   }
 
-  // Use AI parsing
-  if (shouldUseAIParsing(content)) {
+  // Use AI parsing (forced or fallback)
+  if (forceAI || shouldUseAIParsing(content)) {
     const aiResult = await parseWithAI(content, filename)
 
-    // Only use AI result if it's better than rule-based
-    if (ruleBasedResult && aiResult.confidence < ruleBasedConfidence) {
+    // Only prefer rule-based if AI confidence is lower AND not forced
+    if (!forceAI && ruleBasedResult && aiResult.confidence < ruleBasedConfidence) {
       return {
         formatDescription: 'Standard format (rule-based preferred)',
         speakers: ruleBasedResult.speakers,

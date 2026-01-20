@@ -368,7 +368,8 @@ export async function parseTranscriptWithAI(
           duration: ruleBasedResult.duration,
           rawContent: ruleBasedResult.rawContent,
           warnings: ruleBasedResult.warnings,
-        }
+        },
+        { forceAI }
       )
 
       // Use AI result if it's better or if forced
