@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useMemo, useCallback } from 'react'
+import { useEffect, useState, useMemo, useCallback, useRef } from 'react'
 import Link from 'next/link'
 import Shell from '@/components/Shell'
 import ExpandableSpeakers from '@/components/ExpandableSpeakers'
@@ -1701,6 +1701,20 @@ function TranscriptDetail({
   const [loadingAvailableDocuments, setLoadingAvailableDocuments] = useState(false)
   const [linkingDocumentId, setLinkingDocumentId] = useState<string | null>(null)
 
+  // Audio state for voice print processing
+  const [audioInfo, setAudioInfo] = useState<{
+    hasAudio: boolean
+    audioKey?: string
+    audioFormat?: string
+    audioSize?: number
+    diarizationStatus?: string
+    downloadUrl?: string
+  } | null>(null)
+  const [loadingAudio, setLoadingAudio] = useState(false)
+  const [uploadingAudio, setUploadingAudio] = useState(false)
+  const [audioError, setAudioError] = useState<string | null>(null)
+  const audioInputRef = useRef<HTMLInputElement>(null)
+
   const rawPayload = data.raw_payload
   const transcriptData = rawPayload?.data
 
@@ -1828,6 +1842,83 @@ function TranscriptDetail({
       })
     } catch {
       return dateStr
+    }
+  }
+
+  // Load audio info when transcript changes
+  useEffect(() => {
+    async function loadAudioInfo() {
+      setLoadingAudio(true)
+      try {
+        const res = await fetch(`/api/transcripts/${transcript.meetingId}/audio`)
+        if (res.ok) {
+          const data = await res.json()
+          setAudioInfo(data)
+        }
+      } catch (err) {
+        console.error('Error loading audio info:', err)
+      } finally {
+        setLoadingAudio(false)
+      }
+    }
+    loadAudioInfo()
+  }, [transcript.meetingId])
+
+  async function handleAudioUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    setUploadingAudio(true)
+    setAudioError(null)
+
+    try {
+      const formData = new FormData()
+      formData.append('audio', file)
+
+      const res = await fetch(`/api/transcripts/${transcript.meetingId}/audio`, {
+        method: 'POST',
+        body: formData,
+      })
+
+      if (!res.ok) {
+        const error = await res.json()
+        throw new Error(error.error || 'Failed to upload audio')
+      }
+
+      const data = await res.json()
+      setAudioInfo({
+        hasAudio: true,
+        audioKey: data.audioKey,
+        audioFormat: data.audioFormat,
+        audioSize: data.audioSize,
+        diarizationStatus: data.diarizationStatus,
+      })
+    } catch (err) {
+      setAudioError(String(err))
+    } finally {
+      setUploadingAudio(false)
+      // Reset file input
+      if (audioInputRef.current) {
+        audioInputRef.current.value = ''
+      }
+    }
+  }
+
+  async function handleAudioDelete() {
+    if (!confirm('Delete audio file? This will remove any voice print data associated with this recording.')) {
+      return
+    }
+
+    try {
+      const res = await fetch(`/api/transcripts/${transcript.meetingId}/audio`, {
+        method: 'DELETE',
+      })
+
+      if (res.ok) {
+        setAudioInfo({ hasAudio: false })
+      }
+    } catch (err) {
+      console.error('Error deleting audio:', err)
     }
   }
 
@@ -2239,6 +2330,109 @@ function TranscriptDetail({
                       ))}
                   </div>
                 )}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Audio for Voice Print Processing */}
+      <div>
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="text-gray-700 dark:text-gray-300 font-medium flex items-center gap-2">
+            <svg className="w-4 h-4 text-purple-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+            </svg>
+            Audio Recording
+          </h3>
+          {!audioInfo?.hasAudio && !uploadingAudio && (
+            <label className="px-3 py-1.5 text-xs font-medium bg-purple-600 hover:bg-purple-700 text-white rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer">
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+              </svg>
+              Upload Audio
+              <input
+                ref={audioInputRef}
+                type="file"
+                accept="audio/*"
+                onChange={handleAudioUpload}
+                className="hidden"
+              />
+            </label>
+          )}
+        </div>
+
+        {loadingAudio ? (
+          <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3 border border-gray-100 dark:border-gray-600 flex items-center justify-center">
+            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-purple-600"></div>
+            <span className="ml-2 text-xs text-gray-500 dark:text-gray-400">Loading audio info...</span>
+          </div>
+        ) : uploadingAudio ? (
+          <div className="bg-purple-50 dark:bg-purple-900/20 rounded-lg p-3 border border-purple-200 dark:border-purple-800 flex items-center">
+            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-purple-600"></div>
+            <span className="ml-2 text-xs text-purple-600 dark:text-purple-400">Uploading audio file...</span>
+          </div>
+        ) : audioError ? (
+          <div className="bg-red-50 dark:bg-red-900/20 rounded-lg p-3 border border-red-200 dark:border-red-800">
+            <p className="text-xs text-red-600 dark:text-red-400">{audioError}</p>
+          </div>
+        ) : !audioInfo?.hasAudio ? (
+          <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3 border border-gray-100 dark:border-gray-600 text-center">
+            <p className="text-xs text-gray-500 dark:text-gray-400">
+              Upload the audio recording to enable voice print speaker identification. Supported formats: MP3, WAV, OGG, M4A, AAC.
+            </p>
+          </div>
+        ) : (
+          <div className="bg-purple-50 dark:bg-purple-900/20 rounded-lg p-3 border border-purple-200 dark:border-purple-800">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-purple-100 dark:bg-purple-800 rounded-lg flex items-center justify-center">
+                  <svg className="w-5 h-5 text-purple-600 dark:text-purple-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
+                  </svg>
+                </div>
+                <div>
+                  <div className="text-sm font-medium text-gray-900 dark:text-white">
+                    recording.{audioInfo.audioFormat}
+                  </div>
+                  <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+                    <span>{formatFileSize(audioInfo.audioSize)}</span>
+                    <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${
+                      audioInfo.diarizationStatus === 'complete'
+                        ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400'
+                        : audioInfo.diarizationStatus === 'processing'
+                        ? 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400'
+                        : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400'
+                    }`}>
+                      {audioInfo.diarizationStatus === 'complete' ? 'Voice prints ready' :
+                       audioInfo.diarizationStatus === 'processing' ? 'Processing...' :
+                       'Pending processing'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                {audioInfo.downloadUrl && (
+                  <a
+                    href={audioInfo.downloadUrl}
+                    download
+                    className="p-2 text-purple-600 dark:text-purple-400 hover:bg-purple-100 dark:hover:bg-purple-800/50 rounded-lg transition-colors"
+                    title="Download audio"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                    </svg>
+                  </a>
+                )}
+                <button
+                  onClick={handleAudioDelete}
+                  className="p-2 text-gray-400 hover:text-red-500 dark:hover:text-red-400 rounded-lg transition-colors"
+                  title="Delete audio"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                  </svg>
+                </button>
               </div>
             </div>
           </div>

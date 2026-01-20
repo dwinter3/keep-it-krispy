@@ -35,6 +35,7 @@ aws <command> --profile krisp-buddy --region us-east-1
 |--------|---------|
 | `krisp-transcripts-754639201213` | Raw transcript JSON files |
 | `krisp-vectors-754639201213` | Vector embeddings (S3 Vectors) |
+| `krisp-audio-754639201213` | Meeting audio files for voice print processing |
 | `keepitkrispy-website` | Marketing site static files |
 
 ### DynamoDB Tables
@@ -53,6 +54,7 @@ aws <command> --profile krisp-buddy --region us-east-1
 | `krisp-invites` | User invitations | `invite_token` |
 | `krisp-audit-logs` | Audit trail | `log_id` |
 | `krisp-companies` | Company entities | `id` |
+| `krisp-voice-prints` | Speaker voice embeddings | `voice_print_id` |
 
 ### Lambda Functions
 

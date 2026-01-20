@@ -42,6 +42,13 @@ export class KrispBuddyStack extends cdk.Stack {
       `krisp-vectors-${accountId}`
     );
 
+    // Import audio bucket for voice print processing
+    const audioBucket = s3.Bucket.fromBucketName(
+      this,
+      'AudioBucket',
+      `krisp-audio-${accountId}`
+    );
+
     // ============================================================
     // DYNAMODB TABLES (all imported from existing)
     // ============================================================
@@ -82,6 +89,9 @@ export class KrispBuddyStack extends cdk.Stack {
     );
     const companiesTable = dynamodb.Table.fromTableName(
       this, 'CompaniesTable', 'krisp-companies'
+    );
+    const voicePrintsTable = dynamodb.Table.fromTableName(
+      this, 'VoicePrintsTable', 'krisp-voice-prints'
     );
 
     // ============================================================
@@ -178,6 +188,11 @@ export class KrispBuddyStack extends cdk.Stack {
 
     new cdk.CfnOutput(this, 'VectorsBucketName', {
       value: vectorsBucket.bucketName,
+    });
+
+    new cdk.CfnOutput(this, 'AudioBucketName', {
+      value: audioBucket.bucketName,
+      description: 'Audio bucket for voice print processing',
     });
 
     new cdk.CfnOutput(this, 'GitHubActionsRoleArn', {
