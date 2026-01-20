@@ -6,6 +6,44 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-01-20
+
+### Added
+
+#### Infrastructure as Code
+- **AWS CDK Migration** - Full infrastructure now managed via CDK in `infra/` directory
+- **GitHub Actions CI/CD** - Auto-deploy on push to main, daily drift detection
+- **OIDC Authentication** - Secure GitHub Actions IAM role without static credentials
+
+#### AI Transcript Parser
+- **Multi-Format Support** - Automatically parse Zoom, Teams, Slack, podcast, and custom transcript formats
+- **AI Fallback** - When rule-based parsing fails, Bedrock Nova Lite intelligently extracts structure
+- **Confidence Scoring** - Parser reports confidence level for each transcript interpretation
+
+#### Knowledge Graph
+- **Entity System** - Universal entity store for speakers, companies, topics, documents
+- **Relationships** - Graph edges connecting entities (works_at, participant, mentioned)
+- **MCP Tools** - New `list_speakers`, `list_companies`, `get_entity_relationships` tools
+
+#### Multi-Tenant Authentication
+- **User Isolation** - All queries scoped by `user_id` for data privacy
+- **KRISP_USER_ID** - Environment variable for MCP server authentication
+- **API Key Support** - Generate API keys from dashboard for programmatic access
+
+#### Scheduled Jobs
+- **Morning Briefing Lambda** - Daily briefings generated at 7am UTC
+- **Speaker Enrichment Lambda** - Nightly bio enrichment at 2am UTC
+
+### Changed
+- Speaker corrections now create entities automatically in knowledge graph
+- Transcript uploads support AI parsing via `useAI` option
+
+### Fixed
+- Speaker name edits now persist correctly
+- Double-encoded speaker URLs handled properly
+
+## [1.3.0] - 2026-01-18
+
 ### Added
 - **Speaker Corrections on Website** - Transcript list and detail views now display corrected speaker names with visual indicators
 - **Dynamic Speakers Directory** - Speakers page fetches real data from DynamoDB instead of hardcoded mock data
@@ -62,7 +100,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **One-Line Installer** - `curl | bash` deployment to user's AWS account
 - **Static Website** - Documentation at krispy.alpha-pm.dev
 
-[Unreleased]: https://github.com/dwinter3/keep-it-krispy/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/dwinter3/keep-it-krispy/compare/v1.4.0...HEAD
+[1.4.0]: https://github.com/dwinter3/keep-it-krispy/compare/v1.3.0...v1.4.0
+[1.3.0]: https://github.com/dwinter3/keep-it-krispy/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/dwinter3/keep-it-krispy/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/dwinter3/keep-it-krispy/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/dwinter3/keep-it-krispy/releases/tag/v1.0.0

@@ -30,12 +30,104 @@
     <h1>Changelog</h1>
     <p>All notable changes to Keep It Krispy. Also available on <a href="https://github.com/dwinter3/keep-it-krispy/blob/main/CHANGELOG.md" style="color: #00d4aa;">GitHub</a>.</p>
 
+    <!-- v1.4.0 -->
+    <section class="changelog-version">
+      <div class="version-header">
+        <h2>v1.4.0</h2>
+        <span class="version-date">January 20, 2026</span>
+        <span class="version-tag latest">Latest</span>
+      </div>
+
+      <h3>Infrastructure as Code</h3>
+      <ul class="changelog-list">
+        <li>
+          <span class="badge new">New</span>
+          <strong>AWS CDK Migration</strong> — Full infrastructure now managed via CDK with type-safe TypeScript
+        </li>
+        <li>
+          <span class="badge new">New</span>
+          <strong>GitHub Actions CI/CD</strong> — Auto-deploy on push to main, daily drift detection at 6am UTC
+        </li>
+        <li>
+          <span class="badge new">New</span>
+          <strong>OIDC Authentication</strong> — Secure GitHub Actions IAM role without static credentials
+        </li>
+      </ul>
+
+      <h3>AI Transcript Parser</h3>
+      <ul class="changelog-list">
+        <li>
+          <span class="badge new">New</span>
+          <strong>Multi-Format Support</strong> — Automatically parse Zoom, Teams, Slack, podcast, and custom formats
+        </li>
+        <li>
+          <span class="badge new">New</span>
+          <strong>AI Fallback</strong> — When rule-based parsing fails, Bedrock Nova Lite intelligently extracts structure
+        </li>
+        <li>
+          <span class="badge new">New</span>
+          <strong>Confidence Scoring</strong> — Parser reports confidence level for each transcript interpretation
+        </li>
+      </ul>
+
+      <h3>Knowledge Graph</h3>
+      <ul class="changelog-list">
+        <li>
+          <span class="badge new">New</span>
+          <strong>Entity System</strong> — Universal entity store for speakers, companies, topics, documents
+        </li>
+        <li>
+          <span class="badge new">New</span>
+          <strong>Relationships</strong> — Graph edges connecting entities (works_at, participant, mentioned)
+        </li>
+        <li>
+          <span class="badge new">New</span>
+          <strong>MCP Tools</strong> — New <code>list_speakers</code>, <code>list_companies</code>, <code>get_entity_relationships</code> tools
+        </li>
+      </ul>
+
+      <h3>Multi-Tenant Authentication</h3>
+      <ul class="changelog-list">
+        <li>
+          <span class="badge new">New</span>
+          <strong>User Isolation</strong> — All queries scoped by user ID for data privacy
+        </li>
+        <li>
+          <span class="badge new">New</span>
+          <strong>API Key Support</strong> — Generate API keys from dashboard for programmatic access
+        </li>
+      </ul>
+
+      <h3>Scheduled Jobs</h3>
+      <ul class="changelog-list">
+        <li>
+          <span class="badge new">New</span>
+          <strong>Morning Briefing</strong> — Daily briefings generated at 7am UTC
+        </li>
+        <li>
+          <span class="badge new">New</span>
+          <strong>Speaker Enrichment</strong> — Nightly bio enrichment at 2am UTC
+        </li>
+      </ul>
+
+      <h3>Bug Fixes</h3>
+      <ul class="changelog-list">
+        <li>
+          <span class="badge fix">Fix</span>
+          <strong>Speaker Name Persistence</strong> — Edits now save correctly
+        </li>
+        <li>
+          <span class="badge fix">Fix</span>
+          <strong>URL Encoding</strong> — Double-encoded speaker URLs handled properly
+        </li>
+      </ul>
+    </section>
+
     <!-- v1.3.0 -->
     <section class="changelog-version">
       <div class="version-header">
         <h2>v1.3.0</h2>
         <span class="version-date">January 18, 2026</span>
-        <span class="version-tag latest">Latest</span>
       </div>
 
       <h3>Speaker Intelligence</h3>

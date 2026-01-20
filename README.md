@@ -1,8 +1,9 @@
 # Keep It Krispy
 
-**AI-Powered Meeting Memory** — Turn your Krisp transcripts into a searchable knowledge base for Claude.
+**AI-Powered Meeting Memory Platform** — Turn your meeting transcripts into a living knowledge graph that connects people, companies, topics, and opportunities.
 
 🌐 **Website:** [krispy.alpha-pm.dev](https://krispy.alpha-pm.dev)
+📊 **Dashboard:** [app.krispy.alpha-pm.dev](https://app.krispy.alpha-pm.dev)
 
 ```bash
 # One-line install (deploys to your AWS account)
@@ -13,14 +14,15 @@ curl -fsSL https://krispy.alpha-pm.dev/install.sh | bash
 
 ## What It Does
 
-Every Krisp call is automatically captured, indexed, and made searchable by Claude:
+Every meeting is automatically captured, enriched, and made searchable by Claude:
 
 - **"What was my last meeting about?"** — Instant recall of any conversation
 - **"What did Ken commit to?"** — Extract action items and commitments
-- **"Find meetings where we discussed budget"** — Semantic search across all your calls
-- **"Summarize my calls with Sarah this week"** — AI-powered synthesis
+- **"Find meetings where we discussed budget"** — Semantic search across all calls
+- **"Who is Babak Hosseinzadeh?"** — AI-enriched speaker profiles with LinkedIn
+- **"What companies have I talked to this month?"** — Knowledge graph relationships
 
-The whole thing runs as an MCP server, so Claude treats your meeting history like a native tool.
+The platform runs as an MCP server + web dashboard, giving Claude native access to your meeting history.
 
 ---
 
@@ -52,13 +54,19 @@ Krisp App → Webhook Lambda → S3 (raw JSON) → DynamoDB (instant writes)
 
 ## MCP Tools
 
-The MCP server provides three tools to Claude:
+The MCP server provides seven tools to Claude:
 
 | Tool | Description |
 |------|-------------|
 | `list_transcripts` | List recent meetings with metadata. Filter by date or speaker. |
 | `search_transcripts` | Semantic search — find "budget concerns" even if you said "cost overruns" |
 | `get_transcripts` | Fetch full transcript content (summary, notes, action items, text) |
+| `update_speakers` | Correct speaker names — map "Speaker 2" to real names with LinkedIn |
+| `list_speakers` | View your knowledge graph speakers with metadata |
+| `list_companies` | View companies mentioned in your meetings |
+| `get_entity_relationships` | Explore knowledge graph connections between entities |
+
+All queries are scoped to your user ID for multi-tenant isolation.
 
 ---
 
@@ -115,12 +123,15 @@ Add your webhook URL to Krisp:
         "DYNAMODB_TABLE": "krisp-transcripts-index",
         "VECTOR_BUCKET": "krisp-vectors-{account-id}",
         "VECTOR_INDEX": "transcript-chunks",
-        "AWS_PROFILE": "default"
+        "AWS_PROFILE": "default",
+        "KRISP_USER_ID": "{your-user-id}"
       }
     }
   }
 }
 ```
+
+> **Note:** Get your `KRISP_USER_ID` from the dashboard settings page.
 
 **Claude Code**:
 
@@ -148,21 +159,25 @@ claude mcp add --transport stdio \
 ## Project Structure
 
 ```
-├── cloudformation.yaml        # AWS infrastructure (one-click deploy)
+├── infra/                     # AWS CDK infrastructure
+│   ├── lib/infra-stack.ts     # Main infrastructure stack
+│   └── bin/infra.ts           # CDK app entry point
+├── .github/workflows/         # CI/CD
+│   ├── cdk-deploy.yml         # Auto-deploy on push
+│   └── cdk-drift-detection.yml
 ├── lambda/
-│   ├── mcp-server-ts/         # MCP server for Claude
-│   │   ├── src/
-│   │   │   ├── stdio-server.ts
-│   │   │   ├── s3-client.ts
-│   │   │   ├── dynamo-client.ts
-│   │   │   └── vectors-client.ts
-│   │   └── dist/
-│   │       └── stdio-server.cjs
-│   └── processor/             # S3 event processor (embeddings)
+│   ├── mcp-server-ts/         # MCP server for Claude (TypeScript)
+│   ├── processor/             # Transcript processor (Python)
+│   ├── morning-briefing/      # Daily briefing Lambda (Python)
+│   └── speaker-enrichment/    # Bio enrichment Lambda (Python)
 ├── website/                   # Static website (krispy.alpha-pm.dev)
-├── scripts/
-│   └── backfill_vectors.py    # Index existing transcripts
-└── src/                       # Next.js web dashboard (optional)
+├── scripts/                   # Maintenance and migration scripts
+└── src/                       # Next.js web dashboard
+    ├── app/api/               # API routes
+    ├── app/transcripts/       # Transcript pages
+    ├── app/speakers/          # Speaker pages with AI enrichment
+    ├── app/companies/         # Company pages
+    └── lib/parsers/           # AI transcript parser
 ```
 
 ---
