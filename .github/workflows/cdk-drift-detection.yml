@@ -1,0 +1,159 @@
+name: CDK Drift Detection
+
+on:
+  schedule:
+    # Run daily at 6am UTC
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+  issues: write
+
+jobs:
+  drift-detection:
+    name: Check for Drift
+    runs-on: ubuntu-latest
+    env:
+      AWS_REGION: us-east-1
+      STACK_NAME: krisp-buddy
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: infra/package-lock.json
+
+      - name: Install CDK dependencies
+        working-directory: infra
+        run: npm ci
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::754639201213:role/GitHubActionsCDKRole
+          aws-region: us-east-1
+
+      - name: CDK Diff
+        id: diff
+        working-directory: infra
+        run: |
+          set +e
+          npx cdk diff > /tmp/cdk-diff.txt 2>&1
+          if grep -q "There were no differences" /tmp/cdk-diff.txt; then
+            echo "has_drift=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_drift=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: CloudFormation Drift Detection
+        id: cf-drift
+        run: |
+          set +e
+          # Check if stack exists
+          STACK_STATUS=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --query 'Stacks[0].StackStatus' --output text 2>/dev/null)
+          if [ -z "$STACK_STATUS" ] || [ "$STACK_STATUS" = "None" ]; then
+            echo "stack_exists=false" >> "$GITHUB_OUTPUT"
+            echo "drift_status=STACK_NOT_FOUND" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "stack_exists=true" >> "$GITHUB_OUTPUT"
+
+          # Initiate drift detection
+          DRIFT_ID=$(aws cloudformation detect-stack-drift --stack-name "$STACK_NAME" --query 'StackDriftDetectionId' --output text)
+
+          # Wait for drift detection to complete (max 5 minutes)
+          for i in {1..30}; do
+            STATUS=$(aws cloudformation describe-stack-drift-detection-status --stack-drift-detection-id "$DRIFT_ID" --query 'DetectionStatus' --output text)
+            if [ "$STATUS" = "DETECTION_COMPLETE" ]; then
+              break
+            fi
+            sleep 10
+          done
+
+          # Get drift status
+          DRIFT_STATUS=$(aws cloudformation describe-stack-drift-detection-status --stack-drift-detection-id "$DRIFT_ID" --query 'StackDriftStatus' --output text)
+          echo "drift_status=$DRIFT_STATUS" >> "$GITHUB_OUTPUT"
+
+      - name: Create Issue if Drift Detected
+        if: steps.diff.outputs.has_drift == 'true' || steps.cf-drift.outputs.drift_status == 'DRIFTED' || steps.cf-drift.outputs.stack_exists == 'false'
+        uses: actions/github-script@v7
+        env:
+          HAS_DRIFT: ${{ steps.diff.outputs.has_drift }}
+          CF_DRIFT_STATUS: ${{ steps.cf-drift.outputs.drift_status }}
+          STACK_EXISTS: ${{ steps.cf-drift.outputs.stack_exists }}
+        with:
+          script: |
+            const title = '⚠️ Infrastructure Drift Detected';
+            const cfDriftStatus = process.env.CF_DRIFT_STATUS;
+            const stackExists = process.env.STACK_EXISTS;
+            const hasDrift = process.env.HAS_DRIFT;
+
+            let body = `## Infrastructure Drift Report\n\n`;
+            body += `**Date:** ${new Date().toISOString()}\n\n`;
+
+            if (stackExists === 'false') {
+              body += `### CloudFormation Stack\n`;
+              body += `⚠️ Stack \`krisp-buddy\` does not exist. All resources are manually managed.\n\n`;
+              body += `**Action Required:** Deploy CDK stack to bring resources under IaC management.\n\n`;
+            } else if (cfDriftStatus === 'DRIFTED') {
+              body += `### CloudFormation Drift\n`;
+              body += `Resources have been modified outside of CloudFormation.\n\n`;
+            }
+
+            if (hasDrift === 'true') {
+              body += `### CDK Diff\n`;
+              body += `CDK shows differences between code and deployed resources.\n\n`;
+            }
+
+            body += `### Resolution\n`;
+            body += `1. Review the CDK diff: \`cd infra && npx cdk diff --profile krisp-buddy\`\n`;
+            body += `2. Update \`infra/lib/infra-stack.ts\` if needed\n`;
+            body += `3. Deploy: \`cd infra && npx cdk deploy --profile krisp-buddy\`\n\n`;
+            body += `**All infrastructure changes must go through CDK.**`;
+
+            // Check for existing open drift issues
+            const issues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'infrastructure-drift'
+            });
+
+            if (issues.data.length === 0) {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: title,
+                body: body,
+                labels: ['infrastructure-drift', 'ops']
+              });
+            }
+
+      - name: Summary
+        env:
+          STACK_EXISTS: ${{ steps.cf-drift.outputs.stack_exists }}
+          CF_DRIFT_STATUS: ${{ steps.cf-drift.outputs.drift_status }}
+          HAS_DRIFT: ${{ steps.diff.outputs.has_drift }}
+        run: |
+          echo "## Drift Detection Results" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$STACK_EXISTS" = "false" ]; then
+            echo "⚠️ CloudFormation stack does not exist" >> "$GITHUB_STEP_SUMMARY"
+          elif [ "$CF_DRIFT_STATUS" = "DRIFTED" ]; then
+            echo "❌ Drift detected in CloudFormation stack" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "✅ No CloudFormation drift detected" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$HAS_DRIFT" = "true" ]; then
+            echo "❌ CDK diff shows changes" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "✅ CDK is in sync" >> "$GITHUB_STEP_SUMMARY"
+          fi

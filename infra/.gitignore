@@ -1,0 +1,15 @@
+# CDK output
+cdk.out/
+
+# Dependencies
+node_modules/
+
+# Build output
+*.js
+*.d.ts
+!jest.config.js
+
+# IDE
+.idea/
+*.swp
+*.swo

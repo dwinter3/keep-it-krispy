@@ -1,0 +1,74 @@
+name: CDK Deploy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'infra/**'
+      - 'lambda/**'
+      - '.github/workflows/cdk-deploy.yml'
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'CDK action to perform'
+        required: true
+        default: 'deploy'
+        type: choice
+        options:
+          - deploy
+          - diff
+          - synth
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    name: CDK Deploy
+    runs-on: ubuntu-latest
+    env:
+      AWS_REGION: us-east-1
+      STACK_NAME: krisp-buddy
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: infra/package-lock.json
+
+      - name: Install CDK dependencies
+        working-directory: infra
+        run: npm ci
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::754639201213:role/GitHubActionsCDKRole
+          aws-region: us-east-1
+
+      - name: CDK Synth
+        working-directory: infra
+        run: npx cdk synth
+
+      - name: CDK Diff
+        working-directory: infra
+        run: npx cdk diff || true
+
+      - name: CDK Deploy
+        if: github.event_name == 'push' || github.event.inputs.action == 'deploy'
+        working-directory: infra
+        run: npx cdk deploy --require-approval never
+
+      - name: Post deployment summary
+        if: success()
+        run: |
+          echo "## CDK Deployment Summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "✅ Stack deployed successfully" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Stack: $STACK_NAME" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Region: $AWS_REGION" >> "$GITHUB_STEP_SUMMARY"
