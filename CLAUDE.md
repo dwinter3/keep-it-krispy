@@ -43,14 +43,16 @@ aws <command> --profile krisp-buddy --region us-east-1
 |-------|---------|-----|
 | `krisp-transcripts-index` | Transcript metadata | `meeting_id` |
 | `krisp-speakers` | Speaker profiles | `name` |
+| `krisp-entities` | Knowledge graph entities | `entity_id` |
+| `krisp-relationships` | Knowledge graph edges | `relationship_id` |
+| `krisp-documents` | Files/artifacts | `document_id` |
 | `krisp-users` | Platform users | `user_id` |
 | `krisp-api-keys` | User API keys | `api_key` |
 | `krisp-email-mapping` | Email → user mapping | `email` |
-
-**Planned Tables (Phase 1):**
-- `krisp-entities` - Universal entity store (Issue #90)
-- `krisp-relationships` - Graph edges (Issue #91)
-- `krisp-documents` - Files/artifacts (Issue #92)
+| `krisp-briefings` | Morning briefings | `briefing_id` |
+| `krisp-invites` | User invitations | `invite_token` |
+| `krisp-audit-logs` | Audit trail | `log_id` |
+| `krisp-companies` | Company entities | `id` |
 
 ### Lambda Functions
 
@@ -58,6 +60,8 @@ aws <command> --profile krisp-buddy --region us-east-1
 |----------|---------|---------|
 | `krisp-webhook-receiver` | Python 3.12 | Receives Krisp webhooks |
 | `krisp-transcript-processor` | Python 3.12 | Processes transcripts, generates embeddings |
+| `krisp-buddy-morning-briefing` | Python 3.12 | Daily briefing generation (7am UTC) |
+| `krisp-buddy-speaker-enrichment` | Python 3.12 | Speaker bio enrichment (2am UTC) |
 | `krisp-mcp-server` | Node.js 20.x | MCP server for Claude integration |
 
 ### CloudWatch Log Groups
@@ -130,10 +134,24 @@ git push origin main
 aws amplify start-job --app-id dh65gpsgmkx3x --branch-name main --job-type RELEASE --profile krisp-buddy --region us-east-1
 ```
 
-### Deploy Infrastructure (CloudFormation)
+### Deploy Infrastructure (CDK)
+
+Infrastructure is managed via AWS CDK in the `infra/` directory. CDK auto-deploys on push to `main` via GitHub Actions.
+
 ```bash
-aws cloudformation deploy --template-file cloudformation.yaml --stack-name krisp-buddy --capabilities CAPABILITY_NAMED_IAM --profile krisp-buddy --region us-east-1
+# Manual deployment
+cd infra && npx cdk deploy --profile krisp-buddy
+
+# Check for drift
+cd infra && npx cdk diff --profile krisp-buddy
+
+# Synthesize CloudFormation template
+cd infra && npx cdk synth
 ```
+
+**GitHub Actions Workflows:**
+- `cdk-deploy.yml` - Auto-deploys on push to `main` (when `infra/` or `lambda/` changes)
+- `cdk-drift-detection.yml` - Daily drift check at 6am UTC, creates issue if drift detected
 
 ### Deploy Lambda Functions
 ```bash
@@ -144,6 +162,10 @@ aws lambda update-function-code --function-name krisp-transcript-processor --zip
 # Webhook Lambda
 cd lambda && zip handler.zip handler.py
 aws lambda update-function-code --function-name krisp-webhook-receiver --zip-file fileb://handler.zip --profile krisp-buddy --region us-east-1
+
+# MCP Server (TypeScript)
+cd lambda/mcp-server-ts && npm run build:stdio
+# Then rebuild and deploy via CDK or update function code directly
 ```
 
 ## CloudWatch Logs
@@ -351,7 +373,13 @@ Before marking work complete:
 ## Project Structure
 
 ```
-├── cloudformation.yaml          # AWS infrastructure
+├── infra/                       # AWS CDK infrastructure
+│   ├── bin/infra.ts             # CDK app entry point
+│   ├── lib/infra-stack.ts       # Main infrastructure stack
+│   └── package.json             # CDK dependencies
+├── .github/workflows/           # GitHub Actions
+│   ├── cdk-deploy.yml           # Auto-deploy on push
+│   └── cdk-drift-detection.yml  # Daily drift check
 ├── docs/                        # Specifications and planning
 │   ├── phase1-prd-v2.md
 │   ├── entity-relationship-model.md
@@ -360,8 +388,8 @@ Before marking work complete:
 ├── lambda/
 │   ├── handler.py               # Webhook receiver
 │   ├── processor/               # Transcript processor
-│   │   └── handler.py
-│   ├── mcp-server/              # MCP server (Python)
+│   ├── morning-briefing/        # Daily briefing Lambda
+│   ├── speaker-enrichment/      # Bio enrichment Lambda
 │   └── mcp-server-ts/           # MCP server (TypeScript)
 ├── website/                     # Marketing site (S3)
 ├── scripts/                     # Maintenance scripts
