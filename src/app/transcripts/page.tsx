@@ -1849,14 +1849,36 @@ function TranscriptDetail({
   useEffect(() => {
     async function loadAudioInfo() {
       setLoadingAudio(true)
+      setAudioError(null)
       try {
         const res = await fetch(`/api/transcripts/${transcript.meetingId}/audio`)
         if (res.ok) {
-          const data = await res.json()
-          setAudioInfo(data)
+          const text = await res.text()
+          if (text) {
+            const data = JSON.parse(text)
+            setAudioInfo(data)
+          } else {
+            // Empty response, treat as no audio
+            setAudioInfo({ hasAudio: false })
+          }
+        } else {
+          // Non-OK response, try to get error message
+          const text = await res.text()
+          if (text) {
+            try {
+              const error = JSON.parse(text)
+              console.error('Audio API error:', error)
+            } catch {
+              console.error('Audio API error:', text)
+            }
+          }
+          // Default to no audio on error
+          setAudioInfo({ hasAudio: false })
         }
       } catch (err) {
         console.error('Error loading audio info:', err)
+        // Don't show error to user, just treat as no audio
+        setAudioInfo({ hasAudio: false })
       } finally {
         setLoadingAudio(false)
       }
