@@ -2,9 +2,12 @@
  * Lambda handler for Keep It Krispy MCP Server.
  *
  * Implements MCP protocol directly with Lambda response streaming.
+ * Supports API key authentication via X-API-Key header.
  */
 
+import 'aws-lambda'; // Import for awslambda global types
 import { S3TranscriptClient } from './s3-client.js';
+import { getUserContext, UserContext, debugAuthContext } from './auth.js';
 
 interface FunctionUrlEvent {
   version: string;
@@ -22,9 +25,8 @@ interface FunctionUrlEvent {
   };
 }
 
-interface ResponseStream extends NodeJS.WritableStream {
-  setContentType(type: string): void;
-}
+// Use awslambda.HttpResponseStream from @types/aws-lambda
+type ResponseStream = awslambda.HttpResponseStream;
 
 interface JsonRpcRequest {
   jsonrpc: string;
@@ -42,6 +44,38 @@ interface JsonRpcResponse {
 
 // Initialize S3 client outside handler for reuse
 const s3Client = new S3TranscriptClient();
+
+/**
+ * Extract API key from request headers.
+ * Supports both 'X-API-Key' and 'x-api-key' (case-insensitive).
+ */
+function extractApiKey(headers: Record<string, string>): string | undefined {
+  // Headers are typically lowercased by API Gateway/Lambda
+  return headers['x-api-key'] || headers['X-API-Key'] || headers['authorization']?.replace(/^Bearer\s+/i, '');
+}
+
+/**
+ * Create a 401 Unauthorized response.
+ */
+function createUnauthorizedResponse(
+  responseStream: ResponseStream,
+  corsHeaders: Record<string, string>,
+  message: string = 'Authentication required. Provide API key via X-API-Key header or set KRISP_USER_ID environment variable.'
+): void {
+  const httpStream = awslambda.HttpResponseStream.from(responseStream, {
+    statusCode: 401,
+    headers: {
+      ...corsHeaders,
+      'Content-Type': 'application/json',
+      'WWW-Authenticate': 'Bearer realm="krisp-mcp"',
+    },
+  });
+  httpStream.write(JSON.stringify({
+    error: 'Unauthorized',
+    message,
+  }));
+  httpStream.end();
+}
 
 // MCP Server implementation
 const SERVER_INFO = {
@@ -96,8 +130,16 @@ const TOOLS = [
   },
 ];
 
-async function handleMcpRequest(request: JsonRpcRequest): Promise<JsonRpcResponse> {
+async function handleMcpRequest(request: JsonRpcRequest, userContext: UserContext): Promise<JsonRpcResponse> {
   const { method, params, id } = request;
+  // User ID for multi-tenant data isolation
+  // TODO: Pass userId to S3TranscriptClient methods when user-scoped queries are implemented
+  const userId = userContext.userId;
+
+  // Log tool calls with user context for audit trail
+  if (method === 'tools/call') {
+    console.log(`[MCP] Tool call: ${params?.name} by user ${userId.substring(0, 8)}...`);
+  }
 
   try {
     switch (method) {
@@ -245,17 +287,6 @@ async function handleMcpRequest(request: JsonRpcRequest): Promise<JsonRpcRespons
   }
 }
 
-declare global {
-  const awslambda: {
-    streamifyResponse: (
-      handler: (event: FunctionUrlEvent, responseStream: ResponseStream) => Promise<void>
-    ) => (event: FunctionUrlEvent) => Promise<void>;
-    HttpResponseStream: {
-      from: (stream: ResponseStream, metadata: { statusCode: number; headers: Record<string, string> }) => ResponseStream;
-    };
-  };
-}
-
 export const handler = awslambda.streamifyResponse(
   async (event: FunctionUrlEvent, responseStream: ResponseStream): Promise<void> => {
     const path = event.rawPath;
@@ -272,7 +303,7 @@ export const handler = awslambda.streamifyResponse(
     const corsHeaders = {
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-      'Access-Control-Allow-Headers': '*',
+      'Access-Control-Allow-Headers': 'Content-Type, X-API-Key, Authorization',
     };
 
     // Health check
@@ -301,15 +332,51 @@ export const handler = awslambda.streamifyResponse(
       return;
     }
 
+    // Auth verification endpoint - allows clients to verify their API key
+    if (path === '/auth' && method === 'GET') {
+      const apiKey = extractApiKey(event.headers);
+      const userContext = await getUserContext(apiKey);
+
+      if (!userContext) {
+        createUnauthorizedResponse(responseStream, corsHeaders);
+        return;
+      }
+
+      const httpStream = awslambda.HttpResponseStream.from(responseStream, {
+        statusCode: 200,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+      httpStream.write(JSON.stringify({
+        authenticated: true,
+        user_id: userContext.userId.substring(0, 8) + '...', // Partial ID for privacy
+        auth_source: userContext.source,
+        email: userContext.email ? userContext.email.replace(/(.{2}).*(@.*)/, '$1***$2') : undefined,
+      }));
+      httpStream.end();
+      return;
+    }
+
     // MCP endpoint - accept at root or /mcp
     if ((path === '/' || path === '/mcp' || path === '/mcp/') && method === 'POST') {
+      // Authenticate the request
+      const apiKey = extractApiKey(event.headers);
+      const userContext = await getUserContext(apiKey);
+
+      if (!userContext) {
+        console.log('[AUTH] Authentication failed - no valid API key or KRISP_USER_ID');
+        createUnauthorizedResponse(responseStream, corsHeaders);
+        return;
+      }
+
+      console.log(`[AUTH] ${debugAuthContext(userContext)}`);
+
       try {
         const body = event.body
           ? (event.isBase64Encoded ? Buffer.from(event.body, 'base64').toString() : event.body)
           : '{}';
 
         const request = JSON.parse(body) as JsonRpcRequest;
-        const response = await handleMcpRequest(request);
+        const response = await handleMcpRequest(request, userContext);
 
         const httpStream = awslambda.HttpResponseStream.from(responseStream, {
           statusCode: 200,
