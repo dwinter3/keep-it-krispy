@@ -1182,7 +1182,8 @@ export default function TranscriptsPage() {
                                     <ExpandableSpeakers
                                       speakers={transcript.speakers}
                                       speakerCorrections={transcript.speakerCorrections}
-                                      initialCount={2}
+                                      initialCount={3}
+                                      linkToProfiles={true}
                                     />
                                   )}
                                 </div>
