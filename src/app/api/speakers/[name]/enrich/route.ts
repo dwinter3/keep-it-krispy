@@ -60,8 +60,72 @@ interface ValidationResult {
   redFlags: string[]
 }
 
-// Helper function to extract speaker context (replicating context endpoint logic inline)
-async function extractSpeakerContext(speakerName: string): Promise<SpeakerContext | null> {
+// Extended context interface with speaker-specific dialogue
+interface ExtendedSpeakerContext extends SpeakerContext {
+  speakerDialogue: string[]  // Actual things this speaker said
+  otherSpeakers: string[]    // Other people they interact with
+}
+
+// Extract lines spoken by a specific speaker from transcript
+function extractSpeakerLines(transcript: string, speakerName: string): string[] {
+  const lines = transcript.split('\n')
+  const speakerLines: string[] = []
+  const speakerNameLower = speakerName.toLowerCase()
+
+  let currentSpeaker = ''
+  let currentText = ''
+
+  for (const line of lines) {
+    // Match speaker lines like "Sandeep Chellingi | 00:15" or "david winter | 01:48"
+    const speakerMatch = line.match(/^([^|]+)\s*\|\s*[\d:]+/)
+    if (speakerMatch) {
+      // Save previous speaker's text if it was our target speaker
+      if (currentSpeaker && currentText.trim()) {
+        if (currentSpeaker.toLowerCase().includes(speakerNameLower) ||
+            speakerNameLower.includes(currentSpeaker.toLowerCase())) {
+          speakerLines.push(currentText.trim())
+        }
+      }
+      currentSpeaker = speakerMatch[1].trim()
+      currentText = ''
+    } else if (line.trim()) {
+      // Continuation of current speaker's text
+      currentText += ' ' + line.trim()
+    }
+  }
+
+  // Don't forget the last speaker
+  if (currentSpeaker && currentText.trim()) {
+    if (currentSpeaker.toLowerCase().includes(speakerNameLower) ||
+        speakerNameLower.includes(currentSpeaker.toLowerCase())) {
+      speakerLines.push(currentText.trim())
+    }
+  }
+
+  return speakerLines
+}
+
+// Extract all unique speaker names from transcript
+function extractAllSpeakers(transcript: string): string[] {
+  const speakers = new Set<string>()
+  const lines = transcript.split('\n')
+
+  for (const line of lines) {
+    const speakerMatch = line.match(/^([^|]+)\s*\|\s*[\d:]+/)
+    if (speakerMatch) {
+      const speaker = speakerMatch[1].trim()
+      // Skip generic speaker names
+      if (!speaker.toLowerCase().startsWith('speaker ')) {
+        speakers.add(speaker)
+      }
+    }
+  }
+
+  return Array.from(speakers)
+}
+
+// Helper function to extract speaker context with actual dialogue
+async function extractSpeakerContext(speakerName: string): Promise<ExtendedSpeakerContext | null> {
   const speakerNameLower = speakerName.toLowerCase()
 
   // Find all meetings with this speaker
@@ -122,8 +186,11 @@ async function extractSpeakerContext(speakerName: string): Promise<SpeakerContex
   speakerMeetings.sort((a, b) => b.date.localeCompare(a.date))
   const recentMeetings = speakerMeetings.slice(0, 10)
 
-  // Fetch transcript content
+  // Fetch transcript content and extract speaker-specific dialogue
   const transcriptExcerpts: string[] = []
+  const allSpeakerDialogue: string[] = []
+  const otherSpeakersSet = new Set<string>()
+
   for (const meeting of recentMeetings.slice(0, 5)) {
     try {
       const getCommand = new GetObjectCommand({
@@ -140,6 +207,21 @@ async function extractSpeakerContext(speakerName: string): Promise<SpeakerContex
         if (excerpt) {
           transcriptExcerpts.push(`Meeting: ${meeting.title}\n${excerpt}`)
         }
+
+        // Extract what THIS speaker specifically said
+        if (transcript) {
+          const speakerLines = extractSpeakerLines(transcript, canonicalName)
+          allSpeakerDialogue.push(...speakerLines)
+
+          // Extract other speakers they interact with
+          const allSpeakers = extractAllSpeakers(transcript)
+          allSpeakers.forEach(s => {
+            if (!s.toLowerCase().includes(speakerNameLower) &&
+                !speakerNameLower.includes(s.toLowerCase())) {
+              otherSpeakersSet.add(s)
+            }
+          })
+        }
       }
     } catch (err) {
       console.error(`Error fetching transcript ${meeting.key}:`, err)
@@ -155,6 +237,8 @@ async function extractSpeakerContext(speakerName: string): Promise<SpeakerContex
       roleHints: [],
       transcriptCount: speakerMeetings.length,
       recentMeetingTitles: recentMeetings.map(m => m.title),
+      speakerDialogue: [],
+      otherSpeakers: [],
     }
   }
 
@@ -222,6 +306,8 @@ Return ONLY valid JSON:
     roleHints,
     transcriptCount: speakerMeetings.length,
     recentMeetingTitles: recentMeetings.map(m => m.title),
+    speakerDialogue: allSpeakerDialogue,
+    otherSpeakers: Array.from(otherSpeakersSet),
   }
 }
 
@@ -620,25 +706,58 @@ export async function POST(
     let aiSummary = ''
     const topics = context.topics
 
+    // Cast to extended context to access speakerDialogue
+    const extContext = context as ExtendedSpeakerContext
+
     // If we have context, use it for the summary - focus on actionable insights
     if (context.transcriptCount > 0) {
-      const summaryPrompt = `Based on ${context.transcriptCount} meeting transcripts with ${context.name}, provide actionable professional insights.
+      // Prepare speaker's actual dialogue for the prompt (limit to most relevant/longest statements)
+      const dialogueSample = (extContext.speakerDialogue || [])
+        .filter(d => d.length > 30) // Filter out very short utterances like "Yes" or "Okay"
+        .slice(0, 15) // Take up to 15 substantial statements
+        .map((d, i) => `${i + 1}. "${d}"`)
+        .join('\n')
 
-Known context from meetings:
-- Topics discussed: ${context.topics.join(', ')}
-- Companies mentioned: ${context.companies.join(', ')}
-- Role indicators: ${context.roleHints.join(', ')}
-- Keywords used: ${context.contextKeywords.join(', ')}
-- Recent meeting titles: ${context.recentMeetingTitles?.slice(0, 3).join(', ') || 'N/A'}
+      const hasDialogue = dialogueSample.length > 0
 
-Analyze the meeting content and write a 3-4 sentence insight that answers:
-1. What is ${context.name}'s apparent role and what are they responsible for?
-2. What seems to motivate them or what problems are they trying to solve?
-3. What are their likely goals or priorities based on meeting discussions?
+      const summaryPrompt = hasDialogue
+        ? `Analyze what ${context.name} actually said in meetings to create a personalized professional profile.
 
-Be specific and actionable - avoid generic statements. Focus on insights that would help someone prepare for their next meeting with this person.
+ACTUAL STATEMENTS by ${context.name} from ${context.transcriptCount} meetings:
+${dialogueSample}
 
-Return ONLY the summary text, no JSON.`
+Other people they frequently interact with: ${(extContext.otherSpeakers || []).slice(0, 5).join(', ') || 'Unknown'}
+Companies mentioned: ${context.companies.join(', ') || 'Not specified'}
+Role indicators: ${context.roleHints.join(', ') || 'Not specified'}
+
+Based on their ACTUAL WORDS above, write a 4-5 sentence professional insight that covers:
+
+1. COMMUNICATION STYLE: How do they express themselves? (e.g., direct/diplomatic, asks questions/makes statements, technical/business-focused, formal/casual)
+
+2. PRIORITIES & CONCERNS: What topics, problems, or issues do they bring up? What seems to matter most to them?
+
+3. WORKING STYLE: Do they seem like a decision-maker, contributor, coordinator, or facilitator? How do they engage with others?
+
+4. ACTIONABLE INSIGHT: One specific thing to keep in mind when meeting with this person.
+
+IMPORTANT:
+- Quote or paraphrase their actual words to support your observations
+- Be specific, not generic - anyone reading this should recognize THIS person
+- Avoid phrases like "demonstrates expertise" or "professional discussions" - be concrete
+- If they seem to focus on specific topics (e.g., migrations, partnerships, timelines), name them
+
+Return ONLY the insight text, no JSON or labels.`
+        : `Based on ${context.transcriptCount} meeting transcripts with ${context.name}, provide a brief professional insight.
+
+Known context:
+- Topics: ${context.topics.join(', ') || 'Various'}
+- Companies: ${context.companies.join(', ') || 'Unknown'}
+- Role hints: ${context.roleHints.join(', ') || 'Unknown'}
+- Keywords: ${context.contextKeywords.join(', ') || 'Unknown'}
+
+Write 2-3 sentences about this person's likely role and interests. Be specific where possible.
+
+Return ONLY the text, no JSON.`
 
       try {
         const invokeCommand = new InvokeModelCommand({
@@ -647,7 +766,7 @@ Return ONLY the summary text, no JSON.`
           accept: 'application/json',
           body: JSON.stringify({
             messages: [{ role: 'user', content: [{ text: summaryPrompt }] }],
-            inferenceConfig: { maxTokens: 300, temperature: 0.5 },
+            inferenceConfig: { maxTokens: 500, temperature: 0.4 },
           }),
         })
 
