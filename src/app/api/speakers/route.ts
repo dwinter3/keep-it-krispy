@@ -105,13 +105,15 @@ export async function GET() {
       for (const speaker of speakers) {
         const speakerLower = speaker.toLowerCase()
 
-        // Skip excluded generic speakers
-        if (EXCLUDED_SPEAKERS.has(speakerLower)) {
+        // Check for correction first - corrected speakers should be included
+        const correction = speakerCorrections[speakerLower]
+
+        // Skip excluded generic speakers ONLY if they haven't been corrected
+        if (EXCLUDED_SPEAKERS.has(speakerLower) && !correction) {
           continue
         }
 
         // Get canonical name from corrections, or use original
-        const correction = speakerCorrections[speakerLower]
         const canonicalName = correction?.name || speaker
         const canonicalKey = canonicalName.toLowerCase()
 
