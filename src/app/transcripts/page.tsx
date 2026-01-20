@@ -25,6 +25,7 @@ interface Transcript {
   timestamp: string
   duration: number
   speakers: string[]
+  speakerWordCounts?: Record<string, number> | null
   eventType: string
   speakerCorrections: Record<string, SpeakerCorrection> | null
   topic?: string | null
@@ -1182,6 +1183,7 @@ export default function TranscriptsPage() {
                                     <ExpandableSpeakers
                                       speakers={transcript.speakers}
                                       speakerCorrections={transcript.speakerCorrections}
+                                      speakerWordCounts={transcript.speakerWordCounts}
                                       initialCount={3}
                                       linkToProfiles={true}
                                     />

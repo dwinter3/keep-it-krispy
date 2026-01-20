@@ -128,6 +128,7 @@ export async function GET(request: NextRequest) {
       timestamp: item.timestamp,
       duration: item.duration || 0,
       speakers: item.speakers || [],
+      speakerWordCounts: item.speaker_word_counts || null,
       eventType: item.event_type,
       speakerCorrections: item.speaker_corrections || null,
       topic: item.topic || null,

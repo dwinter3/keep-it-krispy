@@ -556,6 +556,29 @@ def process_vectors(
     return len(vectors_to_store)
 
 
+def calculate_speaker_word_counts(content: dict) -> Dict[str, int]:
+    """
+    Calculate word counts per speaker from transcript content.
+    Used to sort speakers by talk time (word count as proxy).
+    """
+    raw_payload = content.get('raw_payload', {})
+    data = raw_payload.get('data', {})
+    segments = data.get('content', [])
+
+    word_counts: Dict[str, int] = {}
+
+    for segment in segments:
+        speaker = segment.get('speaker', '')
+        text = segment.get('text', '')
+        if speaker and text:
+            # Normalize speaker name to lowercase for matching
+            speaker_lower = speaker.lower()
+            word_count = len(text.split())
+            word_counts[speaker_lower] = word_counts.get(speaker_lower, 0) + word_count
+
+    return word_counts
+
+
 def extract_metadata(s3_key: str, content: dict) -> dict:
     """
     Extract metadata from transcript content.
@@ -604,6 +627,9 @@ def extract_metadata(s3_key: str, content: dict) -> dict:
         elif s.get('index'):
             speakers.append(f"Speaker {s['index']}")
 
+    # Calculate speaker word counts for sorting
+    speaker_word_counts = calculate_speaker_word_counts(content)
+
     # Build metadata object
     metadata = {
         'meeting_id': meeting_id,
@@ -612,6 +638,7 @@ def extract_metadata(s3_key: str, content: dict) -> dict:
         'timestamp': timestamp,
         'duration': meeting.get('duration', 0),
         'speakers': speakers,
+        'speaker_word_counts': speaker_word_counts,
         's3_key': s3_key,
         'event_type': content.get('event_type', 'unknown'),
         'received_at': content.get('received_at', ''),
@@ -646,6 +673,10 @@ def index_to_dynamodb(metadata: dict) -> None:
         item['speakers'] = metadata['speakers']
         # Add first speaker as speaker_name for GSI
         item['speaker_name'] = metadata['speakers'][0].lower()
+
+    # Add speaker word counts for sorting by talk time
+    if metadata.get('speaker_word_counts'):
+        item['speaker_word_counts'] = metadata['speaker_word_counts']
 
     # Add AI-generated topic if available
     if metadata.get('topic'):

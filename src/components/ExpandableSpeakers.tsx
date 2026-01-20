@@ -11,6 +11,8 @@ interface SpeakerCorrection {
 interface ExpandableSpeakersProps {
   speakers: string[]
   speakerCorrections?: Record<string, SpeakerCorrection> | null
+  /** Word counts per speaker (lowercase speaker name -> word count) for sorting by talk time */
+  speakerWordCounts?: Record<string, number> | null
   /** Number of speakers to show before collapsing (default: 2) */
   initialCount?: number
   /** Whether to link speaker names to their profile pages */
@@ -26,6 +28,7 @@ interface ExpandableSpeakersProps {
 export default function ExpandableSpeakers({
   speakers,
   speakerCorrections,
+  speakerWordCounts,
   initialCount = 2,
   linkToProfiles = false,
   className = '',
@@ -38,7 +41,15 @@ export default function ExpandableSpeakers({
     return !lower.startsWith('speaker ') && lower !== 'unknown' && lower !== 'guest'
   })
 
-  if (realSpeakers.length === 0) {
+  // Sort by word count (talk time proxy) if available, descending
+  const sortedSpeakers = [...realSpeakers].sort((a, b) => {
+    if (!speakerWordCounts) return 0
+    const countA = speakerWordCounts[a.toLowerCase()] || 0
+    const countB = speakerWordCounts[b.toLowerCase()] || 0
+    return countB - countA // Descending order (top speaker first)
+  })
+
+  if (sortedSpeakers.length === 0) {
     return null
   }
 
@@ -55,8 +66,8 @@ export default function ExpandableSpeakers({
     return { displayName: originalName }
   }
 
-  const visibleSpeakers = expanded ? realSpeakers : realSpeakers.slice(0, initialCount)
-  const hiddenCount = realSpeakers.length - initialCount
+  const visibleSpeakers = expanded ? sortedSpeakers : sortedSpeakers.slice(0, initialCount)
+  const hiddenCount = sortedSpeakers.length - initialCount
   const showExpandButton = hiddenCount > 0
 
   const renderSpeaker = (speaker: string, index: number) => {
