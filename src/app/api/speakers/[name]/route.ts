@@ -18,6 +18,22 @@ const credentials = process.env.S3_ACCESS_KEY_ID ? {
 const dynamoClient = new DynamoDBClient({ region: AWS_REGION, credentials })
 const dynamodb = DynamoDBDocumentClient.from(dynamoClient)
 
+// Helper to safely decode URI component (handles double-encoded strings)
+function safeDecodeURIComponent(str: string): string {
+  try {
+    // Decode repeatedly until stable (handles double-encoding)
+    let decoded = str
+    let prev = ''
+    while (decoded !== prev && decoded.includes('%')) {
+      prev = decoded
+      decoded = decodeURIComponent(decoded)
+    }
+    return decoded
+  } catch {
+    return str
+  }
+}
+
 interface SpeakerCorrection {
   name: string
   linkedin?: string
@@ -313,7 +329,7 @@ export async function GET(
 
   try {
     const { name } = await params
-    const speakerName = decodeURIComponent(name)
+    const speakerName = safeDecodeURIComponent(name)
     const speakerNameLower = speakerName.toLowerCase()
 
     // Query user's transcripts to find meetings with this speaker (user-isolated)
@@ -498,7 +514,7 @@ export async function PUT(
     const userId = user.user_id
 
     const { name } = await params
-    const speakerName = decodeURIComponent(name)
+    const speakerName = safeDecodeURIComponent(name)
     const speakerNameLower = speakerName.toLowerCase()
     const body = await request.json()
 
@@ -567,7 +583,7 @@ export async function PATCH(
 ) {
   try {
     const { name } = await params
-    const speakerName = decodeURIComponent(name)
+    const speakerName = safeDecodeURIComponent(name)
     const speakerNameLower = speakerName.toLowerCase()
     const body = await request.json()
 

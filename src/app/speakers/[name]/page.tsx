@@ -80,8 +80,27 @@ interface EnrichmentResponse {
   }
 }
 
+// Helper to safely decode URI component (handles already-decoded strings)
+function safeDecodeURIComponent(str: string): string {
+  try {
+    // If the string contains %XX patterns, decode it
+    // This handles double-encoded strings by decoding repeatedly until stable
+    let decoded = str
+    let prev = ''
+    while (decoded !== prev && decoded.includes('%')) {
+      prev = decoded
+      decoded = decodeURIComponent(decoded)
+    }
+    return decoded
+  } catch {
+    return str
+  }
+}
+
 export default function SpeakerProfilePage({ params }: { params: Promise<{ name: string }> }) {
-  const { name } = use(params)
+  const { name: rawName } = use(params)
+  // Ensure the name is properly decoded (handles double-encoding from URL)
+  const name = safeDecodeURIComponent(rawName)
   const [profile, setProfile] = useState<SpeakerProfile | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
