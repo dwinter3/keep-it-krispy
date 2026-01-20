@@ -203,14 +203,52 @@ Return ONLY valid JSON. Be specific and extract actual details from the transcri
       generatedAt: new Date().toISOString(),
     }
 
-    // Cache the summary in DynamoDB
+    // Generate a topic title from the overview and important topics
+    let topic: string | null = null
+    if (detailedSummary.overview || detailedSummary.importantTopics.length > 0) {
+      const topicPrompt = `Based on this meeting summary, generate a descriptive topic title (10-20 words) that captures the main subject and purpose.
+
+Overview: ${detailedSummary.overview}
+Key Topics: ${detailedSummary.importantTopics.join(', ')}
+
+Return ONLY the topic title, nothing else. Use a dash to separate the main topic from details.
+Example: "Q4 2025 Financial Review - Revenue targets, margin analysis, and 2026 strategic planning"`
+
+      try {
+        const topicCommand = new InvokeModelCommand({
+          modelId: 'amazon.nova-lite-v1:0',
+          contentType: 'application/json',
+          accept: 'application/json',
+          body: JSON.stringify({
+            messages: [{ role: 'user', content: [{ text: topicPrompt }] }],
+            inferenceConfig: { maxTokens: 100, temperature: 0.3 },
+          }),
+        })
+        const topicResponse = await bedrock.send(topicCommand)
+        const topicBody = JSON.parse(new TextDecoder().decode(topicResponse.body))
+        const generatedTopic = topicBody.output?.message?.content?.[0]?.text?.trim() || ''
+        if (generatedTopic && generatedTopic.length <= 150) {
+          topic = generatedTopic
+        }
+      } catch (topicError) {
+        console.error('Topic generation error (non-fatal):', topicError)
+      }
+    }
+
+    // Cache the summary and topic in DynamoDB
+    const updateExpression = topic
+      ? 'SET detailed_summary = :summary, topic = :topic'
+      : 'SET detailed_summary = :summary'
+    const expressionValues: Record<string, unknown> = { ':summary': detailedSummary }
+    if (topic) {
+      expressionValues[':topic'] = topic
+    }
+
     const updateCommand = new UpdateCommand({
       TableName: TABLE_NAME,
       Key: { meeting_id: meetingId },
-      UpdateExpression: 'SET detailed_summary = :summary',
-      ExpressionAttributeValues: {
-        ':summary': detailedSummary,
-      },
+      UpdateExpression: updateExpression,
+      ExpressionAttributeValues: expressionValues,
     })
     await dynamodb.send(updateCommand)
 

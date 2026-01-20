@@ -23,7 +23,7 @@
         <li><a href="examples.html">Examples</a></li>
         <li><a href="changelog.html">Changelog</a></li>
         <li><a href="https://github.com/dwinter3/keep-it-krispy">GitHub</a></li>
-        <li><a href="https://app.krispy.alpha-pm.dev/api/auth/signin" class="login-btn">Login &rarr;</a></li>
+        <li><a href="https://app.krispy.alpha-pm.dev" class="login-btn">Login &rarr;</a></li>
       </ul>
     </div>
   </nav>
@@ -36,20 +36,25 @@
         <svg height="20" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
         View on GitHub
       </a>
+      <div class="beta-banner">
+        <span class="beta-badge">BETA</span>
+        Invite-only access &mdash; <a href="mailto:david@alpha-pm.dev">Request an invite</a>
+      </div>
     </header>
 
     <!-- Quick Install -->
     <div class="install-box">
-      <h2>Get Started Free</h2>
-      <a href="https://app.krispy.alpha-pm.dev/api/auth/signin" class="btn btn-primary" style="margin-bottom: 15px; display: inline-block; text-decoration: none;">
-        Sign In with Google &rarr;
-      </a>
-      <p style="color: #888; font-size: 0.9rem;">
-        Then install the MCP server to connect Claude:
+      <h2>How It Works</h2>
+      <p style="color: #b0b0c0; margin-bottom: 15px;">
+        Connect your Krisp transcripts to Claude in minutes.
       </p>
-      <div class="curl-command" style="margin-top: 10px;">curl -fsSL https://krispy.alpha-pm.dev/install.sh | bash</div>
-      <p style="margin-top: 15px; color: #888; font-size: 0.9rem;">
-        <a href="install.html" style="color: #00d4aa;">Full setup guide &rarr;</a>
+      <ol style="text-align: left; color: #b0b0c0; margin: 0 auto; max-width: 300px; line-height: 1.8;">
+        <li>Get an invite &amp; sign in</li>
+        <li>Install the MCP server locally</li>
+        <li>Configure Krisp webhook</li>
+      </ol>
+      <p style="margin-top: 20px;">
+        <a href="install.html" class="btn btn-primary" style="display: inline-block; text-decoration: none;">Setup Guide &rarr;</a>
       </p>
     </div>
 
@@ -61,7 +66,7 @@
       <div class="feature-grid">
         <div class="feature">
           <strong>Auto-Index Meetings</strong>
-          <p>Every Krisp call is automatically captured, summarized, and indexed in your AWS account.</p>
+          <p>Every Krisp call is automatically captured, summarized, and indexed in the cloud.</p>
         </div>
         <div class="feature">
           <strong>Semantic Search</strong>
@@ -110,7 +115,7 @@
         </div>
         <div class="feature">
           <strong>Privacy Controls</strong>
-          <p>Mark transcripts as private, delete meetings, manage your data. Your data stays in your AWS account.</p>
+          <p>Mark transcripts as private, delete meetings, manage your data. Full control over your meeting history.</p>
         </div>
         <div class="feature">
           <strong>Company Tracking</strong>
@@ -119,7 +124,7 @@
       </div>
 
       <div class="info-box" style="margin-top: 20px;">
-        <strong>Try the Dashboard:</strong> After installation, your dashboard is hosted on AWS Amplify at your own subdomain.
+        <strong>Try the Dashboard:</strong> Access your meetings at <a href="https://app.krispy.alpha-pm.dev" style="color: #00d4aa;">app.krispy.alpha-pm.dev</a>
       </div>
     </section>
 
@@ -127,26 +132,26 @@
     <section>
       <h2>How It Works</h2>
       <pre class="architecture">
-Krisp.ai          Your AWS Account              Claude
-   |                     |                         |
-   |   [webhook]         |                         |
-   +-------------------> Lambda                    |
-                           |                       |
-                      +----+----+                  |
-                      |         |                  |
-                    S3     DynamoDB                |
-                (transcripts) (index)              |
-                      |         |                  |
-                      +----+----+                  |
-                           |                       |
-                     Bedrock Titan                 |
-                    (embeddings)                   |
-                           |                       |
-                      S3 Vectors                   |
-                    (semantic search)              |
-                           |                       |
-                      MCP Server  <----------------+
-                                    [query meetings]
+Krisp.ai           Keep It Krispy Cloud           Claude
+   |                       |                         |
+   |   [webhook]           |                         |
+   +---------------------> Lambda                    |
+                             |                       |
+                        +----+----+                  |
+                        |         |                  |
+                      S3     DynamoDB                |
+                  (transcripts) (index)              |
+                        |         |                  |
+                        +----+----+                  |
+                             |                       |
+                       Bedrock Titan                 |
+                      (embeddings)                   |
+                             |                       |
+                        S3 Vectors                   |
+                      (semantic search)              |
+                             |                       |
+                   Local MCP Server  <---------------+
+                                      [query meetings]
       </pre>
     </section>
 
@@ -179,26 +184,20 @@ Krisp.ai          Your AWS Account              Claude
       <p style="margin-top: 15px;"><a href="mcp.html" style="color: #00d4aa;">Full MCP setup guide &rarr;</a></p>
     </section>
 
-    <!-- Cost -->
+    <!-- Pricing -->
     <section>
-      <h2>Cost</h2>
-      <table class="cost-table">
-        <tr><th>Component</th><th>Monthly Cost</th></tr>
-        <tr><td>DynamoDB</td><td>Free tier</td></tr>
-        <tr><td>S3 Storage</td><td>~$0.02</td></tr>
-        <tr><td>Lambda</td><td>Free tier</td></tr>
-        <tr><td>Bedrock Embeddings</td><td>~$0.05</td></tr>
-        <tr><td>S3 Vectors</td><td>~$0.01</td></tr>
-        <tr><td><strong>Total</strong></td><td><strong>< $2/month</strong></td></tr>
-      </table>
-      <p style="margin-top: 15px; color: #888; font-size: 0.9rem;">Based on ~50 meetings/month. Most components stay within AWS free tier.</p>
+      <h2>Pricing</h2>
+      <div class="info-box">
+        <strong>Free During Beta</strong>
+        <p style="margin-top: 10px; margin-bottom: 0;">Keep It Krispy is free for beta users. Paid plans will be introduced after the beta period.</p>
+      </div>
     </section>
 
     <!-- CTA -->
     <section style="text-align: center; padding: 40px 0;">
       <h2 style="border: none;">Ready to Remember Everything?</h2>
-      <p style="margin-bottom: 25px;">Set up in 5 minutes. Your data stays in your AWS account.</p>
-      <a href="install.html" class="btn btn-primary">Get Started &rarr;</a>
+      <p style="margin-bottom: 25px;">Request an invite to join the beta and set up in minutes.</p>
+      <a href="mailto:david@alpha-pm.dev" class="btn btn-primary">Request Invite &rarr;</a>
       <a href="examples.html" class="btn btn-secondary" style="margin-left: 10px;">See Examples</a>
     </section>
   </div>

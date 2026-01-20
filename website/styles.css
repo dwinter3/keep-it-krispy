@@ -119,6 +119,39 @@ header {
   background: rgba(255, 255, 255, 0.15);
 }
 
+/* Beta banner */
+.beta-banner {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 20px;
+  padding: 10px 20px;
+  background: rgba(167, 139, 250, 0.1);
+  border: 1px solid rgba(167, 139, 250, 0.3);
+  border-radius: 8px;
+  color: #b0b0c0;
+  font-size: 0.9rem;
+}
+
+.beta-banner a {
+  color: #a78bfa;
+  text-decoration: none;
+}
+
+.beta-banner a:hover {
+  text-decoration: underline;
+}
+
+.beta-badge {
+  background: #a78bfa;
+  color: #0a0a1a;
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+
 /* Sections */
 section {
   margin-bottom: 50px;
