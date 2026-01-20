@@ -34,6 +34,12 @@ interface UserProfile {
   }
 }
 
+interface LinkedInStats {
+  totalConnections: number
+  lastImportAt: string | null
+  importSource: string | null
+}
+
 interface TeamMember {
   user_id: string
   email: string
@@ -74,12 +80,21 @@ export default function SettingsPage() {
   const [autoShareSaved, setAutoShareSaved] = useState(false)
   const [autoShareError, setAutoShareError] = useState<string | null>(null)
 
+  // LinkedIn state
+  const [linkedInStats, setLinkedInStats] = useState<LinkedInStats | null>(null)
+  const [loadingLinkedIn, setLoadingLinkedIn] = useState(true)
+  const [uploadingLinkedIn, setUploadingLinkedIn] = useState(false)
+  const [linkedInError, setLinkedInError] = useState<string | null>(null)
+  const [linkedInSuccess, setLinkedInSuccess] = useState<string | null>(null)
+  const [deletingLinkedIn, setDeletingLinkedIn] = useState(false)
+
   useEffect(() => {
     if (status === 'authenticated') {
       loadProfile()
       loadApiKeys()
       loadInvites()
       loadAutoShare()
+      loadLinkedIn()
     }
   }, [status])
 
@@ -357,6 +372,96 @@ export default function SettingsPage() {
         return [...prev, userId]
       }
     })
+  }
+
+  async function loadLinkedIn() {
+    setLoadingLinkedIn(true)
+    try {
+      const res = await fetch('/api/linkedin')
+      const data = await res.json()
+      setLinkedInStats({
+        totalConnections: data.totalConnections || 0,
+        lastImportAt: data.lastImportAt || null,
+        importSource: data.importSource || null,
+      })
+    } catch (err) {
+      console.error('Failed to load LinkedIn data:', err)
+    } finally {
+      setLoadingLinkedIn(false)
+    }
+  }
+
+  async function uploadLinkedIn(file: File) {
+    setUploadingLinkedIn(true)
+    setLinkedInError(null)
+    setLinkedInSuccess(null)
+
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+
+      const res = await fetch('/api/linkedin', {
+        method: 'POST',
+        body: formData,
+      })
+      const data = await res.json()
+
+      if (data.success) {
+        setLinkedInSuccess(`Successfully imported ${data.imported} connections.`)
+        loadLinkedIn()
+        setTimeout(() => setLinkedInSuccess(null), 5000)
+      } else {
+        setLinkedInError(data.error || 'Failed to import LinkedIn data')
+      }
+    } catch (err) {
+      setLinkedInError('Failed to upload LinkedIn data')
+    } finally {
+      setUploadingLinkedIn(false)
+    }
+  }
+
+  async function deleteLinkedIn() {
+    if (!confirm('Are you sure you want to delete all LinkedIn connections? This cannot be undone.')) {
+      return
+    }
+
+    setDeletingLinkedIn(true)
+    setLinkedInError(null)
+
+    try {
+      const res = await fetch('/api/linkedin', {
+        method: 'DELETE',
+      })
+      const data = await res.json()
+
+      if (data.success) {
+        setLinkedInSuccess(`Deleted ${data.deleted} connections.`)
+        loadLinkedIn()
+        setTimeout(() => setLinkedInSuccess(null), 5000)
+      } else {
+        setLinkedInError(data.error || 'Failed to delete LinkedIn data')
+      }
+    } catch (err) {
+      setLinkedInError('Failed to delete LinkedIn data')
+    } finally {
+      setDeletingLinkedIn(false)
+    }
+  }
+
+  function isLinkedInStale(): boolean {
+    if (!linkedInStats?.lastImportAt) return false
+    const lastImport = new Date(linkedInStats.lastImportAt)
+    const thirtyDaysAgo = new Date()
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30)
+    return lastImport < thirtyDaysAgo
+  }
+
+  function getDaysSinceImport(): number | null {
+    if (!linkedInStats?.lastImportAt) return null
+    const lastImport = new Date(linkedInStats.lastImportAt)
+    const now = new Date()
+    const diffTime = Math.abs(now.getTime() - lastImport.getTime())
+    return Math.ceil(diffTime / (1000 * 60 * 60 * 24))
   }
 
   function getStatusBadge(status: string) {
@@ -678,6 +783,169 @@ export default function SettingsPage() {
                     'Save Changes'
                   )}
                 </button>
+              </div>
+            </>
+          )}
+        </section>
+
+        {/* LinkedIn Connections Section */}
+        <section className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-6 mb-6">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-white">LinkedIn Connections</h2>
+            {linkedInStats?.totalConnections && linkedInStats.totalConnections > 0 && (
+              <span className="px-2.5 py-0.5 text-sm bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300 rounded-full">
+                {linkedInStats.totalConnections.toLocaleString()} connections
+              </span>
+            )}
+          </div>
+          <p className="text-gray-600 dark:text-gray-300 text-sm mb-6">
+            Upload your LinkedIn connections to match meeting attendees with your professional network.
+            This helps identify 1st-degree connections for better meeting context.
+          </p>
+
+          {/* Staleness Warning */}
+          {isLinkedInStale() && (
+            <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 text-amber-700 dark:text-amber-300 px-4 py-3 rounded-lg mb-6 flex items-start gap-3">
+              <svg className="w-5 h-5 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+              </svg>
+              <div>
+                <p className="font-medium">Your LinkedIn data is {getDaysSinceImport()} days old</p>
+                <p className="text-sm mt-1 text-amber-600 dark:text-amber-400">
+                  We recommend updating your connections at least every 30 days to keep speaker matching accurate.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {linkedInError && (
+            <div className="bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 px-4 py-2 rounded mb-4">
+              {linkedInError}
+            </div>
+          )}
+
+          {linkedInSuccess && (
+            <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 text-green-700 dark:text-green-300 px-4 py-2 rounded mb-4">
+              {linkedInSuccess}
+            </div>
+          )}
+
+          {loadingLinkedIn ? (
+            <p className="text-gray-500 dark:text-gray-400">Loading LinkedIn data...</p>
+          ) : (
+            <>
+              {/* Stats */}
+              {linkedInStats?.lastImportAt && (
+                <div className="bg-gray-50 dark:bg-gray-700 rounded-lg p-4 mb-6">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <p className="text-sm text-gray-500 dark:text-gray-400">Last Import</p>
+                      <p className="font-medium text-gray-900 dark:text-white">
+                        {new Date(linkedInStats.lastImportAt).toLocaleDateString()}{' '}
+                        <span className="text-sm text-gray-500 dark:text-gray-400">
+                          ({getDaysSinceImport()} days ago)
+                        </span>
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-gray-500 dark:text-gray-400">Source File</p>
+                      <p className="font-medium text-gray-900 dark:text-white truncate">
+                        {linkedInStats.importSource || 'Unknown'}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Upload Area */}
+              <div className="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg p-6 text-center">
+                <input
+                  type="file"
+                  id="linkedin-upload"
+                  accept=".zip,.csv"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0]
+                    if (file) uploadLinkedIn(file)
+                  }}
+                  disabled={uploadingLinkedIn}
+                />
+                <svg className="w-12 h-12 mx-auto text-gray-400 dark:text-gray-500 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                </svg>
+                <p className="text-gray-600 dark:text-gray-300 mb-2">
+                  {linkedInStats?.totalConnections
+                    ? 'Upload a new LinkedIn export to update your connections'
+                    : 'Upload your LinkedIn data export'}
+                </p>
+                <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+                  Accepts ZIP file from LinkedIn data export or Connections.csv
+                </p>
+                <label
+                  htmlFor="linkedin-upload"
+                  className={`inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg cursor-pointer hover:bg-blue-700 ${
+                    uploadingLinkedIn ? 'opacity-50 cursor-not-allowed' : ''
+                  }`}
+                >
+                  {uploadingLinkedIn ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                      Uploading...
+                    </>
+                  ) : (
+                    <>
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                      </svg>
+                      Choose File
+                    </>
+                  )}
+                </label>
+              </div>
+
+              {/* Delete Button */}
+              {linkedInStats?.totalConnections && linkedInStats.totalConnections > 0 && (
+                <div className="mt-6 pt-6 border-t border-gray-200 dark:border-gray-700">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-gray-700 dark:text-gray-300">Delete All Connections</p>
+                      <p className="text-sm text-gray-500 dark:text-gray-400">
+                        Remove all imported LinkedIn data from your account
+                      </p>
+                    </div>
+                    <button
+                      onClick={deleteLinkedIn}
+                      disabled={deletingLinkedIn}
+                      className="px-4 py-2 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg flex items-center gap-2"
+                    >
+                      {deletingLinkedIn ? (
+                        <>
+                          <div className="w-4 h-4 border-2 border-red-500 border-t-transparent rounded-full animate-spin"></div>
+                          Deleting...
+                        </>
+                      ) : (
+                        <>
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                          </svg>
+                          Delete All
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Instructions */}
+              <div className="mt-6 p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                <h3 className="font-medium mb-2 text-gray-900 dark:text-white">How to export your LinkedIn connections</h3>
+                <ol className="list-decimal list-inside space-y-2 text-sm text-gray-600 dark:text-gray-300">
+                  <li>Go to <span className="font-medium">LinkedIn Settings &amp; Privacy</span></li>
+                  <li>Click <span className="font-medium">Data Privacy</span> → <span className="font-medium">Get a copy of your data</span></li>
+                  <li>Select <span className="font-medium">Connections</span> and request your data</li>
+                  <li>You&apos;ll receive an email with a download link (usually within 24 hours)</li>
+                  <li>Upload the ZIP file here</li>
+                </ol>
               </div>
             </>
           )}

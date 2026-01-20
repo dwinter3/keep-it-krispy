@@ -11,6 +11,7 @@ const TABLE_NAME = process.env.DYNAMODB_TABLE || 'krisp-transcripts-index'
 const SPEAKERS_TABLE = process.env.SPEAKERS_TABLE || 'krisp-speakers'
 const ENTITIES_TABLE = 'krisp-entities'
 const RELATIONSHIPS_TABLE = 'krisp-relationships'
+const LINKEDIN_TABLE = 'krisp-linkedin-connections'
 const BUCKET_NAME = process.env.KRISP_S3_BUCKET || ''
 const AWS_REGION = process.env.APP_REGION || 'us-east-1'
 
@@ -56,6 +57,20 @@ interface EnrichedData {
   linkedinUrl?: string
   photoUrl?: string
   fullName?: string  // Full name if found (e.g., "Babak Hosseinzadeh" from "Babak")
+  linkedInMatch?: LinkedInMatchResult  // Direct match from user's LinkedIn connections
+}
+
+interface LinkedInMatchResult {
+  email: string
+  firstName: string
+  lastName: string
+  fullName: string
+  company: string
+  position: string
+  connectedOn: string
+  confidence: number
+  matchReason: string
+  isFirstDegree: true
 }
 
 interface ValidationResult {
@@ -583,6 +598,150 @@ Return ONLY valid JSON.`
   }
 }
 
+// Search user's LinkedIn connections for a speaker match
+async function searchLinkedInConnections(
+  userId: string,
+  speakerName: string,
+  context?: { companies?: string[]; topics?: string[] }
+): Promise<LinkedInMatchResult | null> {
+  const normalizedSearch = speakerName
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+
+  const searchWords = normalizedSearch.split(' ').filter(w => w.length > 1)
+  if (searchWords.length === 0) return null
+
+  try {
+    const matches: LinkedInMatchResult[] = []
+
+    // Strategy 1: Exact prefix match on normalized name
+    const exactCommand = new QueryCommand({
+      TableName: LINKEDIN_TABLE,
+      IndexName: 'name-index',
+      KeyConditionExpression: 'user_id = :userId AND begins_with(normalized_name, :search)',
+      ExpressionAttributeValues: {
+        ':userId': userId,
+        ':search': normalizedSearch,
+      },
+      Limit: 10,
+    })
+    const exactResult = await dynamodb.send(exactCommand)
+
+    for (const item of exactResult.Items || []) {
+      if (item.email === '_metadata') continue
+
+      const fullNameNorm = (item.full_name as string || '')
+        .toLowerCase()
+        .replace(/[^a-z0-9\s]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim()
+
+      // Calculate similarity
+      let confidence = 50 // Base confidence for LinkedIn 1st-degree match
+      if (normalizedSearch === fullNameNorm) {
+        confidence = 95 // Exact match
+      } else if (fullNameNorm.includes(normalizedSearch) || normalizedSearch.includes(fullNameNorm)) {
+        confidence = 85 // Partial match
+      }
+
+      // Boost confidence if context matches company
+      if (context?.companies && item.company) {
+        const companyNorm = (item.company as string).toLowerCase()
+        for (const contextCompany of context.companies) {
+          if (companyNorm.includes(contextCompany.toLowerCase()) ||
+              contextCompany.toLowerCase().includes(companyNorm)) {
+            confidence += 15
+            break
+          }
+        }
+      }
+
+      matches.push({
+        email: item.email as string,
+        firstName: item.first_name as string,
+        lastName: item.last_name as string,
+        fullName: item.full_name as string,
+        company: item.company as string,
+        position: item.position as string,
+        connectedOn: item.connected_on as string,
+        confidence: Math.min(100, confidence),
+        matchReason: `1st-degree LinkedIn connection: "${speakerName}" → "${item.full_name}"`,
+        isFirstDegree: true,
+      })
+    }
+
+    // Strategy 2: First name match if single word and no good matches yet
+    if (searchWords.length === 1 && matches.filter(m => m.confidence >= 70).length === 0) {
+      const firstNameCommand = new QueryCommand({
+        TableName: LINKEDIN_TABLE,
+        IndexName: 'name-index',
+        KeyConditionExpression: 'user_id = :userId AND begins_with(normalized_name, :search)',
+        ExpressionAttributeValues: {
+          ':userId': userId,
+          ':search': searchWords[0],
+        },
+        Limit: 20,
+      })
+      const firstNameResult = await dynamodb.send(firstNameCommand)
+
+      for (const item of firstNameResult.Items || []) {
+        if (item.email === '_metadata') continue
+        if (matches.some(m => m.email === item.email)) continue
+
+        const firstName = ((item.first_name as string) || '')
+          .toLowerCase()
+          .replace(/[^a-z0-9\s]/g, '')
+          .trim()
+
+        if (firstName === searchWords[0] || firstName.startsWith(searchWords[0])) {
+          let confidence = 60 // Base for first name match
+
+          // Boost if company context matches
+          if (context?.companies && item.company) {
+            const companyNorm = (item.company as string).toLowerCase()
+            for (const contextCompany of context.companies) {
+              if (companyNorm.includes(contextCompany.toLowerCase()) ||
+                  contextCompany.toLowerCase().includes(companyNorm)) {
+                confidence += 20
+                break
+              }
+            }
+          }
+
+          matches.push({
+            email: item.email as string,
+            firstName: item.first_name as string,
+            lastName: item.last_name as string,
+            fullName: item.full_name as string,
+            company: item.company as string,
+            position: item.position as string,
+            connectedOn: item.connected_on as string,
+            confidence: Math.min(100, confidence),
+            matchReason: `1st-degree LinkedIn (first name): "${speakerName}" → "${item.full_name}"`,
+            isFirstDegree: true,
+          })
+        }
+      }
+    }
+
+    // Sort by confidence and return best match if confidence >= 50
+    matches.sort((a, b) => b.confidence - a.confidence)
+    const best = matches[0]
+
+    if (best && best.confidence >= 50) {
+      console.log(`LinkedIn match for "${speakerName}": ${best.fullName} @ ${best.company} (confidence: ${best.confidence}%)`)
+      return best
+    }
+
+    return null
+  } catch (err) {
+    console.error('LinkedIn search error:', err)
+    return null
+  }
+}
+
 // Helper to canonicalize name for consistent lookups
 function canonicalizeName(name: string): string {
   return name
@@ -842,13 +1001,220 @@ export async function POST(
       }, { status: 404 })
     }
 
+    // Step 1.5: Check LinkedIn connections for a direct match
+    const linkedInMatch = await searchLinkedInConnections(userId, speakerName, {
+      companies: context.companies,
+      topics: context.topics,
+    })
+
+    // If we have a high-confidence LinkedIn match (>= 80%), use it directly
+    // This provides verified 1st-degree connection data without web search
+    if (linkedInMatch && linkedInMatch.confidence >= 80) {
+      console.log(`Using high-confidence LinkedIn match for "${speakerName}": ${linkedInMatch.fullName}`)
+
+      const enrichedData: EnrichedData = {
+        fullName: linkedInMatch.fullName,
+        title: linkedInMatch.position || '',
+        company: linkedInMatch.company || '',
+        summary: `${linkedInMatch.fullName} is your 1st-degree LinkedIn connection${linkedInMatch.company ? ` at ${linkedInMatch.company}` : ''}${linkedInMatch.position ? `, working as ${linkedInMatch.position}` : ''}. You connected on ${linkedInMatch.connectedOn || 'LinkedIn'}.`,
+        linkedInMatch,
+      }
+
+      // Generate AI summary from transcripts
+      let aiSummary = ''
+      const topics = context.topics
+      const extContext = context as ExtendedSpeakerContext
+
+      if (context.transcriptCount > 0 && (extContext.speakerDialogue || []).length > 0) {
+        const dialogueSample = (extContext.speakerDialogue || [])
+          .filter(d => d.length > 30)
+          .slice(0, 15)
+          .map((d, i) => `${i + 1}. "${d}"`)
+          .join('\n')
+
+        const summaryPrompt = `Analyze what ${linkedInMatch.fullName} (${linkedInMatch.position || 'professional'}${linkedInMatch.company ? ` at ${linkedInMatch.company}` : ''}) actually said in meetings.
+
+ACTUAL STATEMENTS by ${linkedInMatch.fullName} from ${context.transcriptCount} meetings:
+${dialogueSample}
+
+Write a 3-4 sentence professional insight covering:
+1. Communication style and priorities based on their actual words
+2. Working style (decision-maker, contributor, coordinator?)
+3. One actionable insight for future meetings
+
+Be specific and quote/paraphrase their actual words. Return ONLY the insight text.`
+
+        try {
+          const invokeCommand = new InvokeModelCommand({
+            modelId: 'amazon.nova-lite-v1:0',
+            contentType: 'application/json',
+            accept: 'application/json',
+            body: JSON.stringify({
+              messages: [{ role: 'user', content: [{ text: summaryPrompt }] }],
+              inferenceConfig: { maxTokens: 500, temperature: 0.4 },
+            }),
+          })
+          const response = await bedrock.send(invokeCommand)
+          const responseBody = JSON.parse(new TextDecoder().decode(response.body))
+          aiSummary = responseBody.output?.message?.content?.[0]?.text || ''
+        } catch (err) {
+          console.error('AI summary generation error:', err)
+          aiSummary = `${linkedInMatch.fullName} has participated in ${context.transcriptCount} meeting${context.transcriptCount !== 1 ? 's' : ''}.`
+        }
+      }
+
+      // Cache the enrichment
+      try {
+        const updateCommand = new UpdateCommand({
+          TableName: SPEAKERS_TABLE,
+          Key: { name: speakerNameLower },
+          UpdateExpression: `SET
+            #displayName = :displayName,
+            #enrichedData = :enrichedData,
+            #enrichedConfidence = :enrichedConfidence,
+            #enrichedReasoning = :enrichedReasoning,
+            #enrichedSources = :enrichedSources,
+            #webEnrichedAt = :webEnrichedAt,
+            #aiSummary = :aiSummary,
+            #topics = :topics,
+            #enrichedAt = :enrichedAt,
+            #humanHints = :humanHints,
+            #rejectedProfiles = :rejectedProfiles,
+            #role = :role,
+            #company = :company,
+            #linkedInMatch = :linkedInMatch`,
+          ExpressionAttributeNames: {
+            '#displayName': 'displayName',
+            '#enrichedData': 'enrichedData',
+            '#enrichedConfidence': 'enrichedConfidence',
+            '#enrichedReasoning': 'enrichedReasoning',
+            '#enrichedSources': 'enrichedSources',
+            '#webEnrichedAt': 'webEnrichedAt',
+            '#aiSummary': 'aiSummary',
+            '#topics': 'topics',
+            '#enrichedAt': 'enrichedAt',
+            '#humanHints': 'humanHints',
+            '#rejectedProfiles': 'rejectedProfiles',
+            '#role': 'role',
+            '#company': 'company',
+            '#linkedInMatch': 'linkedInMatch',
+          },
+          ExpressionAttributeValues: {
+            ':displayName': linkedInMatch.fullName,
+            ':enrichedData': enrichedData,
+            ':enrichedConfidence': linkedInMatch.confidence,
+            ':enrichedReasoning': linkedInMatch.matchReason,
+            ':enrichedSources': ['linkedin-connections'],
+            ':webEnrichedAt': new Date().toISOString(),
+            ':aiSummary': aiSummary,
+            ':topics': topics,
+            ':enrichedAt': new Date().toISOString(),
+            ':humanHints': combinedHints || null,
+            ':rejectedProfiles': allExcludedUrls.length > 0 ? allExcludedUrls : null,
+            ':role': linkedInMatch.position || null,
+            ':company': linkedInMatch.company || null,
+            ':linkedInMatch': linkedInMatch,
+          },
+        })
+        await dynamodb.send(updateCommand)
+      } catch (err) {
+        console.error('Error caching LinkedIn enrichment:', err)
+      }
+
+      // Update entity if exists
+      try {
+        const speakerEntity = await findSpeakerEntityByName(userId, context.name)
+        if (speakerEntity) {
+          const now = new Date().toISOString()
+          const entityUpdateCommand = new UpdateCommand({
+            TableName: ENTITIES_TABLE,
+            Key: { entity_id: speakerEntity.entity_id },
+            UpdateExpression: `SET
+              #name = :displayName,
+              #metadata.#role = :role,
+              #metadata.#company_name = :company,
+              #metadata.#bio = :bio,
+              #metadata.#linkedin_match = :linkedInMatch,
+              enriched_at = :enrichedAt,
+              confidence = :confidence,
+              enrichment_source = :source,
+              updated_at = :updatedAt,
+              updated_by = :updatedBy`,
+            ExpressionAttributeNames: {
+              '#name': 'name',
+              '#metadata': 'metadata',
+              '#role': 'role',
+              '#company_name': 'company_name',
+              '#bio': 'bio',
+              '#linkedin_match': 'linkedin_match',
+            },
+            ExpressionAttributeValues: {
+              ':displayName': linkedInMatch.fullName,
+              ':role': linkedInMatch.position || null,
+              ':company': linkedInMatch.company || null,
+              ':bio': enrichedData.summary || aiSummary || null,
+              ':linkedInMatch': linkedInMatch,
+              ':enrichedAt': now,
+              ':confidence': linkedInMatch.confidence,
+              ':source': 'linkedin_match',
+              ':updatedAt': now,
+              ':updatedBy': userId,
+            },
+          })
+          await dynamodb.send(entityUpdateCommand)
+
+          // Create company relationship if company is known
+          if (linkedInMatch.company) {
+            try {
+              const companyEntityId = await findOrCreateCompanyEntity(userId, linkedInMatch.company)
+              await createWorksAtRelationship(userId, speakerEntity.entity_id, companyEntityId)
+            } catch (relErr) {
+              console.error('Error creating company relationship:', relErr)
+            }
+          }
+        }
+      } catch (entityErr) {
+        console.error('Error updating entity with LinkedIn match:', entityErr)
+      }
+
+      return NextResponse.json({
+        cached: false,
+        name: linkedInMatch.fullName,
+        enrichedData,
+        confidence: linkedInMatch.confidence,
+        reasoning: linkedInMatch.matchReason,
+        sources: ['linkedin-connections'],
+        enrichedAt: new Date().toISOString(),
+        aiSummary,
+        topics,
+        humanHints: combinedHints || null,
+        rejectedProfiles: allExcludedUrls.length > 0 ? allExcludedUrls : null,
+        linkedInMatch,
+        context: {
+          transcriptCount: context.transcriptCount,
+          companies: context.companies,
+          roleHints: context.roleHints,
+        },
+      })
+    }
+
+    // If we have a moderate LinkedIn match (50-79%), add it as context for web search
+    let linkedInHint = ''
+    if (linkedInMatch && linkedInMatch.confidence >= 50) {
+      linkedInHint = `Likely: ${linkedInMatch.fullName}${linkedInMatch.company ? ` at ${linkedInMatch.company}` : ''}${linkedInMatch.position ? ` (${linkedInMatch.position})` : ''}`
+      console.log(`Adding moderate-confidence LinkedIn hint: ${linkedInHint}`)
+    }
+
     // Step 2: Build search query
     const searchTerms = [context.name]
 
+    // Include LinkedIn hint in combined hints for web validation
+    const allHints = [combinedHints, linkedInHint].filter(Boolean).join('. ')
+
     // Include human-provided hints in search (high priority)
-    if (combinedHints) {
+    if (allHints) {
       // Extract key terms from hints (company names, locations, titles)
-      const hintTerms = combinedHints.split(/[,.]/).map(t => t.trim()).filter(Boolean).slice(0, 3)
+      const hintTerms = allHints.split(/[,.]/).map(t => t.trim()).filter(Boolean).slice(0, 3)
       searchTerms.push(...hintTerms)
     }
 
@@ -883,7 +1249,7 @@ export async function POST(
     const validatedResults: Array<{ result: WebSearchResult; validation: ValidationResult }> = []
 
     for (const result of webResults.slice(0, 3)) {
-      const validation = await validateWebResult(context, result, combinedHints)
+      const validation = await validateWebResult(context, result, allHints)
       validatedResults.push({ result, validation })
     }
 
@@ -1102,6 +1468,11 @@ Return ONLY the text, no JSON.`
       // Don't fail the whole enrichment for entity update issues
     }
 
+    // Add LinkedIn match to enriched data if available
+    if (linkedInMatch) {
+      enrichedData.linkedInMatch = linkedInMatch
+    }
+
     return NextResponse.json({
       cached: false,
       name: context.name,
@@ -1114,6 +1485,7 @@ Return ONLY the text, no JSON.`
       topics,
       humanHints: combinedHints || null,
       rejectedProfiles: allExcludedUrls.length > 0 ? allExcludedUrls : null,
+      linkedInMatch: linkedInMatch || null,
       context: {
         transcriptCount: context.transcriptCount,
         companies: context.companies,
