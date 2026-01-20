@@ -16,7 +16,12 @@ import { DynamoDBClient } from '@aws-sdk/client-dynamodb'
 import { DynamoDBDocumentClient, PutCommand } from '@aws-sdk/lib-dynamodb'
 import { auth } from '@/lib/auth'
 import { getUserByEmail } from '@/lib/users'
-import { parseTranscriptFile, validateParsedTranscript, type ParsedTranscriptData } from '@/lib/parsers/transcript-parser'
+import {
+  parseTranscriptFile,
+  parseTranscriptWithAI,
+  validateParsedTranscript,
+  type ParsedTranscriptData
+} from '@/lib/parsers/transcript-parser'
 import { randomBytes } from 'crypto'
 
 const BUCKET_NAME = process.env.KRISP_S3_BUCKET || ''
@@ -42,6 +47,12 @@ interface UploadResult {
   duration?: number
   error?: string
   warnings?: string[]
+  /** Whether AI parsing was used */
+  usedAI?: boolean
+  /** Parse confidence (0-100) */
+  confidence?: number
+  /** AI's description of detected format */
+  formatDescription?: string
 }
 
 /**
@@ -173,11 +184,34 @@ async function indexInDynamoDB(
 async function processFile(
   content: string,
   filename: string,
-  userId: string
+  userId: string,
+  options: { useAI?: boolean } = {}
 ): Promise<UploadResult> {
   try {
-    // Parse the transcript
-    const parsed = parseTranscriptFile(content, filename)
+    // Parse the transcript - use AI if requested or as fallback
+    let parsed: ParsedTranscriptData
+
+    if (options.useAI) {
+      // Use AI-powered parsing with fallback
+      parsed = await parseTranscriptWithAI(content, filename)
+      console.log(`AI parsing for ${filename}: confidence=${parsed.confidence}, usedAI=${parsed.usedAI}`)
+    } else {
+      // Try rule-based first
+      parsed = parseTranscriptFile(content, filename)
+
+      // If rule-based has warnings, try AI as fallback
+      if (parsed.warnings.length > 0) {
+        console.log(`Rule-based parsing for ${filename} has warnings, trying AI fallback...`)
+        const aiParsed = await parseTranscriptWithAI(content, filename)
+
+        // Use AI result if confidence is higher
+        const ruleConfidence = 100 - (parsed.warnings.length * 20)
+        if (aiParsed.confidence && aiParsed.confidence > ruleConfidence) {
+          parsed = aiParsed
+          console.log(`Using AI result: confidence=${aiParsed.confidence}`)
+        }
+      }
+    }
 
     // Validate parsed data
     const validation = validateParsedTranscript(parsed)
@@ -186,7 +220,10 @@ async function processFile(
         filename,
         success: false,
         error: validation.errors.join('; '),
-        warnings: parsed.warnings
+        warnings: parsed.warnings,
+        usedAI: parsed.usedAI,
+        confidence: parsed.confidence,
+        formatDescription: parsed.formatDescription
       }
     }
 
@@ -210,7 +247,10 @@ async function processFile(
       title: parsed.title,
       speakers: parsed.speakers,
       duration: parsed.duration,
-      warnings: parsed.warnings.length > 0 ? parsed.warnings : undefined
+      warnings: parsed.warnings.length > 0 ? parsed.warnings : undefined,
+      usedAI: parsed.usedAI,
+      confidence: parsed.confidence,
+      formatDescription: parsed.formatDescription
     }
   } catch (error) {
     console.error(`Error processing ${filename}:`, error)
@@ -239,6 +279,9 @@ export async function POST(request: NextRequest) {
     const formData = await request.formData()
     const files = formData.getAll('files') as File[]
 
+    // Check if AI parsing is requested (via form field or always use AI as fallback)
+    const useAI = formData.get('useAI') === 'true' || formData.get('useAI') === '1'
+
     if (!files || files.length === 0) {
       return NextResponse.json(
         { error: 'No files provided' },
@@ -246,8 +289,8 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Validate file types
-    const validExtensions = ['.vtt', '.txt']
+    // Validate file types - with AI we can handle more formats
+    const validExtensions = ['.vtt', '.txt', '.json']
     const results: UploadResult[] = []
 
     for (const file of files) {
@@ -274,8 +317,8 @@ export async function POST(request: NextRequest) {
         continue
       }
 
-      // Process the file
-      const result = await processFile(content, file.name, user.user_id)
+      // Process the file with optional AI parsing
+      const result = await processFile(content, file.name, user.user_id, { useAI })
       results.push(result)
     }
 

@@ -11,8 +11,13 @@
  */
 
 import { parseVTT, isValidVTT, type ParsedVTT } from './vtt-parser'
+import {
+  parseTranscriptWithAIFallback,
+  shouldUseAIParsing,
+  type AIParserResult,
+} from './ai-transcript-parser'
 
-export type TranscriptFormat = 'vtt' | 'docx' | 'txt' | 'unknown'
+export type TranscriptFormat = 'vtt' | 'docx' | 'txt' | 'unknown' | 'ai-parsed'
 
 export interface ParsedTranscriptData {
   /** Meeting title (derived from filename if not in content) */
@@ -29,6 +34,12 @@ export interface ParsedTranscriptData {
   filename: string
   /** Parse warnings (non-fatal issues) */
   warnings: string[]
+  /** Parse confidence (0-100) - available when AI parsing is used */
+  confidence?: number
+  /** Whether AI was used for parsing */
+  usedAI?: boolean
+  /** AI's description of the detected format */
+  formatDescription?: string
 }
 
 /**
@@ -318,3 +329,86 @@ export function validateParsedTranscript(
     errors
   }
 }
+
+/**
+ * Parse transcript with intelligent AI fallback
+ *
+ * This function first tries rule-based parsing, then falls back to AI
+ * when the content can't be confidently parsed. The AI can interpret
+ * virtually any transcript format and convert it to Krisp format.
+ *
+ * @param content - Raw transcript content
+ * @param filename - Original filename (used for format detection and title)
+ * @param options - Parsing options
+ * @returns ParsedTranscriptData with confidence scores and AI usage info
+ */
+export async function parseTranscriptWithAI(
+  content: string,
+  filename: string,
+  options: {
+    /** Force AI parsing even if rule-based works */
+    forceAI?: boolean
+    /** Minimum confidence threshold for rule-based parsing (default: 70) */
+    minConfidence?: number
+  } = {}
+): Promise<ParsedTranscriptData> {
+  const { forceAI = false, minConfidence = 70 } = options
+
+  // First try rule-based parsing
+  const ruleBasedResult = parseTranscriptFile(content, filename)
+
+  // If forced AI or rule-based has warnings, try AI
+  if (forceAI || ruleBasedResult.warnings.length > 0 || shouldUseAIParsing(content)) {
+    try {
+      const aiResult = await parseTranscriptWithAIFallback(
+        content,
+        filename,
+        {
+          speakers: ruleBasedResult.speakers,
+          duration: ruleBasedResult.duration,
+          rawContent: ruleBasedResult.rawContent,
+          warnings: ruleBasedResult.warnings,
+        }
+      )
+
+      // Use AI result if it's better or if forced
+      if (forceAI || aiResult.usedAI || aiResult.confidence > minConfidence) {
+        return {
+          title: ruleBasedResult.title,
+          speakers: aiResult.speakers,
+          duration: aiResult.duration,
+          rawContent: aiResult.rawContent,
+          format: aiResult.usedAI ? 'ai-parsed' : ruleBasedResult.format,
+          filename,
+          warnings: aiResult.notes,
+          confidence: aiResult.confidence,
+          usedAI: aiResult.usedAI,
+          formatDescription: aiResult.formatDescription,
+        }
+      }
+    } catch (error) {
+      console.error('AI parsing failed, using rule-based result:', error)
+      // Fall through to return rule-based result
+    }
+  }
+
+  // Return rule-based result with confidence estimate
+  let confidence = 100
+  if (ruleBasedResult.warnings.some(w => w.includes('No speaker format'))) {
+    confidence -= 40
+  }
+  if (ruleBasedResult.warnings.some(w => w.includes('estimated'))) {
+    confidence -= 20
+  }
+
+  return {
+    ...ruleBasedResult,
+    confidence,
+    usedAI: false,
+    formatDescription: `Parsed as ${ruleBasedResult.format}`,
+  }
+}
+
+// Re-export AI parser utilities for direct use
+export { shouldUseAIParsing } from './ai-transcript-parser'
+export type { AIParserResult } from './ai-transcript-parser'
