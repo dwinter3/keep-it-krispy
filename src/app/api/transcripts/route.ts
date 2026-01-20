@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3'
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb'
-import { DynamoDBDocumentClient, ScanCommand, QueryCommand, UpdateCommand, GetCommand } from '@aws-sdk/lib-dynamodb'
+import { DynamoDBDocumentClient, ScanCommand, QueryCommand, UpdateCommand, GetCommand, PutCommand } from '@aws-sdk/lib-dynamodb'
 import { auth } from '@/lib/auth'
 import { getUserByEmail, getUser } from '@/lib/users'
 
 const BUCKET_NAME = process.env.KRISP_S3_BUCKET || ''  // Required: set via environment variable
 const TABLE_NAME = process.env.DYNAMODB_TABLE || 'krisp-transcripts-index'
+const ENTITIES_TABLE = 'krisp-entities'
 const AWS_REGION = process.env.APP_REGION || 'us-east-1'
 
 // Ownership filter types for transcript listing
@@ -279,8 +280,85 @@ export async function GET(request: NextRequest) {
   }
 }
 
+// Helper to generate entity ID
+function generateEntityId(): string {
+  const chars = 'abcdefghijklmnopqrstuvwxyz0123456789'
+  let id = 'ent_'
+  for (let i = 0; i < 12; i++) {
+    id += chars[Math.floor(Math.random() * chars.length)]
+  }
+  return id
+}
+
+// Canonicalize name for consistent lookups
+function canonicalizeName(name: string): string {
+  return name
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9\s]/g, '')
+    .replace(/\s+/g, ' ')
+}
+
+// Find existing speaker entity by name
+async function findSpeakerEntity(
+  userId: string,
+  speakerName: string
+): Promise<{ entity_id: string } | null> {
+  const canonical = canonicalizeName(speakerName)
+  const queryCommand = new QueryCommand({
+    TableName: ENTITIES_TABLE,
+    IndexName: 'type-name-index',
+    KeyConditionExpression: 'entity_type = :type AND canonical_name = :name',
+    FilterExpression: 'user_id = :userId',
+    ExpressionAttributeValues: {
+      ':type': 'speaker',
+      ':name': canonical,
+      ':userId': userId,
+    },
+    Limit: 1,
+  })
+
+  const response = await dynamodb.send(queryCommand)
+  if (response.Items && response.Items.length > 0) {
+    return response.Items[0] as { entity_id: string }
+  }
+  return null
+}
+
+// Create a new speaker entity
+async function createSpeakerEntity(
+  userId: string,
+  speakerName: string
+): Promise<string> {
+  const now = new Date().toISOString()
+  const entityId = generateEntityId()
+  const canonical = canonicalizeName(speakerName)
+
+  const putCommand = new PutCommand({
+    TableName: ENTITIES_TABLE,
+    Item: {
+      entity_id: entityId,
+      entity_type: 'speaker',
+      user_id: userId,
+      name: speakerName,
+      canonical_name: canonical,
+      status: 'active',
+      metadata: {},
+      confidence: 70,
+      enrichment_source: 'user_correction',
+      created_at: now,
+      created_by: userId,
+      updated_at: now,
+      updated_by: userId,
+    },
+  })
+  await dynamodb.send(putCommand)
+  return entityId
+}
+
 /**
  * PATCH - Update speaker corrections for a transcript
+ * Also creates speaker entities for new names
  */
 export async function PATCH(request: NextRequest) {
   // Get authenticated user
@@ -296,7 +374,14 @@ export async function PATCH(request: NextRequest) {
   const userId = user.user_id
 
   // Parse body once and store for retry logic
-  let body: { meetingId?: string; speakerCorrection?: { originalName?: string; correctedName?: string } }
+  let body: {
+    meetingId?: string
+    speakerCorrection?: {
+      originalName?: string
+      correctedName?: string
+      entityId?: string  // Optional: link to existing entity
+    }
+  }
   try {
     body = await request.json()
   } catch {
@@ -312,7 +397,7 @@ export async function PATCH(request: NextRequest) {
     )
   }
 
-  const { originalName, correctedName } = speakerCorrection
+  const { originalName, correctedName, entityId: providedEntityId } = speakerCorrection
 
   if (!originalName || !correctedName) {
     return NextResponse.json(
@@ -334,8 +419,29 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ error: 'Access denied' }, { status: 403 })
     }
 
+    // Determine entity ID: use provided, find existing, or create new
+    let entityId = providedEntityId
+
+    if (!entityId) {
+      // Check if an entity already exists for this name
+      const existingEntity = await findSpeakerEntity(userId, correctedName)
+      if (existingEntity) {
+        entityId = existingEntity.entity_id
+      } else {
+        // Create new speaker entity for this name
+        entityId = await createSpeakerEntity(userId, correctedName)
+        console.log(`Created new speaker entity ${entityId} for "${correctedName}"`)
+      }
+    }
+
     // The key is the lowercase original name for consistent lookups
     const correctionKey = originalName.toLowerCase()
+
+    // Build the correction object with entity link
+    const correctionValue = {
+      name: correctedName,
+      entity_id: entityId,
+    }
 
     // Check if speaker_corrections map already exists
     const existingCorrections = existingItem.Item?.speaker_corrections
@@ -352,7 +458,7 @@ export async function PATCH(request: NextRequest) {
           '#speakerKey': correctionKey,
         },
         ExpressionAttributeValues: {
-          ':correction': { name: correctedName },
+          ':correction': correctionValue,
         },
         ReturnValues: 'ALL_NEW',
       })
@@ -364,7 +470,7 @@ export async function PATCH(request: NextRequest) {
         UpdateExpression: 'SET speaker_corrections = :corrections',
         ExpressionAttributeValues: {
           ':corrections': {
-            [correctionKey]: { name: correctedName },
+            [correctionKey]: correctionValue,
           },
         },
         ReturnValues: 'ALL_NEW',
@@ -376,6 +482,7 @@ export async function PATCH(request: NextRequest) {
     return NextResponse.json({
       success: true,
       speakerCorrections: result.Attributes?.speaker_corrections || {},
+      entityId,  // Return the entity ID so frontend knows it was created/linked
     })
   } catch (error) {
     console.error('PATCH error:', error)

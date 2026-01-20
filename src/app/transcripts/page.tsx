@@ -170,13 +170,15 @@ export default function TranscriptsPage() {
     }
   }
 
-// Handle speaker name save
-  async function handleSpeakerSave(newName: string) {
+// Handle speaker name save (with optional entityId for linking to existing speakers)
+  async function handleSpeakerSave(newName: string, entityId?: string) {
     if (!editingSpeaker || !selectedTranscript) return
 
     setSavingSpeaker(true)
     try {
       // Update DynamoDB with the new speaker correction
+      // If entityId is provided, link to existing entity
+      // If not, the API will create a new entity for this speaker
       const response = await fetch(`/api/transcripts`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -184,7 +186,8 @@ export default function TranscriptsPage() {
           meetingId: selectedTranscript.meetingId,
           speakerCorrection: {
             originalName: editingSpeaker.original,
-            correctedName: newName
+            correctedName: newName,
+            entityId: entityId || undefined,  // Link to existing or create new
           }
         })
       })
