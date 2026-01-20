@@ -1,5 +1,6 @@
 /**
  * S3 Vectors client for semantic search of transcript chunks.
+ * Supports user_id filtering for multi-tenant isolation.
  */
 
 import {
@@ -29,6 +30,7 @@ export interface VectorSearchResult {
     chunk_index: string;
     speaker: string;
     text: string;
+    user_id?: string;
   };
 }
 
@@ -69,21 +71,41 @@ export class VectorsClient {
 
   /**
    * Search vectors using semantic similarity.
+   * Supports filtering by user_id for multi-tenant isolation.
+   *
+   * @param query - Natural language search query
+   * @param topK - Maximum number of results
+   * @param meetingIdFilter - Optional filter by specific meeting
+   * @param userIdFilter - Optional filter by user_id (for multi-tenant isolation)
+   * @param allowedMeetingIds - Optional list of meeting IDs the user has access to (post-filter)
    */
   async search(
     query: string,
     topK: number = 10,
-    meetingIdFilter?: string
+    meetingIdFilter?: string,
+    userIdFilter?: string,
+    allowedMeetingIds?: Set<string>
   ): Promise<VectorSearchResult[]> {
     // Generate query embedding
     const queryEmbedding = await this.generateEmbedding(query);
 
     // Query vectors using AWS CLI
+    // Request more results if we need to post-filter
+    const requestK = allowedMeetingIds ? topK * 3 : topK;
     const results = await this.queryVectors(
       queryEmbedding,
-      topK,
-      meetingIdFilter
+      requestK,
+      meetingIdFilter,
+      userIdFilter
     );
+
+    // Post-filter by allowed meeting IDs if provided
+    if (allowedMeetingIds) {
+      const filtered = results.filter(
+        (r) => allowedMeetingIds.has(r.metadata.meeting_id)
+      );
+      return filtered.slice(0, topK);
+    }
 
     return results;
   }
@@ -94,7 +116,8 @@ export class VectorsClient {
   private async queryVectors(
     queryVector: number[],
     topK: number,
-    meetingIdFilter?: string
+    meetingIdFilter?: string,
+    userIdFilter?: string
   ): Promise<VectorSearchResult[]> {
     // Build query parameters
     const queryParams: Record<string, unknown> = {
@@ -107,9 +130,24 @@ export class VectorsClient {
       returnMetadata: true,
     };
 
-    // Add filter if specified
+    // Build filter based on provided filters
+    // S3 Vectors filter format: { equals: { key: 'field', value: 'val' } }
+    // or { and: [filter1, filter2] } for multiple conditions
+    const filters: Array<{ equals: { key: string; value: string } }> = [];
+
     if (meetingIdFilter) {
-      queryParams.filter = { equals: { key: 'meeting_id', value: meetingIdFilter } };
+      filters.push({ equals: { key: 'meeting_id', value: meetingIdFilter } });
+    }
+
+    if (userIdFilter) {
+      filters.push({ equals: { key: 'user_id', value: userIdFilter } });
+    }
+
+    // Apply filter(s)
+    if (filters.length === 1) {
+      queryParams.filter = filters[0];
+    } else if (filters.length > 1) {
+      queryParams.filter = { and: filters };
     }
 
     try {

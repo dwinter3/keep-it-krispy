@@ -5,6 +5,8 @@
  * Enhanced with:
  * - DynamoDB for fast transcript listing
  * - S3 Vectors for semantic search
+ * - Multi-tenant user isolation via KRISP_USER_ID
+ * - Knowledge graph entity tools
  *
  * Debug logs go to stderr and appear in ~/Library/Logs/Claude/mcp-server-krisp.log
  */
@@ -18,6 +20,7 @@ import {
 import { S3TranscriptClient } from './s3-client.js';
 import { DynamoTranscriptClient } from './dynamo-client.js';
 import { VectorsClient } from './vectors-client.js';
+import { getUserContext, debugAuthContext, type UserContext } from './auth.js';
 
 // Debug logging to stderr (shows in Claude Desktop's mcp-server-krisp.log)
 function debug(message: string, data?: unknown) {
@@ -35,6 +38,7 @@ debug('Server module loading', {
   VECTOR_BUCKET: process.env.VECTOR_BUCKET,
   VECTOR_INDEX: process.env.VECTOR_INDEX,
   AWS_PROFILE: process.env.AWS_PROFILE,
+  KRISP_USER_ID: process.env.KRISP_USER_ID ? '(set)' : '(not set)',
   NODE_VERSION: process.version,
 });
 
@@ -80,11 +84,11 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
     tools: [
       {
         name: 'list_transcripts',
-        description: 'List recent Krisp meeting transcripts from DynamoDB index. Returns metadata including title, date, duration, speakers, and S3 key. Fast query (~50ms).',
+        description: 'List your recent Krisp meeting transcripts. Returns metadata including title, date, duration, speakers, and S3 key. Fast query (~50ms). Only shows transcripts you own or have been shared with you.',
         inputSchema: {
           type: 'object',
           properties: {
-            start_date: { type: 'string', description: 'Start date (YYYY-MM-DD). Defaults to 30 days ago.' },
+            start_date: { type: 'string', description: 'Start date (YYYY-MM-DD). Defaults to recent transcripts.' },
             end_date: { type: 'string', description: 'End date (YYYY-MM-DD). Defaults to today.' },
             speaker: { type: 'string', description: 'Filter by speaker name (exact match, case-insensitive)' },
             limit: { type: 'number', description: 'Maximum number of transcripts to return (default: 20)' },
@@ -93,7 +97,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: 'search_transcripts',
-        description: 'Semantic search across meeting transcripts using AI embeddings. Finds conceptually similar content even if exact words differ. Returns ranked results with relevance scores and text snippets.',
+        description: 'Semantic search across your meeting transcripts using AI embeddings. Finds conceptually similar content even if exact words differ. Returns ranked results with relevance scores and text snippets. Only searches transcripts you own.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -106,7 +110,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: 'get_transcripts',
-        description: 'Fetch full content of one or more transcripts by their S3 keys. Use keys from list_transcripts or search_transcripts. Speaker corrections are automatically applied if available.',
+        description: 'Fetch full content of one or more transcripts by their S3 keys. Use keys from list_transcripts or search_transcripts. Speaker corrections are automatically applied if available. Only returns transcripts you have access to.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -121,7 +125,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: 'update_speakers',
-        description: 'Correct or identify speakers in a meeting transcript. Map generic names like "Speaker 2" to real names, or correct misspelled names. Optionally include LinkedIn URLs for reference. Corrections are stored and automatically applied when fetching transcripts.',
+        description: 'Correct or identify speakers in a meeting transcript you own. Map generic names like "Speaker 2" to real names, or correct misspelled names. Optionally include LinkedIn URLs for reference. Corrections are stored and automatically applied when fetching transcripts.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -145,6 +149,46 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           required: ['meeting_id', 'speaker_mappings'],
         },
       },
+      {
+        name: 'list_speakers',
+        description: 'List speakers from your knowledge graph. Returns speaker entities with metadata like names, LinkedIn URLs, and company associations.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            limit: { type: 'number', description: 'Maximum number of speakers to return (default: 50)' },
+            company: { type: 'string', description: 'Filter by company name' },
+            verified_only: { type: 'boolean', description: 'Only return verified speakers' },
+          },
+        },
+      },
+      {
+        name: 'list_companies',
+        description: 'List companies from your knowledge graph. Returns company entities with metadata.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            limit: { type: 'number', description: 'Maximum number of companies to return (default: 50)' },
+            type: { type: 'string', description: 'Filter by company type (e.g., "customer", "partner", "vendor")' },
+          },
+        },
+      },
+      {
+        name: 'get_entity_relationships',
+        description: 'Get relationships for an entity in your knowledge graph. Shows connections between speakers, companies, topics, and documents.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            entity_id: { type: 'string', description: 'The entity ID to get relationships for' },
+            direction: {
+              type: 'string',
+              enum: ['from', 'to', 'both'],
+              description: 'Direction of relationships: "from" (outgoing), "to" (incoming), or "both" (default)',
+            },
+            rel_type: { type: 'string', description: 'Filter by relationship type (e.g., "works_at", "participant", "mentioned")' },
+          },
+          required: ['entity_id'],
+        },
+      },
     ],
   };
 });
@@ -156,6 +200,27 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   debug(`tools/call: ${name}`, { args });
 
   try {
+    // Get user context for all operations
+    const userContext = await getUserContext();
+    debug('User context', { auth: debugAuthContext(userContext) });
+
+    // Require authentication for all tools
+    if (!userContext) {
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            error: 'Authentication required',
+            message: 'Set KRISP_USER_ID environment variable to your user ID.',
+            hint: 'Get your user ID from the Keep It Krispy dashboard settings.',
+          }, null, 2),
+        }],
+        isError: true,
+      };
+    }
+
+    const userId = userContext.userId;
+
     switch (name) {
       case 'list_transcripts': {
         const speaker = args?.speaker as string | undefined;
@@ -164,17 +229,17 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         let transcripts;
 
         if (speaker) {
-          debug('list_transcripts: using speaker GSI', { speaker, limit });
-          transcripts = await dynamoClient.listBySpeaker(speaker, limit);
+          debug('list_transcripts: using speaker GSI', { speaker, limit, userId });
+          transcripts = await dynamoClient.listBySpeaker(userId, speaker, limit);
         } else if (args?.start_date || args?.end_date) {
           const endDate = args?.end_date as string || new Date().toISOString().slice(0, 10);
           const startDate = args?.start_date as string ||
             new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-          debug('list_transcripts: using date range', { startDate, endDate, limit });
-          transcripts = await dynamoClient.listByDateRange(startDate, endDate, limit);
+          debug('list_transcripts: using date range', { startDate, endDate, limit, userId });
+          transcripts = await dynamoClient.listByDateRange(userId, startDate, endDate, limit);
         } else {
-          debug('list_transcripts: getting recent', { limit });
-          transcripts = await dynamoClient.listRecent(limit);
+          debug('list_transcripts: getting recent', { limit, userId });
+          transcripts = await dynamoClient.listRecent(userId, limit);
         }
 
         debug(`list_transcripts: found ${transcripts.length} transcripts in ${Date.now() - startTime}ms`);
@@ -203,10 +268,20 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const meetingIdFilter = args?.meeting_id as string | undefined;
         const limit = (args?.limit as number) || 10;
 
-        debug('search_transcripts: starting semantic search', { query, meetingIdFilter, limit });
+        debug('search_transcripts: starting semantic search', { query, meetingIdFilter, limit, userId });
 
-        // Use semantic search with S3 Vectors
-        const vectorResults = await vectorsClient.search(query, limit * 2, meetingIdFilter);
+        // Get user's transcripts to create an allowlist for post-filtering
+        const userTranscripts = await dynamoClient.listRecent(userId, 100);
+        const allowedMeetingIds = new Set(userTranscripts.map(t => t.meeting_id));
+
+        // Use semantic search with S3 Vectors, filtering by user
+        const vectorResults = await vectorsClient.search(
+          query,
+          limit * 3,
+          meetingIdFilter,
+          userId,
+          allowedMeetingIds
+        );
         debug(`search_transcripts: got ${vectorResults.length} vector results in ${Date.now() - startTime}ms`);
 
         // Group by meeting to deduplicate
@@ -246,12 +321,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case 'get_transcripts': {
         const keys = args?.keys as string[];
-        debug('get_transcripts: fetching from S3', { keys });
+        debug('get_transcripts: fetching from S3', { keys, userId });
 
         const transcripts = await s3Client.getTranscripts(keys);
         debug(`get_transcripts: fetched ${transcripts.length} transcripts in ${Date.now() - startTime}ms`);
 
-        // Apply speaker corrections from DynamoDB and check privacy
+        // Apply speaker corrections from DynamoDB and check access
         const transcriptsWithCorrections = await Promise.all(
           transcripts.map(async (t) => {
             if (t.error) {
@@ -262,9 +337,19 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             const keyParts = t.key.split('_');
             const meetingId = keyParts[keyParts.length - 1]?.replace('.json', '');
 
-            // Check if transcript is private
+            // Check user access and privacy
             if (meetingId) {
-              const record = await dynamoClient.getByMeetingId(meetingId);
+              const { record, accessDenied } = await dynamoClient.getByMeetingIdForUser(meetingId, userId);
+
+              if (accessDenied) {
+                debug(`get_transcripts: access denied for ${meetingId}`);
+                return {
+                  key: t.key,
+                  error: 'Access denied: you do not own this transcript',
+                  access_denied: true,
+                };
+              }
+
               if (record?.isPrivate) {
                 debug(`get_transcripts: skipping private transcript ${meetingId}`);
                 return {
@@ -328,11 +413,29 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const meetingId = args?.meeting_id as string;
         const mappings = args?.speaker_mappings as Record<string, { name: string; linkedin?: string }>;
 
-        debug('update_speakers: updating speaker mappings', { meetingId, mappings });
+        debug('update_speakers: updating speaker mappings', { meetingId, mappings, userId });
 
-        const updated = await dynamoClient.updateSpeakers(meetingId, mappings);
+        const { record: updated, accessDenied, notFound } = await dynamoClient.updateSpeakers(
+          meetingId,
+          userId,
+          mappings
+        );
 
-        if (!updated) {
+        if (accessDenied) {
+          debug(`update_speakers: access denied for ${meetingId}`);
+          return {
+            content: [{
+              type: 'text',
+              text: JSON.stringify({
+                error: 'Access denied: you do not own this transcript',
+                meeting_id: meetingId,
+              }, null, 2),
+            }],
+            isError: true,
+          };
+        }
+
+        if (notFound) {
           debug(`update_speakers: meeting not found: ${meetingId}`);
           return {
             content: [{
@@ -354,8 +457,140 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             text: JSON.stringify({
               success: true,
               meeting_id: meetingId,
-              speaker_corrections: updated.speaker_corrections,
-              message: 'Speaker corrections saved. They will be applied when fetching this transcript.',
+              speaker_corrections: updated?.speaker_corrections,
+              message: 'Speaker corrections saved. They will be applied when fetching this transcript. Speaker entities have been created/updated in your knowledge graph.',
+            }, null, 2),
+          }],
+        };
+      }
+
+      case 'list_speakers': {
+        const limit = (args?.limit as number) || 50;
+        const company = args?.company as string | undefined;
+        const verifiedOnly = args?.verified_only as boolean | undefined;
+
+        debug('list_speakers: querying entities', { limit, company, verifiedOnly, userId });
+
+        const speakers = await dynamoClient.listSpeakers(userId, { limit, company, verifiedOnly });
+
+        debug(`list_speakers: found ${speakers.length} speakers in ${Date.now() - startTime}ms`);
+
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              count: speakers.length,
+              speakers: speakers.map(s => ({
+                entity_id: s.entity_id,
+                name: s.canonical_name,
+                display_name: (s.metadata as { display_name?: string })?.display_name,
+                linkedin: (s.metadata as { linkedin?: string })?.linkedin,
+                company: (s.metadata as { company?: string })?.company,
+                verified: (s.metadata as { verified?: boolean })?.verified,
+                aliases: s.aliases,
+                created_at: s.created_at,
+              })),
+            }, null, 2),
+          }],
+        };
+      }
+
+      case 'list_companies': {
+        const limit = (args?.limit as number) || 50;
+        const type = args?.type as string | undefined;
+
+        debug('list_companies: querying entities', { limit, type, userId });
+
+        const companies = await dynamoClient.listCompanies(userId, { limit, type });
+
+        debug(`list_companies: found ${companies.length} companies in ${Date.now() - startTime}ms`);
+
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              count: companies.length,
+              companies: companies.map(c => ({
+                entity_id: c.entity_id,
+                name: c.canonical_name,
+                display_name: (c.metadata as { display_name?: string })?.display_name,
+                type: (c.metadata as { company_type?: string })?.company_type,
+                website: (c.metadata as { website?: string })?.website,
+                aliases: c.aliases,
+                created_at: c.created_at,
+              })),
+            }, null, 2),
+          }],
+        };
+      }
+
+      case 'get_entity_relationships': {
+        const entityId = args?.entity_id as string;
+        const direction = (args?.direction as 'from' | 'to' | 'both') || 'both';
+        const relType = args?.rel_type as string | undefined;
+
+        debug('get_entity_relationships: querying relationships', { entityId, direction, relType, userId });
+
+        // First verify the entity belongs to the user
+        const entity = await dynamoClient.getEntity(entityId);
+        if (!entity || entity.user_id !== userId) {
+          return {
+            content: [{
+              type: 'text',
+              text: JSON.stringify({
+                error: 'Entity not found or access denied',
+                entity_id: entityId,
+              }, null, 2),
+            }],
+            isError: true,
+          };
+        }
+
+        const relationships = await dynamoClient.getEntityRelationships(userId, entityId, {
+          direction,
+          relType,
+        });
+
+        // Enrich relationships with entity details
+        const enrichedRelationships = await Promise.all(
+          relationships.map(async (r) => {
+            const fromEntity = r.from_entity_id === entityId
+              ? entity
+              : await dynamoClient.getEntity(r.from_entity_id);
+            const toEntity = r.to_entity_id === entityId
+              ? entity
+              : await dynamoClient.getEntity(r.to_entity_id);
+
+            return {
+              relationship_id: r.relationship_id,
+              rel_type: r.rel_type,
+              from_entity: fromEntity ? {
+                entity_id: fromEntity.entity_id,
+                name: fromEntity.canonical_name,
+                type: fromEntity.entity_type,
+              } : { entity_id: r.from_entity_id },
+              to_entity: toEntity ? {
+                entity_id: toEntity.entity_id,
+                name: toEntity.canonical_name,
+                type: toEntity.entity_type,
+              } : { entity_id: r.to_entity_id },
+              metadata: r.metadata,
+              created_at: r.created_at,
+            };
+          })
+        );
+
+        debug(`get_entity_relationships: found ${relationships.length} relationships in ${Date.now() - startTime}ms`);
+
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              entity_id: entityId,
+              entity_name: entity.canonical_name,
+              entity_type: entity.entity_type,
+              count: enrichedRelationships.length,
+              relationships: enrichedRelationships,
             }, null, 2),
           }],
         };

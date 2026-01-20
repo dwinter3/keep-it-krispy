@@ -606,6 +606,18 @@ configure_claude_desktop() {
         return
     fi
 
+    # Ask for user ID
+    echo ""
+    echo "To enable multi-tenant isolation, you need your User ID."
+    echo "Get it from: https://app.krispy.alpha-pm.dev/settings"
+    echo ""
+    read -p "Enter your User ID (or press Enter to skip for now): " USER_ID
+    if [ -z "$USER_ID" ]; then
+        echo -e "${YELLOW}  Warning: Without KRISP_USER_ID, you won't see any transcripts.${NC}"
+        echo "  You can add it later to the config file."
+        USER_ID=""
+    fi
+
     # Build the MCP config
     local mcp_config=$(cat << EOF
 {
@@ -619,7 +631,10 @@ configure_claude_desktop() {
         "DYNAMODB_TABLE": "krisp-transcripts-index",
         "VECTOR_BUCKET": "krisp-vectors-${account_id}",
         "VECTOR_INDEX": "transcript-chunks",
-        "AWS_PROFILE": "${AWS_PROFILE:-default}"
+        "ENTITIES_TABLE": "krisp-entities",
+        "RELATIONSHIPS_TABLE": "krisp-relationships",
+        "AWS_PROFILE": "${AWS_PROFILE:-default}",
+        "KRISP_USER_ID": "$USER_ID"
       }
     }
   }
@@ -698,6 +713,19 @@ configure_claude_code() {
         return
     fi
 
+    # Ask for user ID if not already set
+    if [ -z "$USER_ID" ]; then
+        echo ""
+        echo "To enable multi-tenant isolation, you need your User ID."
+        echo "Get it from: https://app.krispy.alpha-pm.dev/settings"
+        echo ""
+        read -p "Enter your User ID (or press Enter to skip for now): " USER_ID
+        if [ -z "$USER_ID" ]; then
+            echo -e "${YELLOW}  Warning: Without KRISP_USER_ID, you won't see any transcripts.${NC}"
+            echo "  You can add it later with: claude mcp remove krisp && claude mcp add ..."
+        fi
+    fi
+
     # Check if krisp is already configured
     if claude mcp list 2>/dev/null | grep -q "krisp"; then
         echo "  Removing existing krisp MCP server..."
@@ -711,7 +739,10 @@ configure_claude_code() {
         --env "DYNAMODB_TABLE=krisp-transcripts-index" \
         --env "VECTOR_BUCKET=krisp-vectors-${account_id}" \
         --env "VECTOR_INDEX=transcript-chunks" \
+        --env "ENTITIES_TABLE=krisp-entities" \
+        --env "RELATIONSHIPS_TABLE=krisp-relationships" \
         --env "AWS_PROFILE=${AWS_PROFILE:-default}" \
+        --env "KRISP_USER_ID=$USER_ID" \
         --scope user \
         krisp -- node "$INSTALL_DIR/lambda/mcp-server-ts/dist/stdio-server.cjs"
 

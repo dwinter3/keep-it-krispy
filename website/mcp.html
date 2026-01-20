@@ -41,15 +41,27 @@
       </div>
     </section>
 
+    <!-- Authentication -->
+    <section>
+      <h2>Authentication</h2>
+      <p>The MCP server requires your User ID to identify which transcripts to return. This ensures multi-tenant isolation - you only see your own data.</p>
+
+      <div class="info-box">
+        <strong>KRISP_USER_ID Required:</strong> Set this environment variable to your User ID from the dashboard settings page.
+        <div class="curl-command" style="font-size: 0.85rem; margin-top: 10px;">https://app.krispy.alpha-pm.dev/settings</div>
+      </div>
+    </section>
+
     <!-- Available Tools -->
     <section>
       <h2>Available Tools</h2>
-      <p>The MCP server exposes three tools to Claude:</p>
+      <p>The MCP server exposes seven tools to Claude:</p>
 
+      <h3>Transcript Tools</h3>
       <div class="card-grid">
         <div class="card">
           <h3>list_transcripts</h3>
-          <p>List recent meetings with metadata (title, date, duration, speakers). Filter by date range or speaker.</p>
+          <p>List your recent meetings with metadata (title, date, duration, speakers). Filter by date range or speaker.</p>
           <pre class="architecture" style="font-size: 0.8rem; margin-top: 10px;">{
   "start_date": "2025-01-01",
   "end_date": "2025-01-15",
@@ -59,7 +71,7 @@
         </div>
         <div class="card">
           <h3>search_transcripts</h3>
-          <p>Semantic search across all meetings. Find content by meaning, not just keywords.</p>
+          <p>Semantic search across your meetings. Find content by meaning, not just keywords.</p>
           <pre class="architecture" style="font-size: 0.8rem; margin-top: 10px;">{
   "query": "budget concerns",
   "limit": 5
@@ -70,6 +82,46 @@
           <p>Fetch full transcript content by S3 key. Returns summary, notes, action items, and full text.</p>
           <pre class="architecture" style="font-size: 0.8rem; margin-top: 10px;">{
   "keys": ["meetings/2025/01/14/...json"]
+}</pre>
+        </div>
+        <div class="card">
+          <h3>update_speakers</h3>
+          <p>Correct or identify speakers in a meeting. Map "Speaker 2" to real names.</p>
+          <pre class="architecture" style="font-size: 0.8rem; margin-top: 10px;">{
+  "meeting_id": "abc123",
+  "speaker_mappings": {
+    "Speaker 2": {"name": "John Doe"}
+  }
+}</pre>
+        </div>
+      </div>
+
+      <h3>Knowledge Graph Tools</h3>
+      <div class="card-grid">
+        <div class="card">
+          <h3>list_speakers</h3>
+          <p>List speakers from your knowledge graph. Returns metadata like names, LinkedIn URLs, and companies.</p>
+          <pre class="architecture" style="font-size: 0.8rem; margin-top: 10px;">{
+  "limit": 50,
+  "company": "Acme Corp",
+  "verified_only": true
+}</pre>
+        </div>
+        <div class="card">
+          <h3>list_companies</h3>
+          <p>List companies from your knowledge graph. Filter by type.</p>
+          <pre class="architecture" style="font-size: 0.8rem; margin-top: 10px;">{
+  "limit": 50,
+  "type": "customer"
+}</pre>
+        </div>
+        <div class="card">
+          <h3>get_entity_relationships</h3>
+          <p>Get relationships for an entity. Shows connections between speakers, companies, topics.</p>
+          <pre class="architecture" style="font-size: 0.8rem; margin-top: 10px;">{
+  "entity_id": "speaker_abc123",
+  "direction": "both",
+  "rel_type": "works_at"
 }</pre>
         </div>
       </div>
@@ -99,7 +151,7 @@
 
       <div class="setup-step">
         <h3>2. Add MCP Server Config</h3>
-        <p>Add this to your config file (replace <code>{account-id}</code> with your AWS account ID):</p>
+        <p>Add this to your config file (replace <code>{account-id}</code> and <code>{your-user-id}</code>):</p>
         <pre class="architecture" style="font-size: 0.85rem;">{
   "mcpServers": {
     "krisp": {
@@ -111,13 +163,16 @@
         "DYNAMODB_TABLE": "krisp-transcripts-index",
         "VECTOR_BUCKET": "krisp-vectors-{account-id}",
         "VECTOR_INDEX": "transcript-chunks",
-        "AWS_PROFILE": "default"
+        "ENTITIES_TABLE": "krisp-entities",
+        "RELATIONSHIPS_TABLE": "krisp-relationships",
+        "AWS_PROFILE": "default",
+        "KRISP_USER_ID": "{your-user-id}"
       }
     }
   }
 }</pre>
         <div class="info-box" style="margin-top: 15px;">
-          <strong>Tip:</strong> The installer prints your exact configuration at the end. Copy it from there.
+          <strong>Important:</strong> Get your User ID from the dashboard settings page. Without it, you won't see any transcripts.
         </div>
       </div>
 
@@ -152,12 +207,15 @@
   --env DYNAMODB_TABLE=krisp-transcripts-index \
   --env VECTOR_BUCKET=krisp-vectors-{account-id} \
   --env VECTOR_INDEX=transcript-chunks \
+  --env ENTITIES_TABLE=krisp-entities \
+  --env RELATIONSHIPS_TABLE=krisp-relationships \
   --env AWS_PROFILE=default \
+  --env KRISP_USER_ID={your-user-id} \
   --scope user \
   krisp -- node ~/keep-it-krispy/lambda/mcp-server-ts/dist/stdio-server.cjs</pre>
 
         <div class="info-box" style="margin-top: 15px;">
-          <strong>Scope options:</strong>
+          <strong>Important:</strong> Replace <code>{your-user-id}</code> with your User ID from the dashboard settings.
           <ul style="margin-left: 20px; margin-top: 10px;">
             <li><code>--scope user</code> - Available in all projects</li>
             <li><code>--scope project</code> - Available only in current project</li>
@@ -198,11 +256,14 @@
         <h3>Required Environment Variables</h3>
         <table class="cost-table">
           <tr><th>Variable</th><th>Description</th></tr>
+          <tr><td><code>KRISP_USER_ID</code></td><td><strong>Required:</strong> Your User ID from the dashboard settings</td></tr>
           <tr><td><code>AWS_REGION</code></td><td>AWS region (e.g., us-east-1)</td></tr>
           <tr><td><code>KRISP_S3_BUCKET</code></td><td>S3 bucket for transcripts</td></tr>
-          <tr><td><code>DYNAMODB_TABLE</code></td><td>DynamoDB table name</td></tr>
+          <tr><td><code>DYNAMODB_TABLE</code></td><td>DynamoDB table name (krisp-transcripts-index)</td></tr>
           <tr><td><code>VECTOR_BUCKET</code></td><td>S3 bucket for vectors</td></tr>
-          <tr><td><code>VECTOR_INDEX</code></td><td>Vector index name</td></tr>
+          <tr><td><code>VECTOR_INDEX</code></td><td>Vector index name (transcript-chunks)</td></tr>
+          <tr><td><code>ENTITIES_TABLE</code></td><td>Entities table (krisp-entities, optional)</td></tr>
+          <tr><td><code>RELATIONSHIPS_TABLE</code></td><td>Relationships table (krisp-relationships, optional)</td></tr>
           <tr><td><code>AWS_PROFILE</code></td><td>AWS credentials profile (optional)</td></tr>
         </table>
       </div>
