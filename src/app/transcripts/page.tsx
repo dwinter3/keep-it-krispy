@@ -1894,20 +1894,52 @@ function TranscriptDetail({
     setAudioError(null)
 
     try {
-      const formData = new FormData()
-      formData.append('audio', file)
-
-      const res = await fetch(`/api/transcripts/${transcript.meetingId}/audio`, {
-        method: 'POST',
-        body: formData,
+      // Step 1: Get presigned URL for direct S3 upload
+      const urlRes = await fetch(`/api/transcripts/${transcript.meetingId}/audio`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contentType: file.type,
+          fileSize: file.size,
+          fileName: file.name,
+        }),
       })
 
-      if (!res.ok) {
-        const error = await res.json()
-        throw new Error(error.error || 'Failed to upload audio')
+      if (!urlRes.ok) {
+        const error = await urlRes.json()
+        throw new Error(error.error || 'Failed to get upload URL')
       }
 
-      const data = await res.json()
+      const { uploadUrl, s3Key, format } = await urlRes.json()
+
+      // Step 2: Upload directly to S3 (bypasses Lambda size limits)
+      const uploadRes = await fetch(uploadUrl, {
+        method: 'PUT',
+        headers: { 'Content-Type': file.type },
+        body: file,
+      })
+
+      if (!uploadRes.ok) {
+        throw new Error('Failed to upload file to S3')
+      }
+
+      // Step 3: Confirm upload and update transcript metadata
+      const confirmRes = await fetch(`/api/transcripts/${transcript.meetingId}/audio`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          s3Key,
+          format,
+          fileSize: file.size,
+        }),
+      })
+
+      if (!confirmRes.ok) {
+        const error = await confirmRes.json()
+        throw new Error(error.error || 'Failed to confirm upload')
+      }
+
+      const data = await confirmRes.json()
       setAudioInfo({
         hasAudio: true,
         audioKey: data.audioKey,

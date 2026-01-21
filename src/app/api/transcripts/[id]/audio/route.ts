@@ -13,18 +13,18 @@ const AWS_REGION = process.env.APP_REGION || 'us-east-1'
 // Max file size: 500MB (for long meetings)
 const MAX_FILE_SIZE = 500 * 1024 * 1024
 
-// Allowed audio formats
-const ALLOWED_TYPES = [
-  'audio/mpeg',      // .mp3
-  'audio/wav',       // .wav
-  'audio/x-wav',
-  'audio/ogg',       // .ogg
-  'audio/opus',      // .opus
-  'audio/webm',      // .webm
-  'audio/mp4',       // .m4a
-  'audio/x-m4a',
-  'audio/aac',       // .aac
-]
+// Allowed audio formats and their extensions
+const ALLOWED_TYPES: Record<string, string> = {
+  'audio/mpeg': 'mp3',
+  'audio/wav': 'wav',
+  'audio/x-wav': 'wav',
+  'audio/ogg': 'ogg',
+  'audio/opus': 'opus',
+  'audio/webm': 'webm',
+  'audio/mp4': 'm4a',
+  'audio/x-m4a': 'm4a',
+  'audio/aac': 'aac',
+}
 
 const credentials = process.env.S3_ACCESS_KEY_ID ? {
   accessKeyId: process.env.S3_ACCESS_KEY_ID,
@@ -118,12 +118,12 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 }
 
 /**
- * POST /api/transcripts/[id]/audio
+ * PUT /api/transcripts/[id]/audio
  *
- * Upload audio file for a transcript.
- * Expects multipart form data with 'audio' field.
+ * Get a presigned URL for direct S3 upload.
+ * This bypasses Lambda payload limits by uploading directly to S3.
  */
-export async function POST(request: NextRequest, { params }: RouteParams) {
+export async function PUT(request: NextRequest, { params }: RouteParams) {
   const { id: meetingId } = await params
 
   const session = await auth()
@@ -137,6 +137,30 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
   }
 
   try {
+    // Parse request body for file metadata
+    const body = await request.json()
+    const { contentType, fileSize, fileName } = body
+
+    if (!contentType || !fileSize) {
+      return NextResponse.json({ error: 'contentType and fileSize are required' }, { status: 400 })
+    }
+
+    // Validate file type
+    if (!ALLOWED_TYPES[contentType]) {
+      return NextResponse.json(
+        { error: `Invalid audio format. Allowed: ${Object.keys(ALLOWED_TYPES).join(', ')}` },
+        { status: 400 }
+      )
+    }
+
+    // Validate file size
+    if (fileSize > MAX_FILE_SIZE) {
+      return NextResponse.json(
+        { error: `File too large. Max size: ${MAX_FILE_SIZE / 1024 / 1024}MB` },
+        { status: 400 }
+      )
+    }
+
     // Check transcript ownership
     const getCommand = new GetCommand({
       TableName: TABLE_NAME,
@@ -152,62 +176,96 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       return NextResponse.json({ error: 'Access denied' }, { status: 403 })
     }
 
-    // Parse multipart form data
-    const formData = await request.formData()
-    const audioFile = formData.get('audio') as File | null
-
-    if (!audioFile) {
-      return NextResponse.json({ error: 'No audio file provided' }, { status: 400 })
-    }
-
-    // Validate file type
-    if (!ALLOWED_TYPES.includes(audioFile.type)) {
-      return NextResponse.json(
-        { error: `Invalid audio format. Allowed: ${ALLOWED_TYPES.join(', ')}` },
-        { status: 400 }
-      )
-    }
-
-    // Validate file size
-    if (audioFile.size > MAX_FILE_SIZE) {
-      return NextResponse.json(
-        { error: `File too large. Max size: ${MAX_FILE_SIZE / 1024 / 1024}MB` },
-        { status: 400 }
-      )
-    }
-
     // Determine file extension from MIME type
-    const extMap: Record<string, string> = {
-      'audio/mpeg': 'mp3',
-      'audio/wav': 'wav',
-      'audio/x-wav': 'wav',
-      'audio/ogg': 'ogg',
-      'audio/opus': 'opus',
-      'audio/webm': 'webm',
-      'audio/mp4': 'm4a',
-      'audio/x-m4a': 'm4a',
-      'audio/aac': 'aac',
-    }
-    const ext = extMap[audioFile.type] || 'audio'
+    const ext = ALLOWED_TYPES[contentType]
 
     // Build S3 key: users/{user_id}/audio/{meeting_id}/recording.{ext}
     const s3Key = `users/${user.user_id}/audio/${meetingId}/recording.${ext}`
 
-    // Upload to S3
-    const fileBuffer = Buffer.from(await audioFile.arrayBuffer())
-
+    // Generate presigned URL for direct upload (valid for 15 minutes)
     const putCommand = new PutObjectCommand({
       Bucket: AUDIO_BUCKET,
       Key: s3Key,
-      Body: fileBuffer,
-      ContentType: audioFile.type,
+      ContentType: contentType,
       Metadata: {
         'meeting-id': meetingId,
         'user-id': user.user_id,
-        'original-filename': audioFile.name,
+        'original-filename': fileName || 'recording',
       },
     })
-    await s3.send(putCommand)
+    const uploadUrl = await getSignedUrl(s3, putCommand, { expiresIn: 900 })
+
+    return NextResponse.json({
+      uploadUrl,
+      s3Key,
+      format: ext,
+      expiresIn: 900,
+    })
+  } catch (error) {
+    console.error('Error generating upload URL:', error)
+    return NextResponse.json(
+      { error: 'Failed to generate upload URL', details: String(error) },
+      { status: 500 }
+    )
+  }
+}
+
+/**
+ * POST /api/transcripts/[id]/audio
+ *
+ * Confirm audio upload after direct S3 upload completes.
+ * Updates the transcript metadata with audio info.
+ */
+export async function POST(request: NextRequest, { params }: RouteParams) {
+  const { id: meetingId } = await params
+
+  const session = await auth()
+  if (!session?.user?.email) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
+  const user = await getUserByEmail(session.user.email)
+  if (!user) {
+    return NextResponse.json({ error: 'User not found' }, { status: 404 })
+  }
+
+  try {
+    // Parse request body for upload confirmation
+    const body = await request.json()
+    const { s3Key, format, fileSize } = body
+
+    if (!s3Key || !format) {
+      return NextResponse.json({ error: 's3Key and format are required' }, { status: 400 })
+    }
+
+    // Check transcript ownership
+    const getCommand = new GetCommand({
+      TableName: TABLE_NAME,
+      Key: { meeting_id: meetingId },
+    })
+    const transcript = await dynamodb.send(getCommand)
+
+    if (!transcript.Item) {
+      return NextResponse.json({ error: 'Transcript not found' }, { status: 404 })
+    }
+
+    if (transcript.Item.user_id !== user.user_id) {
+      return NextResponse.json({ error: 'Access denied' }, { status: 403 })
+    }
+
+    // Verify file exists in S3
+    try {
+      const headCommand = new HeadObjectCommand({
+        Bucket: AUDIO_BUCKET,
+        Key: s3Key,
+      })
+      await s3.send(headCommand)
+    } catch (err: unknown) {
+      if ((err as { name?: string }).name === 'NotFound') {
+        return NextResponse.json({ error: 'Audio file not found in S3. Upload may have failed.' }, { status: 400 })
+      }
+      throw err
+    }
 
     // Update transcript record with audio info
     const updateCommand = new UpdateCommand({
@@ -216,8 +274,8 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       UpdateExpression: 'SET audio_s3_key = :key, audio_format = :format, audio_size = :size, audio_uploaded_at = :uploadedAt, diarization_status = :status',
       ExpressionAttributeValues: {
         ':key': s3Key,
-        ':format': ext,
-        ':size': audioFile.size,
+        ':format': format,
+        ':size': fileSize || 0,
         ':uploadedAt': new Date().toISOString(),
         ':status': 'pending',  // Ready for diarization processing
       },
@@ -230,15 +288,15 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     return NextResponse.json({
       success: true,
       audioKey: s3Key,
-      audioFormat: ext,
-      audioSize: audioFile.size,
+      audioFormat: format,
+      audioSize: fileSize,
       diarizationStatus: 'pending',
       message: 'Audio uploaded successfully. Voice print processing will begin shortly.',
     })
   } catch (error) {
-    console.error('Error uploading audio:', error)
+    console.error('Error confirming audio upload:', error)
     return NextResponse.json(
-      { error: 'Failed to upload audio', details: String(error) },
+      { error: 'Failed to confirm audio upload', details: String(error) },
       { status: 500 }
     )
   }
