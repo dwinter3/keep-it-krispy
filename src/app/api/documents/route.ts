@@ -763,7 +763,84 @@ export async function PATCH(request: NextRequest) {
       })
     }
 
-    return NextResponse.json({ error: 'Invalid action. Use "link" or "unlink" with meetingId' }, { status: 400 })
+    // Handle reprocess action
+    if (action === 'reprocess') {
+      // Check if document has a raw file to reprocess
+      const rawFileKey = docResponse.Item.raw_file_key
+      const format = docResponse.Item.format
+
+      if (!rawFileKey) {
+        return NextResponse.json(
+          { error: 'Document has no raw file to reprocess' },
+          { status: 400 }
+        )
+      }
+
+      if (format !== 'pdf') {
+        return NextResponse.json(
+          { error: 'Only PDF documents can be reprocessed' },
+          { status: 400 }
+        )
+      }
+
+      // Set processing flag
+      await dynamodb.send(
+        new UpdateCommand({
+          TableName: TABLE_NAME,
+          Key: { meeting_id: `doc_${documentId}` },
+          UpdateExpression: 'SET processing = :p, processing_error = :pe',
+          ExpressionAttributeValues: {
+            ':p': true,
+            ':pe': null,
+          },
+        })
+      )
+
+      // Invoke Lambda asynchronously to reprocess the document
+      try {
+        await lambdaClient.send(new InvokeCommand({
+          FunctionName: DOCUMENT_PROCESSOR_LAMBDA,
+          InvocationType: 'Event', // Async invocation
+          Payload: JSON.stringify({
+            document_id: documentId,
+            user_id: userId,
+            s3_key: docResponse.Item.s3_key,
+            raw_file_key: rawFileKey,
+            format: 'pdf',
+          }),
+        }))
+        console.log(`Invoked document processor Lambda for reprocessing: ${documentId}`)
+
+        return NextResponse.json({
+          success: true,
+          documentId,
+          processing: true,
+          message: 'Document reprocessing started',
+        })
+      } catch (lambdaError) {
+        console.error('Failed to invoke document processor Lambda:', lambdaError)
+
+        // Reset processing flag on error
+        await dynamodb.send(
+          new UpdateCommand({
+            TableName: TABLE_NAME,
+            Key: { meeting_id: `doc_${documentId}` },
+            UpdateExpression: 'SET processing = :p, processing_error = :pe',
+            ExpressionAttributeValues: {
+              ':p': false,
+              ':pe': 'Failed to start reprocessing',
+            },
+          })
+        )
+
+        return NextResponse.json(
+          { error: 'Failed to start reprocessing', details: String(lambdaError) },
+          { status: 500 }
+        )
+      }
+    }
+
+    return NextResponse.json({ error: 'Invalid action. Use "link", "unlink", or "reprocess"' }, { status: 400 })
   } catch (error) {
     console.error('Document PATCH error:', error)
     return NextResponse.json(
