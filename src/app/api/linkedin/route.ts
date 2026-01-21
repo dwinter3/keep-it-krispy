@@ -40,16 +40,28 @@ function normalizeName(name: string): string {
 /**
  * Parse CSV content into array of objects
  * Handles quoted fields with commas
+ * LinkedIn exports have "Notes:" section at the top that we need to skip
  */
 function parseCSV(content: string): Record<string, string>[] {
   const lines = content.split('\n')
   if (lines.length < 2) return []
 
+  // Find the header row - LinkedIn exports start with "Notes:" section
+  // Look for the line that starts with "First Name" which is the actual header
+  let headerIndex = 0
+  for (let i = 0; i < Math.min(lines.length, 10); i++) {
+    const line = lines[i].trim()
+    if (line.startsWith('First Name') || line.startsWith('"First Name"')) {
+      headerIndex = i
+      break
+    }
+  }
+
   // Parse header row
-  const headers = parseCSVLine(lines[0])
+  const headers = parseCSVLine(lines[headerIndex])
 
   const results: Record<string, string>[] = []
-  for (let i = 1; i < lines.length; i++) {
+  for (let i = headerIndex + 1; i < lines.length; i++) {
     const line = lines[i].trim()
     if (!line) continue
 
