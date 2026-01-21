@@ -19,6 +19,8 @@ interface Document {
   linkedTranscripts: string[]
   linkedTranscriptCount: number
   processing?: boolean
+  processingError?: string
+  rawFileKey?: string
 }
 
 interface DocumentWithContent extends Document {
@@ -92,6 +94,12 @@ export default function DocumentsPage() {
   const [driveSearch, setDriveSearch] = useState('')
   const [importingFiles, setImportingFiles] = useState<Set<string>>(new Set())
 
+  // Multi-select and bulk operations
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [bulkDeleteConfirm, setBulkDeleteConfirm] = useState(false)
+  const [bulkDeleting, setBulkDeleting] = useState(false)
+  const [reprocessingIds, setReprocessingIds] = useState<Set<string>>(new Set())
+
   useEffect(() => {
     fetchDocuments()
     checkDriveConnection()
@@ -158,8 +166,137 @@ export default function DocumentsPage() {
         setSelectedDocument(null)
       }
       setDeleteConfirm(null)
+      // Clear from selection if selected
+      setSelectedIds(prev => {
+        const next = new Set(prev)
+        next.delete(documentId)
+        return next
+      })
     } catch (err) {
       setError(String(err))
+    }
+  }
+
+  // Reprocess document
+  async function reprocessDocument(documentId: string) {
+    setReprocessingIds(prev => new Set(prev).add(documentId))
+    setError(null)
+
+    try {
+      const res = await fetch('/api/documents', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          documentId,
+          action: 'reprocess',
+        }),
+      })
+
+      if (!res.ok) {
+        const data = await res.json()
+        throw new Error(data.error || 'Failed to start reprocessing')
+      }
+
+      // Update document status in list
+      setDocuments(prev =>
+        prev.map(d =>
+          d.documentId === documentId
+            ? { ...d, processing: true }
+            : d
+        )
+      )
+
+      // Update selected document if it's the one being reprocessed
+      if (selectedDocument?.documentId === documentId) {
+        setSelectedDocument(prev => prev ? { ...prev, processing: true } : null)
+      }
+
+      setUploadProgress('Document reprocessing started. This may take a few minutes.')
+    } catch (err) {
+      setError(String(err))
+    } finally {
+      setReprocessingIds(prev => {
+        const next = new Set(prev)
+        next.delete(documentId)
+        return next
+      })
+    }
+  }
+
+  // Multi-select handlers
+  function toggleSelectDocument(documentId: string, event: React.MouseEvent) {
+    event.stopPropagation()
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      if (next.has(documentId)) {
+        next.delete(documentId)
+      } else {
+        next.add(documentId)
+      }
+      return next
+    })
+  }
+
+  function toggleSelectAll() {
+    const filteredDocs = documents.filter(doc => sourceFilter === 'all' || doc.source === sourceFilter)
+    if (selectedIds.size === filteredDocs.length) {
+      setSelectedIds(new Set())
+    } else {
+      setSelectedIds(new Set(filteredDocs.map(d => d.documentId)))
+    }
+  }
+
+  // Bulk delete
+  async function bulkDeleteDocuments() {
+    if (selectedIds.size === 0) return
+
+    setBulkDeleting(true)
+    setError(null)
+
+    try {
+      const res = await fetch('/api/documents/bulk', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          documentIds: Array.from(selectedIds),
+        }),
+      })
+
+      if (!res.ok) {
+        const data = await res.json()
+        throw new Error(data.error || 'Failed to delete documents')
+      }
+
+      const data = await res.json()
+
+      // Remove deleted documents from state
+      const deletedIds = new Set(
+        data.results
+          .filter((r: { success: boolean }) => r.success)
+          .map((r: { documentId: string }) => r.documentId)
+      )
+
+      setDocuments(prev => prev.filter(d => !deletedIds.has(d.documentId)))
+
+      // Clear selection
+      setSelectedIds(new Set())
+      setBulkDeleteConfirm(false)
+
+      // Close detail panel if showing a deleted document
+      if (selectedDocument && deletedIds.has(selectedDocument.documentId)) {
+        setSelectedDocument(null)
+      }
+
+      // Show result message
+      if (data.failed > 0) {
+        setError(`Deleted ${data.deleted} documents. ${data.failed} failed.`)
+      } else {
+        setUploadProgress(`Successfully deleted ${data.deleted} document${data.deleted !== 1 ? 's' : ''}`)
+      }
+    } catch (err) {
+      setError(String(err))
+    } finally {
+      setBulkDeleting(false)
     }
   }
 
@@ -614,25 +751,52 @@ export default function DocumentsPage() {
           </div>
         </div>
 
-        {/* Source filter */}
-        <div className="mb-4 flex items-center gap-2">
-          <span className="text-sm text-gray-500 dark:text-gray-400">Filter:</span>
-          <div className="flex flex-wrap gap-2">
-            {(['all', 'upload', 'url', 'notion', 'drive'] as const).map((filter) => (
-              <button
-                key={filter}
-                onClick={() => setSourceFilter(filter)}
-                className={`px-3 py-1 text-sm rounded-full transition-colors flex items-center gap-1.5 ${
-                  sourceFilter === filter
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
-                }`}
-              >
-                {filter !== 'all' && getSourceIcon(filter)}
-                {filter === 'all' ? 'All' : filter === 'url' ? 'Web' : filter === 'notion' ? 'Notion' : filter === 'drive' ? 'Drive' : 'Upload'}
-              </button>
-            ))}
+        {/* Source filter and bulk actions */}
+        <div className="mb-4 flex items-center justify-between flex-wrap gap-3">
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-gray-500 dark:text-gray-400">Filter:</span>
+            <div className="flex flex-wrap gap-2">
+              {(['all', 'upload', 'url', 'notion', 'drive'] as const).map((filter) => (
+                <button
+                  key={filter}
+                  onClick={() => setSourceFilter(filter)}
+                  className={`px-3 py-1 text-sm rounded-full transition-colors flex items-center gap-1.5 ${
+                    sourceFilter === filter
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
+                  }`}
+                >
+                  {filter !== 'all' && getSourceIcon(filter)}
+                  {filter === 'all' ? 'All' : filter === 'url' ? 'Web' : filter === 'notion' ? 'Notion' : filter === 'drive' ? 'Drive' : 'Upload'}
+                </button>
+              ))}
+            </div>
           </div>
+
+          {/* Bulk actions */}
+          {documents.length > 0 && (
+            <div className="flex items-center gap-2">
+              <button
+                onClick={toggleSelectAll}
+                className="px-3 py-1 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300 transition-colors"
+              >
+                {selectedIds.size === documents.filter(d => sourceFilter === 'all' || d.source === sourceFilter).length && selectedIds.size > 0
+                  ? 'Deselect All'
+                  : 'Select All'}
+              </button>
+              {selectedIds.size > 0 && (
+                <button
+                  onClick={() => setBulkDeleteConfirm(true)}
+                  className="px-3 py-1 text-sm rounded-lg bg-red-600 hover:bg-red-700 text-white transition-colors flex items-center gap-1"
+                >
+                  <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
+                  </svg>
+                  Delete {selectedIds.size} Selected
+                </button>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Error message */}
@@ -761,50 +925,92 @@ export default function DocumentsPage() {
                       className={`p-4 cursor-pointer transition-colors ${
                         selectedDocument?.documentId === doc.documentId
                           ? 'bg-blue-50 dark:bg-blue-900/20'
+                          : selectedIds.has(doc.documentId)
+                          ? 'bg-indigo-50 dark:bg-indigo-900/20'
                           : 'hover:bg-gray-50 dark:hover:bg-gray-700/50'
                       }`}
                     >
-                      <div className="flex items-start justify-between gap-4">
-                        <div className="flex-1 min-w-0">
-                          <h3 className="font-medium text-gray-900 dark:text-white truncate">
-                            {doc.title}
-                          </h3>
-                          <div className="mt-1 flex items-center gap-3 text-sm text-gray-500 dark:text-gray-400">
-                            <span className="flex items-center gap-1">
-                              {getSourceIcon(doc.source)}
-                              {doc.source === 'url' ? 'Web' : doc.source === 'drive' ? 'Drive' : doc.source === 'notion' ? 'Notion' : 'Upload'}
-                            </span>
-                            <span>{(doc.wordCount ?? 0).toLocaleString()} words</span>
-                            {doc.fileSize && <span>{formatFileSize(doc.fileSize)}</span>}
-                            <span>{formatRelativeTime(doc.importedAt)}</span>
-                          </div>
-                          {doc.linkedTranscriptCount > 0 && (
-                            <div className="mt-1 flex items-center gap-1 text-xs text-indigo-600 dark:text-indigo-400">
-                              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
-                              </svg>
-                              {doc.linkedTranscriptCount} linked transcript{doc.linkedTranscriptCount !== 1 ? 's' : ''}
-                            </div>
-                          )}
+                      <div className="flex items-start gap-3">
+                        {/* Checkbox for multi-select */}
+                        <div
+                          onClick={(e) => toggleSelectDocument(doc.documentId, e)}
+                          className="flex-shrink-0 pt-0.5"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={selectedIds.has(doc.documentId)}
+                            onChange={() => {}}
+                            className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600 cursor-pointer"
+                          />
                         </div>
-                        <div className="flex items-center gap-2">
-                          <span className={`px-2 py-0.5 rounded text-xs font-medium uppercase ${getFormatBadgeColor(doc.format)}`}>
-                            {doc.format}
-                          </span>
-                          {doc.processing && (
-                            <span className="px-2 py-0.5 rounded text-xs font-medium bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 flex items-center gap-1">
-                              <svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
-                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                              </svg>
-                              Processing
+                        <div className="flex-1 min-w-0 flex items-start justify-between gap-4">
+                          <div className="flex-1 min-w-0">
+                            <h3 className="font-medium text-gray-900 dark:text-white truncate">
+                              {doc.title}
+                            </h3>
+                            <div className="mt-1 flex items-center gap-3 text-sm text-gray-500 dark:text-gray-400">
+                              <span className="flex items-center gap-1">
+                                {getSourceIcon(doc.source)}
+                                {doc.source === 'url' ? 'Web' : doc.source === 'drive' ? 'Drive' : doc.source === 'notion' ? 'Notion' : 'Upload'}
+                              </span>
+                              <span className={(doc.wordCount ?? 0) === 0 && !doc.processing ? 'text-orange-500 dark:text-orange-400' : ''}>
+                                {(doc.wordCount ?? 0).toLocaleString()} words
+                              </span>
+                              {doc.fileSize && <span>{formatFileSize(doc.fileSize)}</span>}
+                              <span>{formatRelativeTime(doc.importedAt)}</span>
+                            </div>
+                            {doc.linkedTranscriptCount > 0 && (
+                              <div className="mt-1 flex items-center gap-1 text-xs text-indigo-600 dark:text-indigo-400">
+                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                                </svg>
+                                {doc.linkedTranscriptCount} linked transcript{doc.linkedTranscriptCount !== 1 ? 's' : ''}
+                              </div>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2">
+                            {/* Reprocess button for documents with 0 words (PDF only) */}
+                            {(doc.wordCount ?? 0) === 0 && !doc.processing && doc.format === 'pdf' && (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  reprocessDocument(doc.documentId)
+                                }}
+                                disabled={reprocessingIds.has(doc.documentId)}
+                                className="px-2 py-0.5 rounded text-xs font-medium bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400 hover:bg-orange-200 dark:hover:bg-orange-900/50 transition-colors flex items-center gap-1"
+                                title="Reprocess this document to extract text"
+                              >
+                                {reprocessingIds.has(doc.documentId) ? (
+                                  <svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
+                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                  </svg>
+                                ) : (
+                                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                  </svg>
+                                )}
+                                Reprocess
+                              </button>
+                            )}
+                            <span className={`px-2 py-0.5 rounded text-xs font-medium uppercase ${getFormatBadgeColor(doc.format)}`}>
+                              {doc.format}
                             </span>
-                          )}
-                          {doc.isPrivate && (
-                            <span className="px-2 py-0.5 rounded text-xs font-medium bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400">
-                              Private
-                            </span>
-                          )}
+                            {doc.processing && (
+                              <span className="px-2 py-0.5 rounded text-xs font-medium bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 flex items-center gap-1">
+                                <svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
+                                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                </svg>
+                                Processing
+                              </span>
+                            )}
+                            {doc.isPrivate && (
+                              <span className="px-2 py-0.5 rounded text-xs font-medium bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400">
+                                Private
+                              </span>
+                            )}
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -947,8 +1153,35 @@ export default function DocumentsPage() {
                     </div>
                   )}
 
-                  {/* Delete button */}
-                  <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
+                  {/* Actions */}
+                  <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700 space-y-3">
+                    {/* Reprocess button for PDFs with 0 words */}
+                    {(selectedDocument.wordCount ?? 0) === 0 && !selectedDocument.processing && selectedDocument.format === 'pdf' && (
+                      <button
+                        onClick={() => reprocessDocument(selectedDocument.documentId)}
+                        disabled={reprocessingIds.has(selectedDocument.documentId)}
+                        className="w-full px-4 py-2 bg-orange-100 dark:bg-orange-900/30 hover:bg-orange-200 dark:hover:bg-orange-900/50 text-orange-700 dark:text-orange-400 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2"
+                      >
+                        {reprocessingIds.has(selectedDocument.documentId) ? (
+                          <>
+                            <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
+                            Starting reprocess...
+                          </>
+                        ) : (
+                          <>
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                            </svg>
+                            Reprocess Document
+                          </>
+                        )}
+                      </button>
+                    )}
+
+                    {/* Delete button */}
                     {deleteConfirm === selectedDocument.documentId ? (
                       <div className="flex items-center gap-2">
                         <span className="text-sm text-gray-500 dark:text-gray-400">Delete this document?</span>
@@ -1174,6 +1407,65 @@ export default function DocumentsPage() {
                   className="px-4 py-2 bg-gray-200 dark:bg-gray-600 hover:bg-gray-300 dark:hover:bg-gray-500 rounded-lg text-gray-700 dark:text-gray-200 transition-colors"
                 >
                   Done
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Bulk Delete Confirmation Modal */}
+        {bulkDeleteConfirm && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+            <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full max-w-md mx-4 p-6">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="flex-shrink-0 w-10 h-10 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center">
+                  <svg className="w-5 h-5 text-red-600 dark:text-red-400" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                  </svg>
+                </div>
+                <div>
+                  <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+                    Delete {selectedIds.size} Document{selectedIds.size !== 1 ? 's' : ''}?
+                  </h3>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">
+                    This action cannot be undone.
+                  </p>
+                </div>
+              </div>
+
+              <p className="text-sm text-gray-600 dark:text-gray-300 mb-6">
+                This will permanently delete {selectedIds.size} document{selectedIds.size !== 1 ? 's' : ''} and their searchable content (embeddings). Any linked transcripts will be unlinked but not deleted.
+              </p>
+
+              <div className="flex justify-end gap-3">
+                <button
+                  onClick={() => setBulkDeleteConfirm(false)}
+                  disabled={bulkDeleting}
+                  className="px-4 py-2 bg-gray-200 dark:bg-gray-600 hover:bg-gray-300 dark:hover:bg-gray-500 rounded-lg text-sm font-medium text-gray-700 dark:text-gray-200 transition-colors disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={bulkDeleteDocuments}
+                  disabled={bulkDeleting}
+                  className="px-4 py-2 bg-red-600 hover:bg-red-700 rounded-lg text-sm font-medium text-white transition-colors flex items-center gap-2 disabled:opacity-50"
+                >
+                  {bulkDeleting ? (
+                    <>
+                      <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                      </svg>
+                      Deleting...
+                    </>
+                  ) : (
+                    <>
+                      <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
+                      </svg>
+                      Delete Documents
+                    </>
+                  )}
                 </button>
               </div>
             </div>
