@@ -9,7 +9,7 @@
  */
 
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
-import { DynamoDBDocumentClient, QueryCommand } from '@aws-sdk/lib-dynamodb';
+import { DynamoDBDocumentClient, GetCommand } from '@aws-sdk/lib-dynamodb';
 import { createHash } from 'crypto';
 
 const AWS_REGION = process.env.AWS_REGION || 'us-east-1';
@@ -55,22 +55,19 @@ async function getUserFromApiKey(apiKey: string): Promise<UserContext | null> {
   const client = getDocClient();
 
   try {
-    const command = new QueryCommand({
+    // key_hash is the primary key - use GetCommand directly
+    const command = new GetCommand({
       TableName: API_KEYS_TABLE,
-      IndexName: 'keyid-index',
-      KeyConditionExpression: 'key_hash = :kh',
-      ExpressionAttributeValues: {
-        ':kh': keyHash,
-      },
+      Key: { key_hash: keyHash },
     });
 
     const response = await client.send(command);
-    const items = response.Items || [];
+    const item = response.Item;
 
-    if (items.length > 0 && items[0].status === 'active') {
+    if (item && item.status === 'active') {
       return {
-        userId: items[0].user_id as string,
-        email: items[0].email as string | undefined,
+        userId: item.user_id as string,
+        email: item.email as string | undefined,
         source: 'api_key',
       };
     }

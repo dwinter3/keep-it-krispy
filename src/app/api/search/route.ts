@@ -2,9 +2,33 @@ import { NextRequest, NextResponse } from 'next/server'
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb'
 import { DynamoDBDocumentClient, GetCommand } from '@aws-sdk/lib-dynamodb'
 import { getMemoryProvider } from '@/lib/memory'
+import { auth } from '@/lib/auth'
+import { getUserByEmail, getUserByApiKey } from '@/lib/users'
 
 const AWS_REGION = process.env.APP_REGION || 'us-east-1'
 const TABLE_NAME = process.env.DYNAMODB_TABLE || 'krisp-transcripts-index'
+
+/**
+ * Authenticate request via session or API key
+ * Returns user_id if authenticated, null otherwise
+ */
+async function authenticateRequest(request: NextRequest): Promise<string | null> {
+  // Check for API key in header
+  const apiKey = request.headers.get('x-api-key')
+  if (apiKey) {
+    const user = await getUserByApiKey(apiKey)
+    return user?.user_id || null
+  }
+
+  // Fall back to session auth
+  const session = await auth()
+  if (session?.user?.email) {
+    const user = await getUserByEmail(session.user.email)
+    return user?.user_id || null
+  }
+
+  return null
+}
 
 // AWS credentials for DynamoDB
 const credentials = process.env.S3_ACCESS_KEY_ID
@@ -29,9 +53,16 @@ interface MeetingMetadata {
   pk?: string
   format?: string
   document_id?: string
+  user_id?: string
 }
 
 export async function GET(request: NextRequest) {
+  // Authenticate the request
+  const userId = await authenticateRequest(request)
+  if (!userId) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
   const { searchParams } = new URL(request.url)
   const query = searchParams.get('q')
   const limit = parseInt(searchParams.get('limit') || '10')
@@ -101,6 +132,12 @@ export async function GET(request: NextRequest) {
     const results = []
     for (const [meetingId, group] of meetingGroups) {
       const metadata = await getMeetingMetadata(meetingId)
+
+      // Skip if user doesn't own this item (user_id filter for tenant isolation)
+      // Allow items without user_id (legacy data) for backwards compatibility
+      if (metadata?.user_id && metadata.user_id !== userId) {
+        continue
+      }
 
       // Skip private transcripts
       if (metadata?.isPrivate === true) {

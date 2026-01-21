@@ -318,5 +318,94 @@ export function createServer(userId?: string): McpServer {
     }
   );
 
+  // Tool: test_connection
+  server.tool(
+    'test_connection',
+    'Test MCP server connectivity and verify all dependencies are working. Returns status of S3, DynamoDB, and other connections.',
+    {},
+    async () => {
+      const checks: {
+        name: string;
+        status: 'ok' | 'error';
+        message: string;
+        latencyMs?: number;
+      }[] = [];
+
+      // Check 1: S3 bucket access
+      const s3Start = Date.now();
+      try {
+        const transcripts = await s3Client.listTranscripts(undefined, undefined, 1);
+        checks.push({
+          name: 's3_transcripts',
+          status: 'ok',
+          message: `Found ${transcripts.length} transcript(s)`,
+          latencyMs: Date.now() - s3Start,
+        });
+      } catch (error) {
+        checks.push({
+          name: 's3_transcripts',
+          status: 'error',
+          message: error instanceof Error ? error.message : 'S3 access failed',
+          latencyMs: Date.now() - s3Start,
+        });
+      }
+
+      // Check 2: DynamoDB speakers table
+      const dynamoStart = Date.now();
+      try {
+        const speakers = await dynamoClient.listSpeakers(currentUserId, { limit: 1 });
+        checks.push({
+          name: 'dynamodb_speakers',
+          status: 'ok',
+          message: `Speakers table accessible (${speakers.length} returned)`,
+          latencyMs: Date.now() - dynamoStart,
+        });
+      } catch (error) {
+        checks.push({
+          name: 'dynamodb_speakers',
+          status: 'error',
+          message: error instanceof Error ? error.message : 'DynamoDB access failed',
+          latencyMs: Date.now() - dynamoStart,
+        });
+      }
+
+      // Check 3: LinkedIn data access
+      const linkedinStart = Date.now();
+      try {
+        const stats = await dynamoClient.getLinkedInStats(currentUserId);
+        checks.push({
+          name: 'linkedin_data',
+          status: 'ok',
+          message: `LinkedIn stats accessible (${stats.totalConnections || 0} connections)`,
+          latencyMs: Date.now() - linkedinStart,
+        });
+      } catch (error) {
+        checks.push({
+          name: 'linkedin_data',
+          status: 'error',
+          message: error instanceof Error ? error.message : 'LinkedIn data access failed',
+          latencyMs: Date.now() - linkedinStart,
+        });
+      }
+
+      const allOk = checks.every(c => c.status === 'ok');
+      const totalLatency = checks.reduce((sum, c) => sum + (c.latencyMs || 0), 0);
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            status: allOk ? 'healthy' : 'degraded',
+            userId: currentUserId.substring(0, 8) + '...',
+            authSource: 'env_var',
+            timestamp: new Date().toISOString(),
+            totalLatencyMs: totalLatency,
+            checks,
+          }, null, 2),
+        }],
+      };
+    }
+  );
+
   return server;
 }

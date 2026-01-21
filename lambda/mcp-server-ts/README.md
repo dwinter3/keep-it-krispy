@@ -2,9 +2,10 @@
 
 MCP (Model Context Protocol) server that gives Claude access to your Krisp meeting transcripts, speakers, companies, and LinkedIn connections.
 
-Two implementations are available:
+Three implementations are available:
 - **Stdio Server** - For Claude Desktop (local usage)
 - **Lambda Handler** - For remote HTTP access via AWS Lambda
+- **Amplify Proxy** - For web dashboard integration (session-based auth)
 
 ## Quick Start
 
@@ -42,6 +43,39 @@ Two implementations are available:
 
 4. Ask Claude: "List my recent meetings" or "Search my transcripts for budget discussions"
 
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      MCP Clients                             │
+├─────────────────────────────────────────────────────────────┤
+│  Claude Desktop     Web Dashboard      Third-Party Apps     │
+│        │                  │                   │              │
+│        ▼                  ▼                   ▼              │
+│   ┌─────────┐       ┌──────────┐        ┌─────────┐        │
+│   │ Stdio   │       │ Amplify  │        │  HTTP   │        │
+│   │ Server  │       │  Proxy   │        │ Direct  │        │
+│   └────┬────┘       └────┬─────┘        └────┬────┘        │
+│        │                 │                   │              │
+│        │                 ▼                   │              │
+│        │           ┌───────────┐             │              │
+│        │           │  /api/mcp │             │              │
+│        │           └─────┬─────┘             │              │
+│        │                 │                   │              │
+│        │                 ▼                   ▼              │
+│        │         ┌────────────────────────────┐             │
+│        │         │   Lambda MCP Server        │             │
+│        │         │   (Function URL)           │             │
+│        │         └────────────────────────────┘             │
+│        │                      │                             │
+│        ▼                      ▼                             │
+│   ┌────────────────────────────────────────────┐           │
+│   │           Shared Data Layer                 │           │
+│   │  S3 Transcripts  │  DynamoDB  │  S3 Vectors │           │
+│   └────────────────────────────────────────────┘           │
+└─────────────────────────────────────────────────────────────┘
+```
+
 ## When to Use Each Implementation
 
 | Use Case | Implementation | Why |
@@ -59,9 +93,16 @@ Two implementations are available:
 | Tool | Description |
 |------|-------------|
 | `list_transcripts` | List recent meetings with metadata (title, date, speakers, duration). Supports filtering by date range or speaker name. |
-| `search_transcripts` | Semantic search using AI embeddings. Finds conceptually similar content even with different wording. |
+| `search_transcripts` | Keyword search in transcript content, summary, and notes. |
+| `semantic_search` | **NEW** Vector/semantic search using AI embeddings via Keep It Krispy API. Finds conceptually similar content even with different wording. |
 | `get_transcripts` | Fetch full transcript content by S3 key. Includes summary, notes, action items. |
 | `update_speakers` | Correct speaker names (e.g., "Speaker 2" to "John Smith"). Persists for future fetches. |
+
+### Health & Diagnostics
+
+| Tool | Description |
+|------|-------------|
+| `test_connection` | **NEW** Health check for all MCP dependencies (S3, DynamoDB, API). Returns latency metrics and status. |
 
 ### Knowledge Graph Tools
 
@@ -117,6 +158,48 @@ Logs are written to stderr and appear in:
 View logs:
 ```bash
 tail -f ~/Library/Logs/Claude/mcp-server-krisp.log
+```
+
+## Amplify Proxy Setup (Web Dashboard)
+
+The Amplify proxy provides session-based authentication for web clients, eliminating the need for API key management.
+
+### Endpoint
+
+```
+https://app.krispy.alpha-pm.dev/api/mcp
+```
+
+### How It Works
+
+1. User authenticates via NextAuth (Google OAuth)
+2. Proxy looks up user's API key from DynamoDB
+3. Proxies request to Lambda MCP endpoint with API key
+4. Returns response to client
+
+### Example Request (from web app)
+
+```javascript
+const response = await fetch('/api/mcp', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    jsonrpc: '2.0',
+    method: 'tools/call',
+    params: {
+      name: 'list_transcripts',
+      arguments: { limit: 5 }
+    },
+    id: 1
+  })
+});
+```
+
+### Health Check
+
+```bash
+curl https://app.krispy.alpha-pm.dev/api/mcp
+# Returns: { "proxy": "healthy", "lambda": { "status": "healthy", ... } }
 ```
 
 ## Lambda Handler Setup (Remote Access)

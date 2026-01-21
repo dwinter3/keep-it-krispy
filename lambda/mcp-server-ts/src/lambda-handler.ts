@@ -5,10 +5,23 @@
  * Supports API key authentication via X-API-Key header.
  */
 
-import 'aws-lambda'; // Import for awslambda global types
 import { S3TranscriptClient } from './s3-client.js';
 import { DynamoTranscriptClient } from './dynamo-client.js';
 import { getUserContext, UserContext, debugAuthContext } from './auth.js';
+import { KrispyApiClient } from './krispy-api-client.js';
+
+// Declare awslambda global (available in Lambda runtime for streaming)
+declare const awslambda: {
+  streamifyResponse: <T>(
+    handler: (event: T, responseStream: ResponseStream) => Promise<void>
+  ) => (event: T) => Promise<void>;
+  HttpResponseStream: {
+    from: (
+      responseStream: ResponseStream,
+      metadata: { statusCode: number; headers: Record<string, string> }
+    ) => ResponseStream;
+  };
+};
 
 interface FunctionUrlEvent {
   version: string;
@@ -26,8 +39,11 @@ interface FunctionUrlEvent {
   };
 }
 
-// Use awslambda.HttpResponseStream from @types/aws-lambda
-type ResponseStream = awslambda.HttpResponseStream;
+// ResponseStream interface for Lambda response streaming
+interface ResponseStream {
+  write(data: string | Buffer): void;
+  end(): void;
+}
 
 interface JsonRpcRequest {
   jsonrpc: string;
@@ -185,13 +201,38 @@ const TOOLS = [
       },
     },
   },
+  {
+    name: 'semantic_search',
+    description: 'Semantic search across meeting transcripts and documents using AI embeddings. Finds conceptually similar content even if exact words differ. Returns ranked results with relevance scores and text snippets.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Natural language search query (e.g., "discussion about project timeline")' },
+        limit: { type: 'number', description: 'Maximum results to return (default: 10)' },
+        speaker: { type: 'string', description: 'Filter by speaker name' },
+        from: { type: 'string', description: 'Start date filter (YYYY-MM-DD)' },
+        to: { type: 'string', description: 'End date filter (YYYY-MM-DD)' },
+      },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'test_connection',
+    description: 'Test MCP server connectivity and verify all dependencies are working. Returns status of S3, DynamoDB, and API connections.',
+    inputSchema: {
+      type: 'object',
+      properties: {},
+    },
+  },
 ];
 
-async function handleMcpRequest(request: JsonRpcRequest, userContext: UserContext): Promise<JsonRpcResponse> {
+async function handleMcpRequest(request: JsonRpcRequest, userContext: UserContext, apiKey?: string): Promise<JsonRpcResponse> {
   const { method, params, id } = request;
   // User ID for multi-tenant data isolation
-  // TODO: Pass userId to S3TranscriptClient methods when user-scoped queries are implemented
   const userId = userContext.userId;
+
+  // API client for authenticated calls to Keep It Krispy API (for semantic search)
+  const apiClient = apiKey ? new KrispyApiClient(apiKey) : null;
 
   // Log tool calls with user context for audit trail
   if (method === 'tools/call') {
@@ -495,6 +536,184 @@ async function handleMcpRequest(request: JsonRpcRequest, userContext: UserContex
             };
           }
 
+          case 'semantic_search': {
+            if (!apiClient) {
+              return {
+                jsonrpc: '2.0',
+                error: {
+                  code: -32603,
+                  message: 'Semantic search requires API key authentication. Please provide an API key via X-API-Key header.',
+                },
+                id,
+              };
+            }
+
+            const query = toolArgs.query as string;
+            const limit = (toolArgs.limit as number) || 10;
+            const speaker = toolArgs.speaker as string | undefined;
+            const from = toolArgs.from as string | undefined;
+            const to = toolArgs.to as string | undefined;
+
+            try {
+              const searchResponse = await apiClient.search(query, { limit, speaker, from, to });
+
+              return {
+                jsonrpc: '2.0',
+                result: {
+                  content: [{
+                    type: 'text',
+                    text: JSON.stringify({
+                      query: searchResponse.query,
+                      searchType: searchResponse.searchType,
+                      filters: searchResponse.filters,
+                      count: searchResponse.count,
+                      results: searchResponse.results.map(r => ({
+                        meetingId: r.meetingId,
+                        s3Key: r.s3Key,
+                        title: r.title,
+                        date: r.date,
+                        speakers: r.speakers,
+                        duration: r.duration,
+                        topic: r.topic,
+                        relevanceScore: r.relevanceScore,
+                        matchingChunks: r.matchingChunks,
+                        snippets: r.snippets,
+                        type: r.type,
+                        format: r.format,
+                        documentId: r.documentId,
+                      })),
+                    }, null, 2),
+                  }],
+                },
+                id,
+              };
+            } catch (error) {
+              console.error('Semantic search error:', error);
+              return {
+                jsonrpc: '2.0',
+                error: {
+                  code: -32603,
+                  message: error instanceof Error ? error.message : 'Semantic search failed',
+                },
+                id,
+              };
+            }
+          }
+
+          case 'test_connection': {
+            const checks: {
+              name: string;
+              status: 'ok' | 'error';
+              message: string;
+              latencyMs?: number;
+            }[] = [];
+
+            // Check 1: S3 bucket access
+            const s3Start = Date.now();
+            try {
+              const transcripts = await s3Client.listTranscripts(undefined, undefined, 1);
+              checks.push({
+                name: 's3_transcripts',
+                status: 'ok',
+                message: `Found ${transcripts.length} transcript(s)`,
+                latencyMs: Date.now() - s3Start,
+              });
+            } catch (error) {
+              checks.push({
+                name: 's3_transcripts',
+                status: 'error',
+                message: error instanceof Error ? error.message : 'S3 access failed',
+                latencyMs: Date.now() - s3Start,
+              });
+            }
+
+            // Check 2: DynamoDB speakers table
+            const dynamoStart = Date.now();
+            try {
+              const speakers = await dynamoClient.listSpeakers(userId, { limit: 1 });
+              checks.push({
+                name: 'dynamodb_speakers',
+                status: 'ok',
+                message: `Speakers table accessible (${speakers.length} returned)`,
+                latencyMs: Date.now() - dynamoStart,
+              });
+            } catch (error) {
+              checks.push({
+                name: 'dynamodb_speakers',
+                status: 'error',
+                message: error instanceof Error ? error.message : 'DynamoDB access failed',
+                latencyMs: Date.now() - dynamoStart,
+              });
+            }
+
+            // Check 3: LinkedIn data access
+            const linkedinStart = Date.now();
+            try {
+              const stats = await dynamoClient.getLinkedInStats(userId);
+              checks.push({
+                name: 'linkedin_data',
+                status: 'ok',
+                message: `LinkedIn stats accessible (${stats.totalConnections || 0} connections)`,
+                latencyMs: Date.now() - linkedinStart,
+              });
+            } catch (error) {
+              checks.push({
+                name: 'linkedin_data',
+                status: 'error',
+                message: error instanceof Error ? error.message : 'LinkedIn data access failed',
+                latencyMs: Date.now() - linkedinStart,
+              });
+            }
+
+            // Check 4: Semantic search API (if API key available)
+            if (apiClient) {
+              const apiStart = Date.now();
+              try {
+                const searchResponse = await apiClient.search('test', { limit: 1 });
+                checks.push({
+                  name: 'semantic_search_api',
+                  status: 'ok',
+                  message: `API accessible (${searchResponse.count} result(s) for test query)`,
+                  latencyMs: Date.now() - apiStart,
+                });
+              } catch (error) {
+                checks.push({
+                  name: 'semantic_search_api',
+                  status: 'error',
+                  message: error instanceof Error ? error.message : 'API access failed',
+                  latencyMs: Date.now() - apiStart,
+                });
+              }
+            } else {
+              checks.push({
+                name: 'semantic_search_api',
+                status: 'error',
+                message: 'Skipped - requires API key authentication',
+              });
+            }
+
+            const allOk = checks.every(c => c.status === 'ok');
+            const totalLatency = checks.reduce((sum, c) => sum + (c.latencyMs || 0), 0);
+
+            return {
+              jsonrpc: '2.0',
+              result: {
+                content: [{
+                  type: 'text',
+                  text: JSON.stringify({
+                    status: allOk ? 'healthy' : 'degraded',
+                    userId: userId.substring(0, 8) + '...',
+                    authSource: userContext.source,
+                    timestamp: new Date().toISOString(),
+                    totalLatencyMs: totalLatency,
+                    checks,
+                  }, null, 2),
+                }],
+              },
+              id,
+            };
+          }
+
           default:
             return {
               jsonrpc: '2.0',
@@ -613,7 +832,7 @@ export const handler = awslambda.streamifyResponse(
           : '{}';
 
         const request = JSON.parse(body) as JsonRpcRequest;
-        const response = await handleMcpRequest(request, userContext);
+        const response = await handleMcpRequest(request, userContext, apiKey);
 
         const httpStream = awslambda.HttpResponseStream.from(responseStream, {
           statusCode: 200,
