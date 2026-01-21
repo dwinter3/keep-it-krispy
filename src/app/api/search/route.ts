@@ -26,6 +26,9 @@ interface MeetingMetadata {
   duration?: number
   isPrivate?: boolean
   topic?: string
+  pk?: string
+  format?: string
+  document_id?: string
 }
 
 export async function GET(request: NextRequest) {
@@ -123,10 +126,14 @@ export async function GET(request: NextRequest) {
         continue
       }
 
+      // Determine if this is a document or transcript
+      const isDocument = meetingId.startsWith('doc_') || metadata?.pk === 'DOCUMENT'
+      const type = isDocument ? 'document' : 'transcript'
+
       results.push({
         meetingId,
         s3Key: group.s3Key,
-        title: metadata?.title || 'Untitled Meeting',
+        title: metadata?.title || (isDocument ? 'Untitled Document' : 'Untitled Meeting'),
         date: meetingDate,
         speakers: metadata?.speakers || [],
         duration: metadata?.duration || 0,
@@ -134,6 +141,9 @@ export async function GET(request: NextRequest) {
         relevanceScore: Math.round(group.score * 100),
         matchingChunks: group.chunks.length,
         snippets: group.chunks.slice(0, 3).map((c) => c.text || ''),
+        type,
+        format: isDocument ? metadata?.format : undefined,
+        documentId: isDocument ? metadata?.document_id : undefined,
       })
     }
 

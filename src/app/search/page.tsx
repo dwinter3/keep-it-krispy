@@ -16,6 +16,9 @@ interface SearchResult {
   matchingChunks: number
   snippets: string[]
   topic?: string
+  type?: 'transcript' | 'document'
+  format?: string
+  documentId?: string
 }
 
 interface SearchFilters {
@@ -606,10 +609,21 @@ function SearchResultCard({
         <div className="flex-1 min-w-0">
           <div className="flex items-start justify-between mb-2">
             <div>
-              <h3 className="font-medium text-white mb-1">{getDisplayTitle(result.topic, result.title)}</h3>
+              <div className="flex items-center gap-2 mb-1">
+                {result.type === 'document' && (
+                  <span className={`px-1.5 py-0.5 rounded text-xs font-medium uppercase ${
+                    result.format === 'pdf' ? 'bg-red-500/20 text-red-400' :
+                    result.format === 'docx' ? 'bg-blue-500/20 text-blue-400' :
+                    'bg-purple-500/20 text-purple-400'
+                  }`}>
+                    {result.format || 'doc'}
+                  </span>
+                )}
+                <h3 className="font-medium text-white">{getDisplayTitle(result.topic, result.title)}</h3>
+              </div>
               <div className="flex flex-wrap items-center gap-2 text-sm text-zinc-500">
                 <span>{formatDate(result.date)}</span>
-                {result.duration > 0 && (
+                {result.type !== 'document' && result.duration > 0 && (
                   <>
                     <span className="text-zinc-600">|</span>
                     <span>{formatDuration(result.duration)}</span>
@@ -669,14 +683,23 @@ function SearchResultCard({
             </div>
           )}
 
-          {/* View transcript link */}
+          {/* View link */}
           <div className="mt-3 pt-3 border-t border-zinc-800">
-            <a
-              href={`/transcripts?view=${result.meetingId}`}
-              className="text-sm text-blue-400 hover:text-blue-300"
-            >
-              View full transcript →
-            </a>
+            {result.type === 'document' ? (
+              <a
+                href={`/documents?id=${result.documentId || result.meetingId.replace('doc_', '')}`}
+                className="text-sm text-blue-400 hover:text-blue-300"
+              >
+                View document →
+              </a>
+            ) : (
+              <a
+                href={`/transcripts?view=${result.meetingId}`}
+                className="text-sm text-blue-400 hover:text-blue-300"
+              >
+                View full transcript →
+              </a>
+            )}
           </div>
         </div>
       </div>
