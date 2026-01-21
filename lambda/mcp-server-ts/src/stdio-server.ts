@@ -20,6 +20,7 @@ import {
 import { S3TranscriptClient } from './s3-client.js';
 import { DynamoTranscriptClient } from './dynamo-client.js';
 import { VectorsClient } from './vectors-client.js';
+import { KrispyApiClient } from './krispy-api-client.js';
 import { getUserContext, debugAuthContext, type UserContext } from './auth.js';
 
 // Debug logging to stderr (shows in Claude Desktop's mcp-server-krisp.log)
@@ -39,12 +40,14 @@ debug('Server module loading', {
   VECTOR_INDEX: process.env.VECTOR_INDEX,
   AWS_PROFILE: process.env.AWS_PROFILE,
   KRISP_USER_ID: process.env.KRISP_USER_ID ? '(set)' : '(not set)',
+  KRISP_API_KEY: process.env.KRISP_API_KEY ? '(set)' : '(not set)',
   NODE_VERSION: process.version,
 });
 
 let s3Client: S3TranscriptClient;
 let dynamoClient: DynamoTranscriptClient;
 let vectorsClient: VectorsClient;
+let apiClient: KrispyApiClient | null = null;
 
 try {
   debug('Initializing S3 client...');
@@ -58,6 +61,15 @@ try {
   debug('Initializing Vectors client...');
   vectorsClient = new VectorsClient();
   debug('Vectors client initialized');
+
+  // Initialize API client if API key is provided (optional, enables API-based semantic search)
+  if (process.env.KRISP_API_KEY) {
+    debug('Initializing API client...');
+    apiClient = new KrispyApiClient(process.env.KRISP_API_KEY);
+    debug('API client initialized');
+  } else {
+    debug('No KRISP_API_KEY set, API-based semantic search will not be available');
+  }
 } catch (error) {
   debug('FATAL: Failed to initialize clients', {
     error: error instanceof Error ? error.message : String(error),
@@ -104,6 +116,21 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             query: { type: 'string', description: 'Natural language search query (e.g., "discussion about project timeline")' },
             meeting_id: { type: 'string', description: 'Optional: limit search to a specific meeting ID' },
             limit: { type: 'number', description: 'Maximum results to return (default: 10)' },
+          },
+          required: ['query'],
+        },
+      },
+      {
+        name: 'semantic_search',
+        description: 'API-based semantic search across your meeting transcripts using AI embeddings. Similar to search_transcripts but uses the Keep It Krispy API for richer results including topic and speaker filtering. Requires KRISP_API_KEY to be set.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            query: { type: 'string', description: 'Natural language search query (e.g., "discussion about project timeline")' },
+            limit: { type: 'number', description: 'Maximum results to return (default: 10)' },
+            speaker: { type: 'string', description: 'Filter by speaker name' },
+            from: { type: 'string', description: 'Start date (YYYY-MM-DD)' },
+            to: { type: 'string', description: 'End date (YYYY-MM-DD)' },
           },
           required: ['query'],
         },
@@ -351,6 +378,76 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             }, null, 2),
           }],
         };
+      }
+
+      case 'semantic_search': {
+        // API-based semantic search (requires KRISP_API_KEY)
+        if (!apiClient) {
+          return {
+            content: [{
+              type: 'text',
+              text: JSON.stringify({
+                error: 'Semantic search via API requires KRISP_API_KEY environment variable.',
+                hint: 'Add KRISP_API_KEY to your Claude Desktop config env section.',
+                alternative: 'Use search_transcripts tool instead - it uses local S3 Vectors and works without an API key.',
+              }, null, 2),
+            }],
+            isError: true,
+          };
+        }
+
+        const query = args?.query as string;
+        const limit = (args?.limit as number) || 10;
+        const speaker = args?.speaker as string | undefined;
+        const from = args?.from as string | undefined;
+        const to = args?.to as string | undefined;
+
+        debug('semantic_search: calling API', { query, limit, speaker, from, to });
+
+        try {
+          const searchResponse = await apiClient.search(query, { limit, speaker, from, to });
+
+          debug(`semantic_search: got ${searchResponse.count} results in ${Date.now() - startTime}ms`);
+
+          return {
+            content: [{
+              type: 'text',
+              text: JSON.stringify({
+                query: searchResponse.query,
+                searchType: searchResponse.searchType,
+                filters: searchResponse.filters,
+                count: searchResponse.count,
+                results: searchResponse.results.map(r => ({
+                  meetingId: r.meetingId,
+                  s3Key: r.s3Key,
+                  title: r.title,
+                  date: r.date,
+                  speakers: r.speakers,
+                  duration: r.duration,
+                  topic: r.topic,
+                  relevanceScore: r.relevanceScore,
+                  matchingChunks: r.matchingChunks,
+                  snippets: r.snippets,
+                  type: r.type,
+                  format: r.format,
+                  documentId: r.documentId,
+                })),
+              }, null, 2),
+            }],
+          };
+        } catch (error) {
+          debug('semantic_search: API error', { error: error instanceof Error ? error.message : String(error) });
+          return {
+            content: [{
+              type: 'text',
+              text: JSON.stringify({
+                error: error instanceof Error ? error.message : 'Semantic search API failed',
+                hint: 'Check that your KRISP_API_KEY is valid.',
+              }, null, 2),
+            }],
+            isError: true,
+          };
+        }
       }
 
       case 'get_transcripts': {

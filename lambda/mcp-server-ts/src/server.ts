@@ -8,13 +8,18 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { S3TranscriptClient } from './s3-client.js';
 import { DynamoTranscriptClient } from './dynamo-client.js';
+import { KrispyApiClient } from './krispy-api-client.js';
 
-export function createServer(userId?: string): McpServer {
+export function createServer(userId?: string, apiKey?: string): McpServer {
   const s3Client = new S3TranscriptClient();
   const dynamoClient = new DynamoTranscriptClient();
 
   // Use provided userId or a default for testing
   const currentUserId = userId || process.env.USER_ID || 'default-user';
+
+  // API client for semantic search (requires API key)
+  const currentApiKey = apiKey || process.env.KRISP_API_KEY;
+  const apiClient = currentApiKey ? new KrispyApiClient(currentApiKey) : null;
 
   const server = new McpServer({
     name: 'Keep It Krispy',
@@ -87,6 +92,78 @@ export function createServer(userId?: string): McpServer {
           }, null, 2),
         }],
       };
+    }
+  );
+
+  // Tool: semantic_search (requires API key)
+  server.tool(
+    'semantic_search',
+    'Semantic search across your meeting transcripts using AI embeddings. Finds conceptually similar content even if exact words differ. Returns ranked results with relevance scores and text snippets. Only searches transcripts you own.',
+    {
+      query: z.string().describe('Natural language search query (e.g., "discussion about project timeline")'),
+      limit: z.number().optional().default(10).describe('Maximum results to return (default: 10)'),
+      speaker: z.string().optional().describe('Filter by speaker name'),
+      from: z.string().optional().describe('Start date (YYYY-MM-DD)'),
+      to: z.string().optional().describe('End date (YYYY-MM-DD)'),
+    },
+    async ({ query, limit, speaker, from, to }) => {
+      if (!apiClient) {
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              error: 'Semantic search requires API key. Set KRISP_API_KEY environment variable in your Claude Desktop config.',
+              hint: 'Get your API key from https://app.krispy.alpha-pm.dev/settings',
+            }, null, 2),
+          }],
+        };
+      }
+
+      try {
+        const searchResponse = await apiClient.search(query, {
+          limit: limit || 10,
+          speaker,
+          from,
+          to,
+        });
+
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              query: searchResponse.query,
+              searchType: searchResponse.searchType,
+              filters: searchResponse.filters,
+              count: searchResponse.count,
+              results: searchResponse.results.map(r => ({
+                meetingId: r.meetingId,
+                s3Key: r.s3Key,
+                title: r.title,
+                date: r.date,
+                speakers: r.speakers,
+                duration: r.duration,
+                topic: r.topic,
+                relevanceScore: r.relevanceScore,
+                matchingChunks: r.matchingChunks,
+                snippets: r.snippets,
+                type: r.type,
+                format: r.format,
+                documentId: r.documentId,
+              })),
+            }, null, 2),
+          }],
+        };
+      } catch (error) {
+        console.error('[MCP] Semantic search error:', error);
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              error: error instanceof Error ? error.message : 'Semantic search failed',
+            }, null, 2),
+          }],
+        };
+      }
     }
   );
 

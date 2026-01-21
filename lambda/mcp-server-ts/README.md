@@ -27,6 +27,7 @@ Three implementations are available:
          "args": ["/path/to/krisp-buddy/lambda/mcp-server-ts/dist/stdio-server.cjs"],
          "env": {
            "KRISP_USER_ID": "your-user-id-from-dashboard",
+           "KRISP_API_KEY": "your-api-key-from-dashboard",
            "AWS_PROFILE": "krisp-buddy",
            "AWS_REGION": "us-east-1",
            "KRISP_S3_BUCKET": "krisp-transcripts-754639201213",
@@ -38,6 +39,8 @@ Three implementations are available:
      }
    }
    ```
+
+   Note: `KRISP_API_KEY` is optional but enables the `semantic_search` tool for API-based search.
 
 3. Restart Claude Desktop
 
@@ -139,6 +142,7 @@ Three implementations are available:
 | `DYNAMODB_TABLE` | Yes | DynamoDB table for metadata |
 | `VECTOR_BUCKET` | Yes | S3 bucket for vector embeddings |
 | `VECTOR_INDEX` | Yes | Vector index name for semantic search |
+| `KRISP_API_KEY` | No | API key for `semantic_search` tool (get from dashboard settings) |
 
 *Or use `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` directly.
 
