@@ -10,6 +10,7 @@ import {
   ScanCommand,
 } from '@aws-sdk/lib-dynamodb'
 import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3'
+import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda'
 import { BedrockRuntimeClient, InvokeModelCommand } from '@aws-sdk/client-bedrock-runtime'
 import { S3VectorsClient, PutVectorsCommand, DeleteVectorsCommand } from '@aws-sdk/client-s3vectors'
 import { v4 as uuidv4 } from 'uuid'
@@ -26,6 +27,7 @@ const AWS_REGION = process.env.APP_REGION || 'us-east-1'
 const MODEL_ID = 'amazon.titan-embed-text-v2:0'
 const EMBEDDING_DIMENSIONS = 1024
 const MAX_FILE_SIZE = 10 * 1024 * 1024 // 10MB
+const DOCUMENT_PROCESSOR_LAMBDA = 'krisp-document-processor'
 
 // AWS clients with custom credentials for Amplify
 const credentials = process.env.S3_ACCESS_KEY_ID
@@ -39,6 +41,7 @@ const dynamoClient = new DynamoDBClient({ region: AWS_REGION, credentials })
 const dynamodb = DynamoDBDocumentClient.from(dynamoClient)
 const s3 = new S3Client({ region: AWS_REGION, credentials })
 const bedrock = new BedrockRuntimeClient({ region: AWS_REGION, credentials })
+const lambdaClient = new LambdaClient({ region: AWS_REGION, credentials })
 
 export interface Document {
   document_id: string
@@ -110,14 +113,21 @@ export async function GET(request: NextRequest) {
           return NextResponse.json({
             ...response.Item,
             content,
+            processing: response.Item.processing || false,
           })
         } catch {
           // Content might not exist, return metadata only
-          return NextResponse.json(response.Item)
+          return NextResponse.json({
+            ...response.Item,
+            processing: response.Item.processing || false,
+          })
         }
       }
 
-      return NextResponse.json(response.Item)
+      return NextResponse.json({
+        ...response.Item,
+        processing: response.Item.processing || false,
+      })
     }
 
     // List documents for this user using GSI
@@ -168,6 +178,7 @@ export async function GET(request: NextRequest) {
         isPrivate: item.is_private || item.isPrivate || false,
         linkedTranscripts,
         linkedTranscriptCount: linkedTranscripts.length,
+        processing: item.processing || false,
       }
     })
 
@@ -319,11 +330,100 @@ export async function POST(request: NextRequest) {
       const LARGE_PDF_THRESHOLD = 1 * 1024 * 1024 // 1MB
 
       if (format === 'pdf' && file.size > LARGE_PDF_THRESHOLD) {
-        // Skip parsing for large PDFs - store file directly
+        // Skip parsing for large PDFs - will be processed asynchronously by Lambda
         title = (formData.get('title') as string) || file.name.replace(/\.[^/.]+$/, '')
-        content = `[PDF document: ${file.name}]\n\nThis PDF is too large for inline text extraction. The original file is stored and available for download.`
+        content = `[PDF document: ${file.name}]\n\nThis PDF is being processed. Content will be available shortly.`
         wordCount = 0
         isPrivate = formData.get('isPrivate') === 'true'
+
+        // Generate document ID early for large PDFs
+        const documentId = uuidv4()
+        const now = new Date()
+        const safeFilename = (filename || title).replace(/[^a-zA-Z0-9-_.\s]/g, '').slice(0, 50)
+        const s3Key = `users/${userId}/documents/${documentId}/${safeFilename}.txt`
+        const rawFileKey = `users/${userId}/documents/${documentId}/${filename || safeFilename + '.pdf'}`
+
+        // Store placeholder content in S3
+        await s3.send(
+          new PutObjectCommand({
+            Bucket: BUCKET_NAME,
+            Key: s3Key,
+            Body: content,
+            ContentType: 'text/plain; charset=utf-8',
+          })
+        )
+
+        // Store raw PDF file
+        await s3.send(
+          new PutObjectCommand({
+            Bucket: BUCKET_NAME,
+            Key: rawFileKey,
+            Body: fileBuffer,
+            ContentType: 'application/pdf',
+          })
+        )
+
+        // Store metadata in DynamoDB with processing flag
+        const item: Record<string, unknown> = {
+          pk: 'DOCUMENT',
+          meeting_id: `doc_${documentId}`,
+          document_id: documentId,
+          user_id: userId,
+          title,
+          filename,
+          file_type: format,
+          file_size: fileSize,
+          file_hash: fileHash,
+          source,
+          source_url: sourceUrl,
+          format,
+          s3_key: s3Key,
+          raw_file_key: rawFileKey,
+          timestamp: now.toISOString(),
+          importedAt: now.toISOString(),
+          word_count: wordCount,
+          is_private: isPrivate,
+          linked_transcripts: [],
+          processing: true, // Flag to indicate async processing in progress
+        }
+
+        await dynamodb.send(
+          new PutCommand({
+            TableName: TABLE_NAME,
+            Item: item,
+          })
+        )
+
+        // Invoke Lambda asynchronously to process the PDF
+        try {
+          await lambdaClient.send(new InvokeCommand({
+            FunctionName: DOCUMENT_PROCESSOR_LAMBDA,
+            InvocationType: 'Event', // Async invocation
+            Payload: JSON.stringify({
+              document_id: documentId,
+              user_id: userId,
+              s3_key: s3Key,
+              raw_file_key: rawFileKey,
+              format: 'pdf',
+            }),
+          }))
+          console.log(`Invoked document processor Lambda for large PDF: ${documentId}`)
+        } catch (lambdaError) {
+          console.error('Failed to invoke document processor Lambda:', lambdaError)
+          // Don't fail the upload - document is saved, just won't be processed
+        }
+
+        // Return early for large PDFs - embeddings will be generated by Lambda
+        return NextResponse.json({
+          success: true,
+          documentId,
+          title,
+          filename,
+          fileSize,
+          wordCount: 0,
+          chunks: 0,
+          processing: true, // Indicate async processing in progress
+        })
       } else {
         // Parse smaller documents normally
         const parsed = await parseDocument(fileBuffer, format)

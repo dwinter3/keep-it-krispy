@@ -57,3 +57,4 @@ client_secret_*.json
 
 # Screenshots
 CleanShot*.png
+lambda/**/function.zip

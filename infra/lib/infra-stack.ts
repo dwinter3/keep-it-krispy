@@ -115,6 +115,9 @@ export class KrispBuddyStack extends cdk.Stack {
     const mcpFunction = lambda.Function.fromFunctionName(
       this, 'McpServerFunction', 'krisp-mcp-server'
     );
+    const documentProcessorFunction = lambda.Function.fromFunctionName(
+      this, 'DocumentProcessorFunction', 'krisp-document-processor'
+    );
 
     // ============================================================
     // GITHUB ACTIONS IAM ROLE (for CI/CD)
