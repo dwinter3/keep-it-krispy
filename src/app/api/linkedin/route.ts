@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb'
 import { DynamoDBDocumentClient, PutCommand, QueryCommand, BatchWriteCommand, ScanCommand } from '@aws-sdk/lib-dynamodb'
-import { S3Client, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3'
+import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3'
 import { auth } from '@/lib/auth'
 import { getUserByEmail } from '@/lib/users'
 import JSZip from 'jszip'
@@ -565,6 +565,7 @@ export async function PUT(request: NextRequest) {
  * DELETE /api/linkedin
  *
  * Delete all LinkedIn connections for the user.
+ * Also removes the stored CSV from S3.
  */
 export async function DELETE(request: NextRequest) {
   const session = await auth()
@@ -616,6 +617,19 @@ export async function DELETE(request: NextRequest) {
         deleted += result.Items.length
       }
     } while (lastKey)
+
+    // Delete the stored CSV from S3
+    const s3Key = `linkedin/${user.user_id}/connections.csv`
+    try {
+      await s3Client.send(new DeleteObjectCommand({
+        Bucket: S3_BUCKET,
+        Key: s3Key,
+      }))
+      console.log('[LinkedIn Delete] Removed CSV from S3:', s3Key)
+    } catch (s3Error) {
+      // Log but don't fail - the file might not exist
+      console.warn('[LinkedIn Delete] Failed to delete S3 file (may not exist):', s3Error)
+    }
 
     return NextResponse.json({
       success: true,
