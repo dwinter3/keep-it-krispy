@@ -174,7 +174,7 @@ export async function GET(request: NextRequest) {
         sourceUrl: item.source_url,
         format: item.format,
         importedAt: item.timestamp || item.importedAt,
-        wordCount: item.word_count || item.wordCount,
+        wordCount: item.word_count ?? item.wordCount ?? 0,
         isPrivate: item.is_private || item.isPrivate || false,
         linkedTranscripts,
         linkedTranscriptCount: linkedTranscripts.length,
