@@ -1,10 +1,10 @@
 /* eslint-disable @typescript-eslint/no-require-imports */
 import * as cheerio from 'cheerio'
 import { convert } from 'html-to-text'
-import { extractText } from 'unpdf'
 
 // mammoth doesn't have proper ESM exports, use require
 const mammoth = require('mammoth')
+const PDFParser = require('pdf2json')
 
 export type DocumentFormat = 'pdf' | 'docx' | 'md' | 'txt' | 'html'
 
@@ -19,20 +19,40 @@ export interface ParsedDocument {
  * Parse a PDF file and extract text content
  */
 export async function parsePDF(buffer: Buffer): Promise<ParsedDocument> {
-  const { text } = await extractText(buffer)
-  // text is an array of strings (one per page), join them
-  const content = (Array.isArray(text) ? text.join('\n') : text).trim()
+  return new Promise((resolve, reject) => {
+    const pdfParser = new PDFParser()
 
-  // Try to extract title from first line
-  const lines = content.split('\n').filter((line: string) => line.trim())
-  const title = lines[0]?.slice(0, 200) || undefined
+    pdfParser.on('pdfParser_dataError', (errData: { parserError: Error }) => {
+      reject(errData.parserError)
+    })
 
-  return {
-    content,
-    title,
-    wordCount: countWords(content),
-    format: 'pdf',
-  }
+    pdfParser.on('pdfParser_dataReady', (pdfData: { Pages: Array<{ Texts: Array<{ R: Array<{ T: string }> }> }> }) => {
+      // Extract text from all pages
+      let content = ''
+      for (const page of pdfData.Pages || []) {
+        for (const text of page.Texts || []) {
+          for (const r of text.R || []) {
+            content += decodeURIComponent(r.T) + ' '
+          }
+        }
+        content += '\n'
+      }
+      content = content.trim()
+
+      // Try to extract title from first line
+      const lines = content.split('\n').filter((line: string) => line.trim())
+      const title = lines[0]?.slice(0, 200) || undefined
+
+      resolve({
+        content,
+        title,
+        wordCount: countWords(content),
+        format: 'pdf',
+      })
+    })
+
+    pdfParser.parseBuffer(buffer)
+  })
 }
 
 /**
