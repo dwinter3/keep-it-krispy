@@ -1,13 +1,10 @@
 /* eslint-disable @typescript-eslint/no-require-imports */
 import * as cheerio from 'cheerio'
 import { convert } from 'html-to-text'
-import { getDocument, GlobalWorkerOptions } from 'pdfjs-dist'
+import { extractText } from 'unpdf'
 
 // mammoth doesn't have proper ESM exports, use require
 const mammoth = require('mammoth')
-
-// Disable worker for server-side usage
-GlobalWorkerOptions.workerSrc = ''
 
 export type DocumentFormat = 'pdf' | 'docx' | 'md' | 'txt' | 'html'
 
@@ -22,24 +19,9 @@ export interface ParsedDocument {
  * Parse a PDF file and extract text content
  */
 export async function parsePDF(buffer: Buffer): Promise<ParsedDocument> {
-  // Convert Buffer to Uint8Array for pdfjs-dist
-  const uint8Array = new Uint8Array(buffer)
-
-  const loadingTask = getDocument({ data: uint8Array })
-  const pdf = await loadingTask.promise
-
-  let content = ''
-
-  for (let i = 1; i <= pdf.numPages; i++) {
-    const page = await pdf.getPage(i)
-    const textContent = await page.getTextContent()
-    const pageText = textContent.items
-      .map((item) => ('str' in item ? item.str : ''))
-      .join(' ')
-    content += pageText + '\n'
-  }
-
-  content = content.trim()
+  const { text } = await extractText(buffer)
+  // text is an array of strings (one per page), join them
+  const content = (Array.isArray(text) ? text.join('\n') : text).trim()
 
   // Try to extract title from first line
   const lines = content.split('\n').filter((line: string) => line.trim())
