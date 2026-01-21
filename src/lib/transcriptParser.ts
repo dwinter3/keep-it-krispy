@@ -146,10 +146,20 @@ export function parseTranscript(rawContent: string, totalDuration?: number): Par
   }
 
   // Calculate speaking time per speaker
+  // Use word count as a proxy when timestamp-based duration is invalid (0 or negative)
+  // Average speaking rate is ~150 words per minute (2.5 words per second)
+  const WORDS_PER_SECOND = 2.5
   const speakerTimeMap = new Map<string, { time: number; count: number }>()
 
   for (const segment of segments) {
-    const duration = segment.endTime - segment.startTime
+    let duration = segment.endTime - segment.startTime
+
+    // If duration is invalid (0 or negative), estimate from word count
+    if (duration <= 0) {
+      const wordCount = segment.text.split(/\s+/).filter(w => w.length > 0).length
+      duration = wordCount / WORDS_PER_SECOND
+    }
+
     const existing = speakerTimeMap.get(segment.speaker) || { time: 0, count: 0 }
     speakerTimeMap.set(segment.speaker, {
       time: existing.time + duration,
