@@ -5,6 +5,10 @@ import { auth } from '@/lib/auth'
 import { getUserByEmail } from '@/lib/users'
 import JSZip from 'jszip'
 
+// Route segment config for file uploads
+export const maxDuration = 60 // 60 seconds timeout
+export const dynamic = 'force-dynamic'
+
 const TABLE_NAME = 'krisp-linkedin-connections'
 const AWS_REGION = process.env.APP_REGION || 'us-east-1'
 

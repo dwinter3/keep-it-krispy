@@ -411,9 +411,14 @@ export default function SettingsPage() {
         loadLinkedIn()
         setTimeout(() => setLinkedInSuccess(null), 5000)
       } else {
-        setLinkedInError(data.error || 'Failed to import LinkedIn data')
+        const errorMsg = data.details
+          ? `${data.error}: ${data.details}`
+          : (data.error || 'Failed to import LinkedIn data')
+        setLinkedInError(errorMsg)
+        console.error('LinkedIn import error:', data)
       }
     } catch (err) {
+      console.error('LinkedIn upload error:', err)
       setLinkedInError('Failed to upload LinkedIn data')
     } finally {
       setUploadingLinkedIn(false)
