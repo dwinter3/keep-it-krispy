@@ -267,6 +267,7 @@ export async function POST(request: NextRequest) {
     let filename: string | undefined
     let fileSize: number | undefined
     let fileHash: string | undefined
+    let fileBuffer: Buffer | undefined
 
     // Handle file upload (multipart/form-data)
     if (contentType.includes('multipart/form-data')) {
@@ -296,7 +297,7 @@ export async function POST(request: NextRequest) {
       format = detectedFormat
       filename = file.name
       fileSize = file.size
-      const fileBuffer = Buffer.from(await file.arrayBuffer())
+      fileBuffer = Buffer.from(await file.arrayBuffer())
 
       // Calculate hash for deduplication
       fileHash = calculateFileHash(fileBuffer)
@@ -313,12 +314,24 @@ export async function POST(request: NextRequest) {
         })
       }
 
-      // Parse the document
-      const parsed = await parseDocument(fileBuffer, format)
-      title = (formData.get('title') as string) || parsed.title || file.name.replace(/\.[^/.]+$/, '')
-      content = parsed.content
-      wordCount = parsed.wordCount
-      isPrivate = formData.get('isPrivate') === 'true'
+      // For large PDFs (>1MB), skip parsing to avoid timeout
+      // Store the raw file and use placeholder content
+      const LARGE_PDF_THRESHOLD = 1 * 1024 * 1024 // 1MB
+
+      if (format === 'pdf' && file.size > LARGE_PDF_THRESHOLD) {
+        // Skip parsing for large PDFs - store file directly
+        title = (formData.get('title') as string) || file.name.replace(/\.[^/.]+$/, '')
+        content = `[PDF document: ${file.name}]\n\nThis PDF is too large for inline text extraction. The original file is stored and available for download.`
+        wordCount = 0
+        isPrivate = formData.get('isPrivate') === 'true'
+      } else {
+        // Parse smaller documents normally
+        const parsed = await parseDocument(fileBuffer, format)
+        title = (formData.get('title') as string) || parsed.title || file.name.replace(/\.[^/.]+$/, '')
+        content = parsed.content
+        wordCount = parsed.wordCount
+        isPrivate = formData.get('isPrivate') === 'true'
+      }
     }
     // Handle JSON body (for manual content or URL-imported content)
     else {
@@ -369,8 +382,22 @@ export async function POST(request: NextRequest) {
       })
     )
 
+    // For PDFs, also store the raw file for download/viewing
+    let rawFileKey: string | undefined
+    if (format === 'pdf' && fileBuffer) {
+      rawFileKey = `users/${userId}/documents/${documentId}/${filename || safeFilename + '.pdf'}`
+      await s3.send(
+        new PutObjectCommand({
+          Bucket: BUCKET_NAME,
+          Key: rawFileKey,
+          Body: fileBuffer,
+          ContentType: 'application/pdf',
+        })
+      )
+    }
+
     // Store metadata in DynamoDB
-    const item = {
+    const item: Record<string, unknown> = {
       pk: 'DOCUMENT',
       meeting_id: `doc_${documentId}`,
       document_id: documentId,
@@ -389,6 +416,11 @@ export async function POST(request: NextRequest) {
       word_count: wordCount,
       is_private: isPrivate,
       linked_transcripts: [],
+    }
+
+    // Add raw file key for PDFs
+    if (rawFileKey) {
+      item.raw_file_key = rawFileKey
     }
 
     await dynamodb.send(
