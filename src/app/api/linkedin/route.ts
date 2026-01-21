@@ -196,14 +196,19 @@ export async function POST(request: NextRequest) {
         const position = conn['Position'] || ''
         const connectedOn = conn['Connected On'] || ''
 
-        // Skip if no email (required for deduplication)
-        if (!email) {
+        const fullName = `${firstName} ${lastName}`.trim()
+
+        // Skip if no name (can't match without a name)
+        if (!fullName) {
           skipped++
           continue
         }
 
-        const fullName = `${firstName} ${lastName}`.trim()
         const normalizedName = normalizeName(fullName)
+
+        // Use email as key if available, otherwise generate from normalized name
+        // This allows importing connections without email addresses
+        const recordKey = email ? email.toLowerCase() : `name:${normalizedName}`
 
         // Build search terms for fuzzy matching
         const searchTerms = [
@@ -216,7 +221,7 @@ export async function POST(request: NextRequest) {
           PutRequest: {
             Item: {
               user_id: user.user_id,
-              email: email.toLowerCase(),
+              email: recordKey,  // Using 'email' field as unique key (may be name-based)
               first_name: firstName,
               last_name: lastName,
               full_name: fullName,
