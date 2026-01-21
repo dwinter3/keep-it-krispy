@@ -646,6 +646,12 @@ def extract_metadata(s3_key: str, content: dict) -> dict:
         'indexed_at': datetime.now().isoformat()
     }
 
+    # Include user_id if present (from webhook API key authentication)
+    user_id = content.get('user_id')
+    if user_id:
+        metadata['user_id'] = user_id
+        print(f"Transcript owned by user: {user_id}")
+
     return metadata
 
 
@@ -677,6 +683,10 @@ def index_to_dynamodb(metadata: dict) -> None:
     # Add speaker word counts for sorting by talk time
     if metadata.get('speaker_word_counts'):
         item['speaker_word_counts'] = metadata['speaker_word_counts']
+
+    # Add user_id for multi-tenant isolation
+    if metadata.get('user_id'):
+        item['user_id'] = metadata['user_id']
 
     # Add AI-generated topic if available
     if metadata.get('topic'):

@@ -1,14 +1,73 @@
 import json
 import os
 import re
+import hashlib
 import boto3
 from datetime import datetime
-from typing import Optional, Dict, List, Any
+from typing import Optional, Dict, List, Any, Tuple
 
 s3 = boto3.client('s3')
+dynamodb = boto3.resource('dynamodb')
 
 BUCKET_NAME = os.environ.get('KRISP_S3_BUCKET', '')  # Required: set via environment variable
-WEBHOOK_AUTH_KEY = os.environ.get('KRISP_WEBHOOK_AUTH_KEY')
+WEBHOOK_AUTH_KEY = os.environ.get('KRISP_WEBHOOK_AUTH_KEY')  # Legacy: single shared key
+API_KEYS_TABLE = os.environ.get('API_KEYS_TABLE', 'krisp-api-keys')
+
+api_keys_table = dynamodb.Table(API_KEYS_TABLE)
+
+
+def authenticate_request(headers: dict) -> Tuple[bool, Optional[str], str]:
+    """
+    Authenticate the request using API key or legacy webhook auth key.
+
+    Checks:
+    1. X-API-Key header
+    2. Authorization: Bearer <key> header
+    3. Legacy WEBHOOK_AUTH_KEY (for backward compatibility)
+
+    Returns:
+        Tuple of (is_authenticated, user_id, auth_method)
+        - is_authenticated: True if auth succeeded
+        - user_id: The user ID if API key auth, None for legacy auth
+        - auth_method: 'api_key', 'legacy', or 'none'
+    """
+    # Try X-API-Key header first
+    api_key = headers.get('x-api-key', '')
+
+    # Try Authorization: Bearer <key>
+    if not api_key:
+        auth_header = headers.get('authorization', '')
+        if auth_header.startswith('Bearer '):
+            api_key = auth_header[7:]
+
+    # If we have an API key, look it up
+    if api_key:
+        try:
+            key_hash = hashlib.sha256(api_key.encode()).hexdigest()
+            response = api_keys_table.get_item(Key={'key_hash': key_hash})
+            item = response.get('Item')
+
+            if item and item.get('status') == 'active':
+                user_id = item.get('user_id')
+                print(f"API key authenticated for user: {user_id}")
+                return (True, user_id, 'api_key')
+            else:
+                print(f"API key not found or inactive: {key_hash[:16]}...")
+                return (False, None, 'none')
+        except Exception as e:
+            print(f"API key lookup error: {e}")
+            return (False, None, 'none')
+
+    # Fall back to legacy webhook auth key
+    auth_header = headers.get('authorization', '')
+    if WEBHOOK_AUTH_KEY and auth_header == WEBHOOK_AUTH_KEY:
+        print("Legacy webhook auth key accepted (no user_id)")
+        return (True, None, 'legacy')
+
+    # No valid authentication
+    if WEBHOOK_AUTH_KEY:
+        print(f"Auth failed. No valid API key or legacy key match.")
+    return (False, None, 'none')
 
 
 def format_timestamp(ms: int) -> str:
@@ -330,18 +389,23 @@ def lambda_handler(event, context):
 
     Receives meeting data from Krisp webhooks and stores in S3.
     Supports events: transcript_created, notes_generated, outline_generated
+
+    Authentication:
+    - X-API-Key header with user's API key (preferred)
+    - Authorization: Bearer <api_key>
+    - Legacy: Authorization header matching KRISP_WEBHOOK_AUTH_KEY env var
     """
 
     # Extract headers (Lambda function URL format)
     headers = event.get('headers', {})
-    auth_header = headers.get('authorization', '')
 
-    # Validate authorization
-    if WEBHOOK_AUTH_KEY and auth_header != WEBHOOK_AUTH_KEY:
-        print(f"Auth failed. Expected: {WEBHOOK_AUTH_KEY[:8]}..., Got: {auth_header[:8]}...")
+    # Authenticate the request
+    is_authenticated, user_id, auth_method = authenticate_request(headers)
+
+    if not is_authenticated:
         return {
             'statusCode': 401,
-            'body': json.dumps({'error': 'Unauthorized'})
+            'body': json.dumps({'error': 'Unauthorized. Provide API key via X-API-Key header.'})
         }
 
     # Parse body
@@ -385,6 +449,11 @@ def lambda_handler(event, context):
         'event_type': event_type,
         'raw_payload': payload
     }
+
+    # Include user_id if authenticated via API key
+    if user_id:
+        enriched_payload['user_id'] = user_id
+        print(f"Transcript will be owned by user: {user_id}")
 
     # Store in S3
     try:
