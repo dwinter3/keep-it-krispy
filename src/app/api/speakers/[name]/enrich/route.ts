@@ -288,7 +288,7 @@ Return ONLY valid JSON:
 
   try {
     const invokeCommand = new InvokeModelCommand({
-      modelId: 'amazon.nova-lite-v1:0',
+      modelId: 'amazon.nova-2-lite-v1:0',
       contentType: 'application/json',
       accept: 'application/json',
       body: JSON.stringify({
@@ -459,7 +459,7 @@ Return ONLY valid JSON:
 
   try {
     const invokeCommand = new InvokeModelCommand({
-      modelId: 'amazon.nova-lite-v1:0',
+      modelId: 'amazon.nova-2-lite-v1:0',
       contentType: 'application/json',
       accept: 'application/json',
       body: JSON.stringify({
@@ -543,7 +543,7 @@ Return ONLY valid JSON.`
 
   try {
     const invokeCommand = new InvokeModelCommand({
-      modelId: 'amazon.nova-lite-v1:0',
+      modelId: 'amazon.nova-2-lite-v1:0',
       contentType: 'application/json',
       accept: 'application/json',
       body: JSON.stringify({
@@ -1046,7 +1046,7 @@ Be specific and quote/paraphrase their actual words. Return ONLY the insight tex
 
         try {
           const invokeCommand = new InvokeModelCommand({
-            modelId: 'amazon.nova-lite-v1:0',
+            modelId: 'amazon.nova-2-lite-v1:0',
             contentType: 'application/json',
             accept: 'application/json',
             body: JSON.stringify({
@@ -1327,7 +1327,7 @@ Return ONLY the text, no JSON.`
 
       try {
         const invokeCommand = new InvokeModelCommand({
-          modelId: 'amazon.nova-lite-v1:0',
+          modelId: 'amazon.nova-2-lite-v1:0',
           contentType: 'application/json',
           accept: 'application/json',
           body: JSON.stringify({

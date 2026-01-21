@@ -31,7 +31,7 @@ BUCKET_NAME = os.environ.get('KRISP_S3_BUCKET', '')
 TABLE_NAME = os.environ.get('DYNAMODB_TABLE', 'krisp-transcripts-index')
 COMPANIES_TABLE = os.environ.get('COMPANIES_TABLE', 'krisp-companies')
 REGION = os.environ.get('AWS_REGION', 'us-east-1')
-MODEL_ID = os.environ.get('COMPANY_MODEL_ID', 'amazon.nova-lite-v1:0')
+MODEL_ID = os.environ.get('COMPANY_MODEL_ID', 'amazon.nova-2-lite-v1:0')
 
 # Initialize clients
 s3 = boto3.client('s3', region_name=REGION)

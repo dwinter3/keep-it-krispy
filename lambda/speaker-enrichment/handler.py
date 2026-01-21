@@ -38,7 +38,7 @@ SPEAKERS_TABLE = os.environ.get('SPEAKERS_TABLE', 'krisp-speakers')
 ENTITIES_TABLE = os.environ.get('ENTITIES_TABLE', 'krisp-entities')
 TRANSCRIPTS_TABLE = os.environ.get('DYNAMODB_TABLE', 'krisp-transcripts-index')
 S3_BUCKET = os.environ.get('KRISP_S3_BUCKET', '')
-MODEL_ID = os.environ.get('MODEL_ID', 'amazon.nova-lite-v1:0')
+MODEL_ID = os.environ.get('MODEL_ID', 'amazon.nova-2-lite-v1:0')
 
 # Configuration
 MAX_ENRICHMENTS_PER_RUN = 50

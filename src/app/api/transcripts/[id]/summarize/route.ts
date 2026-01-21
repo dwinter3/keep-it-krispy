@@ -151,7 +151,7 @@ Please provide a detailed analysis in the following JSON format. Be thorough and
 Return ONLY valid JSON. Be specific and extract actual details from the transcript rather than generic descriptions.`
 
     const invokeCommand = new InvokeModelCommand({
-      modelId: 'amazon.nova-lite-v1:0',
+      modelId: 'amazon.nova-2-lite-v1:0',
       contentType: 'application/json',
       accept: 'application/json',
       body: JSON.stringify({
@@ -216,7 +216,7 @@ Example: "Q4 2025 Financial Review - Revenue targets, margin analysis, and 2026 
 
       try {
         const topicCommand = new InvokeModelCommand({
-          modelId: 'amazon.nova-lite-v1:0',
+          modelId: 'amazon.nova-2-lite-v1:0',
           contentType: 'application/json',
           accept: 'application/json',
           body: JSON.stringify({

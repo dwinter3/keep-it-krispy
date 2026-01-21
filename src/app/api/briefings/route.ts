@@ -11,7 +11,7 @@ const BRIEFINGS_TABLE = process.env.BRIEFINGS_TABLE || 'krisp-briefings'
 const TRANSCRIPTS_TABLE = process.env.DYNAMODB_TABLE || 'krisp-transcripts-index'
 const BUCKET_NAME = process.env.KRISP_S3_BUCKET || ''
 const AWS_REGION = process.env.APP_REGION || 'us-east-1'
-const MODEL_ID = 'amazon.nova-lite-v1:0'
+const MODEL_ID = 'amazon.nova-2-lite-v1:0'
 
 // AWS clients with custom credentials for Amplify
 const credentials = process.env.S3_ACCESS_KEY_ID ? {

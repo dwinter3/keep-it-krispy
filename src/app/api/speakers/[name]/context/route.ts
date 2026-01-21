@@ -185,7 +185,7 @@ Return ONLY valid JSON:
 
     try {
       const invokeCommand = new InvokeModelCommand({
-        modelId: 'amazon.nova-lite-v1:0',
+        modelId: 'amazon.nova-2-lite-v1:0',
         contentType: 'application/json',
         accept: 'application/json',
         body: JSON.stringify({

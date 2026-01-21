@@ -29,14 +29,14 @@ TRANSCRIPTS_TABLE = os.environ.get('DYNAMODB_TABLE', 'krisp-transcripts-index')
 BRIEFINGS_TABLE = os.environ.get('BRIEFINGS_TABLE', 'krisp-briefings')
 USERS_TABLE = os.environ.get('USERS_TABLE', 'krisp-users')
 S3_BUCKET = os.environ.get('KRISP_S3_BUCKET', '')
-MODEL_ID = os.environ.get('BRIEFING_MODEL_ID', 'amazon.nova-lite-v1:0')
+MODEL_ID = os.environ.get('BRIEFING_MODEL_ID', 'amazon.nova-2-lite-v1:0')
 
 transcripts_table = dynamodb.Table(TRANSCRIPTS_TABLE)
 briefings_table = dynamodb.Table(BRIEFINGS_TABLE)
 users_table = dynamodb.Table(USERS_TABLE)
 
 
-def handler(event: dict, context: Any) -> dict:
+def lambda_handler(event: dict, context: Any) -> dict:
     """
     Main handler for morning briefing generation.
 

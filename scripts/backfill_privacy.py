@@ -26,7 +26,7 @@ from typing import Optional, Dict
 BUCKET_NAME = os.environ.get('KRISP_S3_BUCKET', '')  # Required: set KRISP_S3_BUCKET env var
 TABLE_NAME = os.environ.get('DYNAMODB_TABLE', 'krisp-transcripts-index')
 REGION = os.environ.get('AWS_REGION', 'us-east-1')
-PRIVACY_MODEL_ID = os.environ.get('PRIVACY_MODEL_ID', 'amazon.nova-lite-v1:0')
+PRIVACY_MODEL_ID = os.environ.get('PRIVACY_MODEL_ID', 'amazon.nova-2-lite-v1:0')
 
 # Initialize clients
 s3 = boto3.client('s3', region_name=REGION)
