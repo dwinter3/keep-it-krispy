@@ -87,6 +87,33 @@ function canonicalizeName(name: string): string {
     .replace(/\s+/g, ' ')
 }
 
+// Extract LinkedIn URL from text (hints field)
+// Matches patterns like:
+// - linkedin.com/in/username
+// - www.linkedin.com/in/username
+// - https://linkedin.com/in/username
+// - https://www.linkedin.com/in/username
+function extractLinkedInUrl(text: string): string | null {
+  if (!text) return null
+
+  // Match LinkedIn profile URLs - captures the full URL including protocol if present
+  const linkedinPattern = /(?:https?:\/\/)?(?:www\.)?linkedin\.com\/in\/[\w-]+\/?/gi
+  const match = text.match(linkedinPattern)
+
+  if (match && match[0]) {
+    let url = match[0]
+    // Normalize the URL to always have https://
+    if (!url.startsWith('http')) {
+      url = 'https://' + url
+    }
+    // Remove trailing slash for consistency
+    url = url.replace(/\/$/, '')
+    return url
+  }
+
+  return null
+}
+
 async function findSpeakerEntity(
   userId: string,
   speakerName: string
@@ -622,6 +649,14 @@ export async function PATCH(
       updateExpressions.push('#humanHints = :humanHints')
       expressionAttributeNames['#humanHints'] = 'humanHints'
       expressionAttributeValues[':humanHints'] = body.humanHints || null
+
+      // Auto-detect LinkedIn URL in hints and store it
+      const linkedinUrl = extractLinkedInUrl(body.humanHints)
+      if (linkedinUrl) {
+        updateExpressions.push('#linkedin = :linkedin')
+        expressionAttributeNames['#linkedin'] = 'linkedin'
+        expressionAttributeValues[':linkedin'] = linkedinUrl
+      }
     }
 
     // Handle rejected profile (adds to list)
