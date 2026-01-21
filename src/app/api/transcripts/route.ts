@@ -78,24 +78,26 @@ export async function GET(request: NextRequest) {
       return NextResponse.json(JSON.parse(body))
     }
 
-    // Get stats for dashboard (scoped to user)
+    // Get stats for dashboard (scoped to user, excluding documents)
     if (action === 'stats') {
       const queryCommand = new QueryCommand({
         TableName: TABLE_NAME,
         IndexName: 'user-index',
         KeyConditionExpression: 'user_id = :userId',
-        ExpressionAttributeValues: { ':userId': userId },
+        FilterExpression: 'attribute_not_exists(pk) OR pk <> :docPk',
+        ExpressionAttributeValues: { ':userId': userId, ':docPk': 'DOCUMENT' },
         Select: 'COUNT',
       })
       const countResult = await dynamodb.send(queryCommand)
 
-      // Get unique speakers for this user
+      // Get unique speakers for this user (excluding documents)
       const speakersCommand = new QueryCommand({
         TableName: TABLE_NAME,
         IndexName: 'user-index',
         KeyConditionExpression: 'user_id = :userId',
-        ExpressionAttributeValues: { ':userId': userId },
-        ProjectionExpression: 'speakers',
+        FilterExpression: 'attribute_not_exists(pk) OR pk <> :docPk',
+        ExpressionAttributeValues: { ':userId': userId, ':docPk': 'DOCUMENT' },
+        ProjectionExpression: 'speakers, pk',
       })
       const speakersResult = await dynamodb.send(speakersCommand)
       const allSpeakers = new Set<string>()
@@ -153,11 +155,11 @@ export async function GET(request: NextRequest) {
     // For shared-only, we need to scan for transcripts shared with this user
     // This is less efficient but necessary until we add a GSI for shared_with_user_ids
     if (ownership === 'shared') {
-      // Scan for transcripts where user is in shared_with_user_ids
+      // Scan for transcripts where user is in shared_with_user_ids (excluding documents)
       const scanCommand = new ScanCommand({
         TableName: TABLE_NAME,
-        FilterExpression: 'contains(shared_with_user_ids, :userId)',
-        ExpressionAttributeValues: { ':userId': userId },
+        FilterExpression: 'contains(shared_with_user_ids, :userId) AND (attribute_not_exists(pk) OR pk <> :docPk)',
+        ExpressionAttributeValues: { ':userId': userId, ':docPk': 'DOCUMENT' },
         Limit: limit,
         ...(cursor && { ExclusiveStartKey: JSON.parse(Buffer.from(cursor, 'base64').toString('utf-8')) }),
       })
@@ -195,16 +197,24 @@ export async function GET(request: NextRequest) {
     }
 
     // Build filter expression for privacy (for owned transcripts)
+    // Also exclude documents (pk = 'DOCUMENT') which are stored in the same table
     let filterExpression: string | undefined
     const expressionAttrValues: Record<string, unknown> = { ':userId': userId }
+    const expressionAttrNames: Record<string, string> = {}
+
+    // Base filter: exclude documents
+    const documentFilter = '(attribute_not_exists(pk) OR pk <> :docPk)'
+    expressionAttrValues[':docPk'] = 'DOCUMENT'
 
     if (onlyPrivate) {
-      filterExpression = 'isPrivate = :isPrivate'
+      filterExpression = `${documentFilter} AND isPrivate = :isPrivate`
       expressionAttrValues[':isPrivate'] = true
     } else if (!includePrivate) {
       // By default, exclude private transcripts
-      filterExpression = 'attribute_not_exists(isPrivate) OR isPrivate = :isPrivate'
+      filterExpression = `${documentFilter} AND (attribute_not_exists(isPrivate) OR isPrivate = :isPrivate)`
       expressionAttrValues[':isPrivate'] = false
+    } else {
+      filterExpression = documentFilter
     }
 
     // Query owned transcripts
@@ -232,8 +242,8 @@ export async function GET(request: NextRequest) {
       if (sharedLimit > 0) {
         const scanCommand = new ScanCommand({
           TableName: TABLE_NAME,
-          FilterExpression: 'contains(shared_with_user_ids, :userId)',
-          ExpressionAttributeValues: { ':userId': userId },
+          FilterExpression: 'contains(shared_with_user_ids, :userId) AND (attribute_not_exists(pk) OR pk <> :docPk)',
+          ExpressionAttributeValues: { ':userId': userId, ':docPk': 'DOCUMENT' },
           Limit: sharedLimit,
         })
 
