@@ -1083,7 +1083,10 @@ export default function TranscriptsPage() {
                 {/* Group transcripts by date */}
                 {(() => {
                   const grouped = filteredTranscripts.reduce((acc, t) => {
-                    const dateKey = formatDate(t.date || t.timestamp)
+                    // Use timestamp (with full time info) for grouping, not date-only string
+                    // Date-only strings like "2026-01-20" are parsed as UTC midnight,
+                    // which can show as the previous day in local timezone
+                    const dateKey = formatDate(t.timestamp || t.date)
                     if (!acc[dateKey]) acc[dateKey] = []
                     acc[dateKey].push(t)
                     return acc
