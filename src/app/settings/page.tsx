@@ -938,7 +938,7 @@ export default function SettingsPage() {
               </div>
 
               {/* Re-process and Delete Buttons */}
-              {linkedInStats?.totalConnections && linkedInStats.totalConnections > 0 && (
+              {linkedInStats?.lastImportAt && (
                 <div className="mt-6 pt-6 border-t border-gray-200 dark:border-gray-700 space-y-4">
                   {/* Re-process Button */}
                   <div className="flex items-center justify-between">
@@ -969,34 +969,36 @@ export default function SettingsPage() {
                     </button>
                   </div>
 
-                  {/* Delete Button */}
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm font-medium text-gray-700 dark:text-gray-300">Delete All Connections</p>
-                      <p className="text-sm text-gray-500 dark:text-gray-400">
-                        Remove all imported LinkedIn data from your account
-                      </p>
+                  {/* Delete Button - only show if there are connections */}
+                  {linkedInStats.totalConnections > 0 && (
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm font-medium text-gray-700 dark:text-gray-300">Delete All Connections</p>
+                        <p className="text-sm text-gray-500 dark:text-gray-400">
+                          Remove all imported LinkedIn data from your account
+                        </p>
+                      </div>
+                      <button
+                        onClick={deleteLinkedIn}
+                        disabled={deletingLinkedIn}
+                        className="px-4 py-2 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg flex items-center gap-2"
+                      >
+                        {deletingLinkedIn ? (
+                          <>
+                            <div className="w-4 h-4 border-2 border-red-500 border-t-transparent rounded-full animate-spin"></div>
+                            Deleting...
+                          </>
+                        ) : (
+                          <>
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                            </svg>
+                            Delete All
+                          </>
+                        )}
+                      </button>
                     </div>
-                    <button
-                      onClick={deleteLinkedIn}
-                      disabled={deletingLinkedIn}
-                      className="px-4 py-2 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg flex items-center gap-2"
-                    >
-                      {deletingLinkedIn ? (
-                        <>
-                          <div className="w-4 h-4 border-2 border-red-500 border-t-transparent rounded-full animate-spin"></div>
-                          Deleting...
-                        </>
-                      ) : (
-                        <>
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                          </svg>
-                          Delete All
-                        </>
-                      )}
-                    </button>
-                  </div>
+                  )}
                 </div>
               )}
 
