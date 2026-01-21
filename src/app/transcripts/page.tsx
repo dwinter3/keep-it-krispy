@@ -2304,7 +2304,7 @@ function TranscriptDetail({
                     <span className="uppercase font-medium px-1.5 py-0.5 bg-gray-200 dark:bg-gray-600 rounded text-gray-600 dark:text-gray-300">
                       {doc.format}
                     </span>
-                    <span>{doc.wordCount.toLocaleString()} words</span>
+                    <span>{(doc.wordCount ?? 0).toLocaleString()} words</span>
                     {doc.fileSize && <span>{formatFileSize(doc.fileSize)}</span>}
                     <span>{formatDocDate(doc.importedAt)}</span>
                   </div>
@@ -2371,7 +2371,7 @@ function TranscriptDetail({
                           </div>
                           <div className="flex items-center gap-2 mt-1 text-xs text-gray-500 dark:text-gray-400">
                             <span className="uppercase font-medium">{doc.format}</span>
-                            <span>{doc.wordCount.toLocaleString()} words</span>
+                            <span>{(doc.wordCount ?? 0).toLocaleString()} words</span>
                             <span>{formatDocDate(doc.importedAt)}</span>
                           </div>
                           {linkingDocumentId === doc.documentId && (

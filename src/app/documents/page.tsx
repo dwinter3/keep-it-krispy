@@ -773,7 +773,7 @@ export default function DocumentsPage() {
                               {getSourceIcon(doc.source)}
                               {doc.source === 'url' ? 'Web' : doc.source === 'drive' ? 'Drive' : doc.source === 'notion' ? 'Notion' : 'Upload'}
                             </span>
-                            <span>{doc.wordCount.toLocaleString()} words</span>
+                            <span>{(doc.wordCount ?? 0).toLocaleString()} words</span>
                             {doc.fileSize && <span>{formatFileSize(doc.fileSize)}</span>}
                             <span>{formatRelativeTime(doc.importedAt)}</span>
                           </div>
@@ -832,7 +832,7 @@ export default function DocumentsPage() {
                       {selectedDocument.format.toUpperCase()}
                     </span>
                     <span className="px-2.5 py-1 bg-gray-100 dark:bg-gray-700 rounded-full text-sm text-gray-700 dark:text-gray-300">
-                      {selectedDocument.wordCount.toLocaleString()} words
+                      {(selectedDocument.wordCount ?? 0).toLocaleString()} words
                     </span>
                     {selectedDocument.fileSize && (
                       <span className="px-2.5 py-1 bg-gray-100 dark:bg-gray-700 rounded-full text-sm text-gray-700 dark:text-gray-300">
