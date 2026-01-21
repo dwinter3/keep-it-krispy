@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb'
 import { DynamoDBDocumentClient, PutCommand, QueryCommand, BatchWriteCommand, ScanCommand } from '@aws-sdk/lib-dynamodb'
+import { S3Client, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3'
 import { auth } from '@/lib/auth'
 import { getUserByEmail } from '@/lib/users'
 import JSZip from 'jszip'
@@ -11,6 +12,7 @@ export const dynamic = 'force-dynamic'
 
 const TABLE_NAME = 'krisp-linkedin-connections'
 const AWS_REGION = process.env.APP_REGION || 'us-east-1'
+const S3_BUCKET = process.env.KRISP_S3_BUCKET || 'krisp-transcripts-754639201213'
 
 const credentials = process.env.S3_ACCESS_KEY_ID ? {
   accessKeyId: process.env.S3_ACCESS_KEY_ID,
@@ -18,6 +20,7 @@ const credentials = process.env.S3_ACCESS_KEY_ID ? {
 } : undefined
 
 const dynamoClient = new DynamoDBClient({ region: AWS_REGION, credentials })
+const s3Client = new S3Client({ region: AWS_REGION, credentials })
 const dynamodb = DynamoDBDocumentClient.from(dynamoClient)
 
 /**
@@ -173,6 +176,21 @@ export async function POST(request: NextRequest) {
         { error: 'No connections found in the file.' },
         { status: 400 }
       )
+    }
+
+    // Store raw CSV to S3 for re-processing
+    const s3Key = `linkedin/${user.user_id}/connections.csv`
+    try {
+      await s3Client.send(new PutObjectCommand({
+        Bucket: S3_BUCKET,
+        Key: s3Key,
+        Body: csvContent,
+        ContentType: 'text/csv',
+      }))
+      console.log('[LinkedIn Import] Stored CSV to S3:', s3Key)
+    } catch (s3Error) {
+      console.error('[LinkedIn Import] Failed to store CSV to S3:', s3Error)
+      // Continue with import even if S3 storage fails
     }
 
     // Process and store connections
@@ -370,6 +388,162 @@ export async function GET(request: NextRequest) {
     console.error('LinkedIn list error:', error)
     return NextResponse.json(
       { error: 'Failed to list LinkedIn connections', details: String(error) },
+      { status: 500 }
+    )
+  }
+}
+
+/**
+ * PUT /api/linkedin
+ *
+ * Re-process LinkedIn connections from stored CSV.
+ */
+export async function PUT(request: NextRequest) {
+  console.log('[LinkedIn Re-process] Starting re-process request')
+
+  const session = await auth()
+  if (!session?.user?.email) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
+  const user = await getUserByEmail(session.user.email)
+  if (!user) {
+    return NextResponse.json({ error: 'User not found' }, { status: 404 })
+  }
+
+  try {
+    // Fetch stored CSV from S3
+    const s3Key = `linkedin/${user.user_id}/connections.csv`
+    console.log('[LinkedIn Re-process] Fetching CSV from S3:', s3Key)
+
+    let csvContent: string
+    try {
+      const response = await s3Client.send(new GetObjectCommand({
+        Bucket: S3_BUCKET,
+        Key: s3Key,
+      }))
+      csvContent = await response.Body?.transformToString() || ''
+    } catch (s3Error) {
+      console.error('[LinkedIn Re-process] CSV not found in S3:', s3Error)
+      return NextResponse.json(
+        { error: 'No stored LinkedIn data found. Please upload your LinkedIn export first.' },
+        { status: 404 }
+      )
+    }
+
+    if (!csvContent) {
+      return NextResponse.json(
+        { error: 'Stored CSV is empty. Please re-upload your LinkedIn export.' },
+        { status: 400 }
+      )
+    }
+
+    // Parse CSV
+    console.log('[LinkedIn Re-process] Parsing CSV, length:', csvContent.length)
+    const connections = parseCSV(csvContent)
+    console.log('[LinkedIn Re-process] Parsed connections count:', connections.length)
+
+    if (connections.length === 0) {
+      return NextResponse.json(
+        { error: 'No connections found in stored file.' },
+        { status: 400 }
+      )
+    }
+
+    // Process and store connections (same logic as POST)
+    const now = new Date().toISOString()
+    let imported = 0
+    let skipped = 0
+    const errors: string[] = []
+
+    const batchSize = 25
+    for (let i = 0; i < connections.length; i += batchSize) {
+      const batch = connections.slice(i, i + batchSize)
+      const writeRequests = []
+
+      for (const conn of batch) {
+        const firstName = conn['First Name'] || ''
+        const lastName = conn['Last Name'] || ''
+        const email = conn['Email Address'] || ''
+        const company = conn['Company'] || ''
+        const position = conn['Position'] || ''
+        const connectedOn = conn['Connected On'] || ''
+
+        const fullName = `${firstName} ${lastName}`.trim()
+
+        if (!fullName) {
+          skipped++
+          continue
+        }
+
+        const normalizedName = normalizeName(fullName)
+        const recordKey = email ? email.toLowerCase() : `name:${normalizedName}`
+
+        const searchTerms = [
+          ...normalizeName(firstName).split(' '),
+          ...normalizeName(lastName).split(' '),
+          ...normalizeName(company).split(' '),
+        ].filter(t => t.length > 1)
+
+        writeRequests.push({
+          PutRequest: {
+            Item: {
+              user_id: user.user_id,
+              email: recordKey,
+              first_name: firstName,
+              last_name: lastName,
+              full_name: fullName,
+              normalized_name: normalizedName,
+              company,
+              position,
+              connected_on: connectedOn,
+              search_terms: searchTerms,
+              imported_at: now,
+            },
+          },
+        })
+      }
+
+      if (writeRequests.length > 0) {
+        try {
+          await dynamodb.send(new BatchWriteCommand({
+            RequestItems: {
+              [TABLE_NAME]: writeRequests,
+            },
+          }))
+          imported += writeRequests.length
+        } catch (err) {
+          console.error('[LinkedIn Re-process] Batch write error:', err)
+          errors.push(`Batch ${Math.floor(i / batchSize) + 1} failed: ${String(err)}`)
+        }
+      }
+    }
+
+    // Update metadata
+    await dynamodb.send(new PutCommand({
+      TableName: TABLE_NAME,
+      Item: {
+        user_id: user.user_id,
+        email: '_metadata',
+        total_connections: imported,
+        last_import_at: now,
+        import_source: 'reprocessed',
+      },
+    }))
+
+    console.log(`[LinkedIn Re-process] Complete. Imported: ${imported}, Skipped: ${skipped}`)
+
+    return NextResponse.json({
+      success: true,
+      imported,
+      skipped,
+      errors: errors.length > 0 ? errors : undefined,
+      message: `Re-processed ${imported} LinkedIn connections.`,
+    })
+  } catch (error) {
+    console.error('[LinkedIn Re-process] Error:', error)
+    return NextResponse.json(
+      { error: 'Failed to re-process LinkedIn data', details: String(error) },
       { status: 500 }
     )
   }

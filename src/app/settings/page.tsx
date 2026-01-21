@@ -87,6 +87,7 @@ export default function SettingsPage() {
   const [linkedInError, setLinkedInError] = useState<string | null>(null)
   const [linkedInSuccess, setLinkedInSuccess] = useState<string | null>(null)
   const [deletingLinkedIn, setDeletingLinkedIn] = useState(false)
+  const [reprocessingLinkedIn, setReprocessingLinkedIn] = useState(false)
 
   useEffect(() => {
     if (status === 'authenticated') {
@@ -450,6 +451,34 @@ export default function SettingsPage() {
       setLinkedInError('Failed to delete LinkedIn data')
     } finally {
       setDeletingLinkedIn(false)
+    }
+  }
+
+  async function reprocessLinkedIn() {
+    setReprocessingLinkedIn(true)
+    setLinkedInError(null)
+    setLinkedInSuccess(null)
+
+    try {
+      const res = await fetch('/api/linkedin', {
+        method: 'PUT',
+      })
+      const data = await res.json()
+
+      if (data.success) {
+        setLinkedInSuccess(`Re-processed ${data.imported} connections.`)
+        loadLinkedIn()
+        setTimeout(() => setLinkedInSuccess(null), 5000)
+      } else {
+        const errorMsg = data.details
+          ? `${data.error}: ${data.details}`
+          : (data.error || 'Failed to re-process LinkedIn data')
+        setLinkedInError(errorMsg)
+      }
+    } catch (err) {
+      setLinkedInError('Failed to re-process LinkedIn data')
+    } finally {
+      setReprocessingLinkedIn(false)
     }
   }
 
@@ -908,9 +937,39 @@ export default function SettingsPage() {
                 </label>
               </div>
 
-              {/* Delete Button */}
+              {/* Re-process and Delete Buttons */}
               {linkedInStats?.totalConnections && linkedInStats.totalConnections > 0 && (
-                <div className="mt-6 pt-6 border-t border-gray-200 dark:border-gray-700">
+                <div className="mt-6 pt-6 border-t border-gray-200 dark:border-gray-700 space-y-4">
+                  {/* Re-process Button */}
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-gray-700 dark:text-gray-300">Re-process Connections</p>
+                      <p className="text-sm text-gray-500 dark:text-gray-400">
+                        Re-import from your last uploaded CSV file (deduplicates automatically)
+                      </p>
+                    </div>
+                    <button
+                      onClick={reprocessLinkedIn}
+                      disabled={reprocessingLinkedIn}
+                      className="px-4 py-2 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-lg flex items-center gap-2"
+                    >
+                      {reprocessingLinkedIn ? (
+                        <>
+                          <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+                          Processing...
+                        </>
+                      ) : (
+                        <>
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                          </svg>
+                          Re-process
+                        </>
+                      )}
+                    </button>
+                  </div>
+
+                  {/* Delete Button */}
                   <div className="flex items-center justify-between">
                     <div>
                       <p className="text-sm font-medium text-gray-700 dark:text-gray-300">Delete All Connections</p>
