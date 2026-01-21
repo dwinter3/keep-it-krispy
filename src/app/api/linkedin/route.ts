@@ -91,23 +91,32 @@ function parseCSVLine(line: string): string[] {
  * Expects multipart form data with 'file' field containing the ZIP.
  */
 export async function POST(request: NextRequest) {
+  console.log('[LinkedIn Import] Starting import request')
+
   const session = await auth()
   if (!session?.user?.email) {
+    console.log('[LinkedIn Import] Unauthorized - no session')
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
+  console.log('[LinkedIn Import] User email:', session.user.email)
 
   const user = await getUserByEmail(session.user.email)
   if (!user) {
+    console.log('[LinkedIn Import] User not found for email:', session.user.email)
     return NextResponse.json({ error: 'User not found' }, { status: 404 })
   }
+  console.log('[LinkedIn Import] User ID:', user.user_id)
 
   try {
+    console.log('[LinkedIn Import] Parsing form data...')
     const formData = await request.formData()
     const file = formData.get('file') as File | null
 
     if (!file) {
+      console.log('[LinkedIn Import] No file in form data')
       return NextResponse.json({ error: 'No file provided' }, { status: 400 })
     }
+    console.log('[LinkedIn Import] File received:', file.name, 'Size:', file.size, 'Type:', file.type)
 
     // Check file type
     if (!file.name.endsWith('.zip') && !file.name.endsWith('.csv')) {
@@ -121,12 +130,17 @@ export async function POST(request: NextRequest) {
 
     if (file.name.endsWith('.zip')) {
       // Parse ZIP file
+      console.log('[LinkedIn Import] Processing ZIP file...')
       const arrayBuffer = await file.arrayBuffer()
+      console.log('[LinkedIn Import] ArrayBuffer size:', arrayBuffer.byteLength)
+
       const zip = await JSZip.loadAsync(arrayBuffer)
+      console.log('[LinkedIn Import] ZIP loaded, files:', Object.keys(zip.files))
 
       // Find Connections.csv in the ZIP
       const connectionsFile = zip.file('Connections.csv')
       if (!connectionsFile) {
+        console.log('[LinkedIn Import] Connections.csv not found in ZIP')
         return NextResponse.json(
           { error: 'Connections.csv not found in ZIP file. Make sure you uploaded a LinkedIn data export.' },
           { status: 400 }
@@ -134,13 +148,21 @@ export async function POST(request: NextRequest) {
       }
 
       csvContent = await connectionsFile.async('string')
+      console.log('[LinkedIn Import] CSV content length:', csvContent.length)
     } else {
       // Direct CSV upload
+      console.log('[LinkedIn Import] Processing CSV file directly...')
       csvContent = await file.text()
+      console.log('[LinkedIn Import] CSV content length:', csvContent.length)
     }
 
     // Parse CSV
+    console.log('[LinkedIn Import] Parsing CSV...')
     const connections = parseCSV(csvContent)
+    console.log('[LinkedIn Import] Parsed connections count:', connections.length)
+    if (connections.length > 0) {
+      console.log('[LinkedIn Import] First row keys:', Object.keys(connections[0]))
+    }
 
     if (connections.length === 0) {
       return NextResponse.json(
@@ -207,19 +229,22 @@ export async function POST(request: NextRequest) {
 
       if (writeRequests.length > 0) {
         try {
+          console.log(`[LinkedIn Import] Writing batch ${Math.floor(i / batchSize) + 1}, items: ${writeRequests.length}`)
           await dynamodb.send(new BatchWriteCommand({
             RequestItems: {
               [TABLE_NAME]: writeRequests,
             },
           }))
           imported += writeRequests.length
+          console.log(`[LinkedIn Import] Batch ${Math.floor(i / batchSize) + 1} complete, total imported: ${imported}`)
         } catch (err) {
-          console.error('Batch write error:', err)
-          errors.push(`Batch ${i / batchSize + 1} failed`)
+          console.error('[LinkedIn Import] Batch write error:', err)
+          errors.push(`Batch ${Math.floor(i / batchSize) + 1} failed: ${String(err)}`)
         }
       }
     }
 
+    console.log(`[LinkedIn Import] Writing metadata, total imported: ${imported}`)
     // Store import metadata
     await dynamodb.send(new PutCommand({
       TableName: TABLE_NAME,
@@ -240,7 +265,10 @@ export async function POST(request: NextRequest) {
       message: `Successfully imported ${imported} LinkedIn connections.`,
     })
   } catch (error) {
-    console.error('LinkedIn import error:', error)
+    console.error('[LinkedIn Import] FATAL ERROR:', error)
+    console.error('[LinkedIn Import] Error name:', (error as Error).name)
+    console.error('[LinkedIn Import] Error message:', (error as Error).message)
+    console.error('[LinkedIn Import] Error stack:', (error as Error).stack)
     return NextResponse.json(
       { error: 'Failed to import LinkedIn data', details: String(error) },
       { status: 500 }
