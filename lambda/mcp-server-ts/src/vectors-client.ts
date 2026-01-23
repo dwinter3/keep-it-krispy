@@ -157,7 +157,7 @@ export class VectorsClient {
 
       try {
         // Use execFile for safety - no shell interpolation
-        const { stdout } = await execFileAsync('aws', [
+        const awsArgs = [
           's3vectors',
           'query-vectors',
           '--cli-input-json',
@@ -166,7 +166,15 @@ export class VectorsClient {
           AWS_REGION,
           '--output',
           'json',
-        ], { maxBuffer: 10 * 1024 * 1024 });
+        ];
+
+        // Add profile if AWS_PROFILE is set
+        const awsProfile = process.env.AWS_PROFILE;
+        if (awsProfile) {
+          awsArgs.push('--profile', awsProfile);
+        }
+
+        const { stdout } = await execFileAsync('aws', awsArgs, { maxBuffer: 10 * 1024 * 1024 });
 
         const response = JSON.parse(stdout);
         const results: VectorSearchResult[] = [];
