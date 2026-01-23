@@ -131,23 +131,23 @@ export class VectorsClient {
     };
 
     // Build filter based on provided filters
-    // S3 Vectors filter format: { equals: { key: 'field', value: 'val' } }
-    // or { and: [filter1, filter2] } for multiple conditions
-    const filters: Array<{ equals: { key: string; value: string } }> = [];
+    // S3 Vectors filter format: { "field": { "$eq": "value" } }
+    // or { "$and": [filter1, filter2] } for multiple conditions
+    const filters: Array<Record<string, { $eq: string }>> = [];
 
     if (meetingIdFilter) {
-      filters.push({ equals: { key: 'meeting_id', value: meetingIdFilter } });
+      filters.push({ meeting_id: { $eq: meetingIdFilter } });
     }
 
     if (userIdFilter) {
-      filters.push({ equals: { key: 'user_id', value: userIdFilter } });
+      filters.push({ user_id: { $eq: userIdFilter } });
     }
 
     // Apply filter(s)
     if (filters.length === 1) {
       queryParams.filter = filters[0];
     } else if (filters.length > 1) {
-      queryParams.filter = { and: filters };
+      queryParams.filter = { $and: filters };
     }
 
     try {
