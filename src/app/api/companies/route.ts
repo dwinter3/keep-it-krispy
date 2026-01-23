@@ -1,8 +1,7 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb'
 import { DynamoDBDocumentClient, QueryCommand, ScanCommand } from '@aws-sdk/lib-dynamodb'
-import { auth } from '@/lib/auth'
-import { getUserByEmail } from '@/lib/users'
+import { authenticateApiRequest } from '@/lib/api-auth'
 import type { CompanyEntity, CompanyMetadata } from '@/lib/entities'
 
 const ENTITIES_TABLE = 'krisp-entities'
@@ -34,17 +33,13 @@ interface CompanyResponse {
 }
 
 // GET /api/companies - List all companies for the user
-export async function GET() {
-  const session = await auth()
-  if (!session?.user?.email) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+export async function GET(request: NextRequest) {
+  // Authenticate via session or API key
+  const authResult = await authenticateApiRequest(request)
+  if (!authResult.authenticated || !authResult.userId) {
+    return NextResponse.json({ error: authResult.error || 'Unauthorized' }, { status: 401 })
   }
-
-  const user = await getUserByEmail(session.user.email)
-  if (!user) {
-    return NextResponse.json({ error: 'User not found' }, { status: 404 })
-  }
-  const userId = user.user_id
+  const userId = authResult.userId
 
   try {
     // Query company entities for this user using GSI

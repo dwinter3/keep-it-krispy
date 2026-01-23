@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb'
-import { DynamoDBDocumentClient, ScanCommand } from '@aws-sdk/lib-dynamodb'
+import { DynamoDBDocumentClient, QueryCommand } from '@aws-sdk/lib-dynamodb'
 import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3'
 import { BedrockRuntimeClient, InvokeModelCommand } from '@aws-sdk/client-bedrock-runtime'
+import { authenticateApiRequest } from '@/lib/api-auth'
 
 const TABLE_NAME = process.env.DYNAMODB_TABLE || 'krisp-transcripts-index'
 const BUCKET_NAME = process.env.KRISP_S3_BUCKET || ''
@@ -52,27 +53,39 @@ export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ name: string }> }
 ) {
+  // Authenticate via session or API key
+  const authResult = await authenticateApiRequest(request)
+  if (!authResult.authenticated || !authResult.userId) {
+    return NextResponse.json({ error: authResult.error || 'Unauthorized' }, { status: 401 })
+  }
+  const userId = authResult.userId
+
   try {
     const { name } = await params
     const speakerName = decodeURIComponent(name)
     const speakerNameLower = speakerName.toLowerCase()
 
-    // Find all meetings with this speaker
+    // Find all meetings with this speaker for this user
     const allItems: TranscriptItem[] = []
     let lastKey: Record<string, unknown> | undefined
 
     do {
-      const scanCommand = new ScanCommand({
+      const queryCommand = new QueryCommand({
         TableName: TABLE_NAME,
+        IndexName: 'user-index',
+        KeyConditionExpression: 'user_id = :userId',
         ProjectionExpression: 'meeting_id, s3_key, title, #date, #timestamp, speakers, speaker_corrections',
         ExpressionAttributeNames: {
           '#date': 'date',
           '#timestamp': 'timestamp',
         },
+        ExpressionAttributeValues: {
+          ':userId': userId,
+        },
         ...(lastKey && { ExclusiveStartKey: lastKey }),
       })
 
-      const response = await dynamodb.send(scanCommand)
+      const response = await dynamodb.send(queryCommand)
       if (response.Items) {
         allItems.push(...(response.Items as TranscriptItem[]))
       }

@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3'
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb'
 import { DynamoDBDocumentClient, ScanCommand, QueryCommand, UpdateCommand, GetCommand, PutCommand } from '@aws-sdk/lib-dynamodb'
-import { auth } from '@/lib/auth'
-import { getUserByEmail, getUser } from '@/lib/users'
+import { authenticateApiRequest } from '@/lib/api-auth'
+import { getUser } from '@/lib/users'
 
 const BUCKET_NAME = process.env.KRISP_S3_BUCKET || ''  // Required: set via environment variable
 const TABLE_NAME = process.env.DYNAMODB_TABLE || 'krisp-transcripts-index'
@@ -28,18 +28,12 @@ export async function GET(request: NextRequest) {
   const key = searchParams.get('key')
   const action = searchParams.get('action')
 
-  // Get authenticated user
-  const session = await auth()
-  if (!session?.user?.email) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  // Authenticate via session or API key
+  const authResult = await authenticateApiRequest(request)
+  if (!authResult.authenticated || !authResult.userId) {
+    return NextResponse.json({ error: authResult.error || 'Unauthorized' }, { status: 401 })
   }
-
-  // Get user's ID for tenant isolation
-  const user = await getUserByEmail(session.user.email)
-  if (!user) {
-    return NextResponse.json({ error: 'User not found' }, { status: 404 })
-  }
-  const userId = user.user_id
+  const userId = authResult.userId
 
   try {
     // If key provided, fetch specific transcript from S3 (with ownership/sharing check)
@@ -419,17 +413,12 @@ async function triggerSpeakerEnrichment(
  * Also creates speaker entities for new names
  */
 export async function PATCH(request: NextRequest) {
-  // Get authenticated user
-  const session = await auth()
-  if (!session?.user?.email) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  // Authenticate via session or API key
+  const authResult = await authenticateApiRequest(request)
+  if (!authResult.authenticated || !authResult.userId) {
+    return NextResponse.json({ error: authResult.error || 'Unauthorized' }, { status: 401 })
   }
-
-  const user = await getUserByEmail(session.user.email)
-  if (!user) {
-    return NextResponse.json({ error: 'User not found' }, { status: 404 })
-  }
-  const userId = user.user_id
+  const userId = authResult.userId
 
   // Parse body once and store for retry logic
   let body: {

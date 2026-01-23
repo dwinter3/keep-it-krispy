@@ -4,6 +4,7 @@ import { DynamoDBDocumentClient, PutCommand, QueryCommand, BatchWriteCommand, Sc
 import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3'
 import { auth } from '@/lib/auth'
 import { getUserByEmail } from '@/lib/users'
+import { authenticateApiRequest } from '@/lib/api-auth'
 import JSZip from 'jszip'
 
 // Route segment config for file uploads
@@ -324,15 +325,12 @@ export async function POST(request: NextRequest) {
  * - search: Filter by name
  */
 export async function GET(request: NextRequest) {
-  const session = await auth()
-  if (!session?.user?.email) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  // Authenticate via session or API key
+  const authResult = await authenticateApiRequest(request)
+  if (!authResult.authenticated || !authResult.userId) {
+    return NextResponse.json({ error: authResult.error || 'Unauthorized' }, { status: 401 })
   }
-
-  const user = await getUserByEmail(session.user.email)
-  if (!user) {
-    return NextResponse.json({ error: 'User not found' }, { status: 404 })
-  }
+  const userId = authResult.userId
 
   const { searchParams } = new URL(request.url)
   const limit = Math.min(parseInt(searchParams.get('limit') || '50'), 100)
@@ -344,7 +342,7 @@ export async function GET(request: NextRequest) {
       TableName: TABLE_NAME,
       KeyConditionExpression: 'user_id = :userId AND email = :email',
       ExpressionAttributeValues: {
-        ':userId': user.user_id,
+        ':userId': userId,
         ':email': '_metadata',
       },
     })
@@ -361,7 +359,7 @@ export async function GET(request: NextRequest) {
         IndexName: 'name-index',
         KeyConditionExpression: 'user_id = :userId AND begins_with(normalized_name, :search)',
         ExpressionAttributeValues: {
-          ':userId': user.user_id,
+          ':userId': userId,
           ':search': normalizeName(search),
         },
         Limit: limit,
@@ -374,7 +372,7 @@ export async function GET(request: NextRequest) {
         TableName: TABLE_NAME,
         KeyConditionExpression: 'user_id = :userId',
         ExpressionAttributeValues: {
-          ':userId': user.user_id,
+          ':userId': userId,
         },
         Limit: limit + 1, // +1 to account for metadata row
       })

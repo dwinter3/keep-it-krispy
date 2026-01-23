@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb'
 import { DynamoDBDocumentClient, QueryCommand } from '@aws-sdk/lib-dynamodb'
-import { auth } from '@/lib/auth'
-import { getUserByEmail } from '@/lib/users'
+import { authenticateApiRequest } from '@/lib/api-auth'
 
 const TABLE_NAME = 'krisp-linkedin-connections'
 const AWS_REGION = process.env.APP_REGION || 'us-east-1'
@@ -73,15 +72,12 @@ interface LinkedInMatch {
  * - context: Optional context from transcript to improve matching
  */
 export async function GET(request: NextRequest) {
-  const session = await auth()
-  if (!session?.user?.email) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  // Authenticate via session or API key
+  const authResult = await authenticateApiRequest(request)
+  if (!authResult.authenticated || !authResult.userId) {
+    return NextResponse.json({ error: authResult.error || 'Unauthorized' }, { status: 401 })
   }
-
-  const user = await getUserByEmail(session.user.email)
-  if (!user) {
-    return NextResponse.json({ error: 'User not found' }, { status: 404 })
-  }
+  const userId = authResult.userId
 
   const { searchParams } = new URL(request.url)
   const name = searchParams.get('name')
@@ -103,7 +99,7 @@ export async function GET(request: NextRequest) {
       IndexName: 'name-index',
       KeyConditionExpression: 'user_id = :userId AND begins_with(normalized_name, :search)',
       ExpressionAttributeValues: {
-        ':userId': user.user_id,
+        ':userId': userId,
         ':search': normalizedSearch,
       },
       Limit: 10,
@@ -136,7 +132,7 @@ export async function GET(request: NextRequest) {
         IndexName: 'name-index',
         KeyConditionExpression: 'user_id = :userId AND begins_with(normalized_name, :search)',
         ExpressionAttributeValues: {
-          ':userId': user.user_id,
+          ':userId': userId,
           ':search': searchWords[0],
         },
         Limit: 20,
