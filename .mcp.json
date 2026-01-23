@@ -22,7 +22,7 @@
         "AWS_REGION": "us-east-1",
         "KRISP_S3_BUCKET": "krisp-transcripts-754639201213",
         "DYNAMODB_TABLE": "krisp-transcripts-index",
-        "VECTOR_BUCKET": "krisp-vectors-754639201213",
+        "VECTOR_BUCKET": "krisp-vectors",
         "VECTOR_INDEX": "transcript-chunks",
         "AWS_PROFILE": "krisp-buddy",
         "KRISP_USER_ID": "usr_admin_001",

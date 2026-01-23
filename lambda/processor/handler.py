@@ -656,6 +656,17 @@ def extract_metadata(s3_key: str, content: dict) -> dict:
 
     # Include user_id if present (from webhook API key authentication)
     user_id = content.get('user_id')
+    if not user_id:
+        # Fall back to DynamoDB for user_id (for re-indexing existing transcripts)
+        try:
+            table = dynamodb.Table(TABLE_NAME)
+            existing = table.get_item(Key={'meeting_id': meeting_id})
+            if 'Item' in existing and 'user_id' in existing['Item']:
+                user_id = existing['Item']['user_id']
+                print(f"Got user_id from DynamoDB: {user_id}")
+        except Exception as e:
+            print(f"Could not get user_id from DynamoDB: {e}")
+
     if user_id:
         metadata['user_id'] = user_id
         print(f"Transcript owned by user: {user_id}")
