@@ -186,30 +186,44 @@ export class DynamoTranscriptClient {
 
   /**
    * List transcripts by speaker for a specific user.
-   * Filters by user_id for multi-tenant isolation.
+   * Uses user-index and filters by speaker name in the speakers array.
+   * Case-insensitive matching.
    */
   async listBySpeaker(
     userId: string,
     speakerName: string,
     limit: number = 20
   ): Promise<TranscriptRecord[]> {
+    // Query user's transcripts and filter by speaker in the speakers array
+    // We need to check multiple case variations since speaker names may vary
+    const searchName = speakerName.toLowerCase();
+
     const command = new QueryCommand({
       TableName: this.tableName,
-      IndexName: 'speaker-index',
-      KeyConditionExpression: 'speaker_name = :speaker',
-      FilterExpression: '(attribute_not_exists(isPrivate) OR isPrivate = :false) AND user_id = :userId',
+      IndexName: 'user-index',
+      KeyConditionExpression: 'user_id = :userId',
+      FilterExpression: '(attribute_not_exists(isPrivate) OR isPrivate = :false)',
       ExpressionAttributeValues: {
-        ':speaker': speakerName.toLowerCase(),
-        ':false': false,
         ':userId': userId,
+        ':false': false,
       },
-      Limit: limit * 2, // Request more since we're filtering
+      Limit: 200, // Get more records to filter client-side
       ScanIndexForward: false,
     });
 
     const response = await this.client.send(command);
     const items = (response.Items as TranscriptRecord[]) || [];
-    return items.slice(0, limit);
+
+    // Filter by speaker name (case-insensitive) in the speakers array
+    const filtered = items.filter(item => {
+      if (!item.speakers || !Array.isArray(item.speakers)) return false;
+      return item.speakers.some(s =>
+        s.toLowerCase().includes(searchName) ||
+        searchName.includes(s.toLowerCase())
+      );
+    });
+
+    return filtered.slice(0, limit);
   }
 
   /**

@@ -1,0 +1,33 @@
+{
+  "mcpServers": {
+    "pdf-reader": {
+      "command": "npx",
+      "args": ["@sylphx/pdf-reader-mcp"]
+    },
+    "crawl4ai": {
+      "command": "/Users/david.winter/claude-projects/mcp-servers/crawl4ai/launcher.sh"
+    },
+    "aws-admin": {
+      "command": "/Users/david.winter/claude-projects/mcp-servers/aws-admin/.venv/bin/python",
+      "args": ["-m", "aws_admin_mcp.server"]
+    },
+    "cloudflare": {
+      "command": "node",
+      "args": ["/Users/david.winter/claude-projects/mcp-servers/cloudflare/dist/index.js"]
+    },
+    "krisp": {
+      "command": "node",
+      "args": ["/Users/david.winter/claude-projects/krisp-buddy/lambda/mcp-server-ts/dist/stdio-server.cjs"],
+      "env": {
+        "AWS_REGION": "us-east-1",
+        "KRISP_S3_BUCKET": "krisp-transcripts-754639201213",
+        "DYNAMODB_TABLE": "krisp-transcripts-index",
+        "VECTOR_BUCKET": "krisp-vectors-754639201213",
+        "VECTOR_INDEX": "transcript-chunks",
+        "AWS_PROFILE": "krisp-buddy",
+        "KRISP_USER_ID": "usr_admin_001",
+        "KRISP_API_KEY": "kk_513ad475_gxJJZbbRoAtoxzvtQ7No5vR-VPtVPiRO"
+      }
+    }
+  }
+}

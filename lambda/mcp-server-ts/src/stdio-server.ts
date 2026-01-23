@@ -137,7 +137,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: 'get_transcripts',
-        description: 'Fetch full content of one or more transcripts by their S3 keys. Use keys from list_transcripts or search_transcripts. Speaker corrections are automatically applied if available. Only returns transcripts you have access to.',
+        description: 'Fetch transcript content by S3 keys. Use summary_only=true to get metadata without full transcript text (recommended for multiple transcripts). Speaker corrections are automatically applied.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -145,6 +145,10 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               type: 'array',
               items: { type: 'string' },
               description: 'S3 keys of transcripts to fetch',
+            },
+            summary_only: {
+              type: 'boolean',
+              description: 'If true, returns only title, summary, notes, action_items, and speakers (no full transcript text). Recommended when fetching multiple transcripts to avoid large responses.',
             },
           },
           required: ['keys'],
@@ -345,6 +349,25 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         );
         debug(`search_transcripts: got ${vectorResults.length} vector results in ${Date.now() - startTime}ms`);
 
+        // Check if vectors are working - if user has transcripts but no vector results,
+        // suggest using semantic_search tool instead
+        if (vectorResults.length === 0 && userTranscripts.length > 0) {
+          debug('search_transcripts: no vector results despite having transcripts - vectors may not be indexed');
+          return {
+            content: [{
+              type: 'text',
+              text: JSON.stringify({
+                query,
+                search_type: 'semantic',
+                count: 0,
+                results: [],
+                note: 'No results found. Vector search may not be available for your transcripts.',
+                suggestion: 'Try using the semantic_search tool instead, which uses the Keep It Krispy API and requires KRISP_API_KEY to be set.',
+              }, null, 2),
+            }],
+          };
+        }
+
         // Group by meeting to deduplicate
         const grouped = vectorsClient.groupByMeeting(vectorResults);
 
@@ -452,7 +475,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case 'get_transcripts': {
         const keys = args?.keys as string[];
-        debug('get_transcripts: fetching from S3', { keys, userId });
+        const summaryOnly = args?.summary_only as boolean || false;
+        debug('get_transcripts: fetching from S3', { keys, summaryOnly, userId });
 
         const transcripts = await s3Client.getTranscripts(keys);
         debug(`get_transcripts: fetched ${transcripts.length} transcripts in ${Date.now() - startTime}ms`);
@@ -514,20 +538,27 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               }
             }
 
-            return {
+            // Return with or without full transcript based on summaryOnly flag
+            const result: Record<string, unknown> = {
               key: t.key,
               title: t.title,
               summary: t.summary,
               notes: t.notes,
-              transcript: correctedTranscript,
               action_items: t.actionItems,
               speakers: correctedSpeakers,
               speaker_corrections: speakerCorrections,
             };
+
+            // Only include full transcript if not summary_only
+            if (!summaryOnly) {
+              result.transcript = correctedTranscript;
+            }
+
+            return result;
           })
         );
 
-        debug(`get_transcripts: applied corrections in ${Date.now() - startTime}ms`);
+        debug(`get_transcripts: applied corrections (summaryOnly=${summaryOnly}) in ${Date.now() - startTime}ms`);
 
         return {
           content: [{
