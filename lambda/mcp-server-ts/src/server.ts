@@ -1,103 +1,87 @@
 /**
  * Keep It Krispy MCP Server
  *
- * Exposes Krisp meeting transcripts to Claude Desktop.
+ * Exposes Krisp meeting transcripts to Claude Desktop via the KIK SaaS API.
+ * All operations go through the API for proper authentication and tenant isolation.
  */
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { S3TranscriptClient } from './s3-client.js';
-import { DynamoTranscriptClient } from './dynamo-client.js';
 import { KrispyApiClient } from './krispy-api-client.js';
 
-export function createServer(userId?: string, apiKey?: string): McpServer {
-  const s3Client = new S3TranscriptClient();
-  const dynamoClient = new DynamoTranscriptClient();
-
-  // Use provided userId or a default for testing
-  const currentUserId = userId || process.env.USER_ID || 'default-user';
-
-  // API client for semantic search (requires API key)
+export function createServer(apiKey?: string): McpServer {
+  // API key is required - all operations go through the API
   const currentApiKey = apiKey || process.env.KRISP_API_KEY;
-  const apiClient = currentApiKey ? new KrispyApiClient(currentApiKey) : null;
 
-  const server = new McpServer({
-    name: 'Keep It Krispy',
-    version: '1.0.0',
-  }, {
-    capabilities: {
-      tools: {},
+  if (!currentApiKey) {
+    throw new Error(
+      'KRISP_API_KEY is required. Get your API key from https://app.krispy.alpha-pm.dev/settings'
+    );
+  }
+
+  const apiClient = new KrispyApiClient(currentApiKey);
+
+  const server = new McpServer(
+    {
+      name: 'Keep It Krispy',
+      version: '1.0.0',
     },
-  });
+    {
+      capabilities: {
+        tools: {},
+      },
+    }
+  );
 
   // Tool: list_transcripts
   server.tool(
     'list_transcripts',
-    'List recent Krisp meeting transcripts. Returns metadata including title, date, and S3 key for each transcript.',
+    'List your recent Krisp meeting transcripts. Returns metadata including title, date, duration, speakers, and S3 key. Fast query (~50ms). Only shows transcripts you own or have been shared with you.',
     {
-      start_date: z.string().optional().describe('Start date (YYYY-MM-DD). Defaults to 30 days ago.'),
+      start_date: z.string().optional().describe('Start date (YYYY-MM-DD). Defaults to recent transcripts.'),
       end_date: z.string().optional().describe('End date (YYYY-MM-DD). Defaults to today.'),
       limit: z.number().optional().default(20).describe('Maximum number of transcripts to return (default: 20)'),
+      speaker: z.string().optional().describe('Filter by speaker name (exact match, case-insensitive)'),
     },
-    async ({ start_date, end_date, limit }) => {
-      const startDate = start_date ? new Date(start_date) : undefined;
-      const endDate = end_date ? new Date(end_date) : undefined;
+    async ({ start_date, end_date, limit, speaker }) => {
+      try {
+        const response = await apiClient.listTranscripts({
+          limit: limit || 20,
+          startDate: start_date,
+          endDate: end_date,
+          speaker,
+        });
 
-      const transcripts = await s3Client.listTranscripts(startDate, endDate, limit || 20);
-
-      return {
-        content: [{
-          type: 'text',
-          text: JSON.stringify({
-            count: transcripts.length,
-            transcripts: transcripts.map(t => ({
-              key: t.key,
-              title: t.title,
-              date: t.dateStr,
-              meeting_id: t.meetingId,
-            })),
-          }, null, 2),
-        }],
-      };
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(response, null, 2),
+            },
+          ],
+        };
+      } catch (error) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(
+                {
+                  error: error instanceof Error ? error.message : 'Failed to list transcripts',
+                },
+                null,
+                2
+              ),
+            },
+          ],
+        };
+      }
     }
   );
 
-  // Tool: search_transcripts
+  // Tool: search_transcripts (semantic search via API)
   server.tool(
     'search_transcripts',
-    'Search meeting transcripts by keyword in content, summary, or notes. Optionally filter by speaker name.',
-    {
-      query: z.string().describe('Search query to find in transcripts'),
-      speaker: z.string().optional().describe('Filter by speaker name (partial match)'),
-      limit: z.number().optional().default(10).describe('Maximum results to return (default: 10)'),
-    },
-    async ({ query, speaker, limit }) => {
-      const results = await s3Client.search(query, speaker, limit || 10);
-
-      return {
-        content: [{
-          type: 'text',
-          text: JSON.stringify({
-            query,
-            speaker: speaker || null,
-            count: results.length,
-            results: results.map(r => ({
-              key: r.key,
-              title: r.title,
-              date: r.dateStr,
-              speakers: r.speakers,
-              snippet: r.snippet,
-              summary: r.summary,
-            })),
-          }, null, 2),
-        }],
-      };
-    }
-  );
-
-  // Tool: semantic_search (requires API key)
-  server.tool(
-    'semantic_search',
     'Semantic search across your meeting transcripts using AI embeddings. Finds conceptually similar content even if exact words differ. Returns ranked results with relevance scores and text snippets. Only searches transcripts you own.',
     {
       query: z.string().describe('Natural language search query (e.g., "discussion about project timeline")'),
@@ -107,18 +91,6 @@ export function createServer(userId?: string, apiKey?: string): McpServer {
       to: z.string().optional().describe('End date (YYYY-MM-DD)'),
     },
     async ({ query, limit, speaker, from, to }) => {
-      if (!apiClient) {
-        return {
-          content: [{
-            type: 'text',
-            text: JSON.stringify({
-              error: 'Semantic search requires API key. Set KRISP_API_KEY environment variable in your Claude Desktop config.',
-              hint: 'Get your API key from https://app.krispy.alpha-pm.dev/settings',
-            }, null, 2),
-          }],
-        };
-      }
-
       try {
         const searchResponse = await apiClient.search(query, {
           limit: limit || 10,
@@ -128,40 +100,52 @@ export function createServer(userId?: string, apiKey?: string): McpServer {
         });
 
         return {
-          content: [{
-            type: 'text',
-            text: JSON.stringify({
-              query: searchResponse.query,
-              searchType: searchResponse.searchType,
-              filters: searchResponse.filters,
-              count: searchResponse.count,
-              results: searchResponse.results.map(r => ({
-                meetingId: r.meetingId,
-                s3Key: r.s3Key,
-                title: r.title,
-                date: r.date,
-                speakers: r.speakers,
-                duration: r.duration,
-                topic: r.topic,
-                relevanceScore: r.relevanceScore,
-                matchingChunks: r.matchingChunks,
-                snippets: r.snippets,
-                type: r.type,
-                format: r.format,
-                documentId: r.documentId,
-              })),
-            }, null, 2),
-          }],
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(
+                {
+                  query: searchResponse.query,
+                  searchType: searchResponse.searchType,
+                  filters: searchResponse.filters,
+                  count: searchResponse.count,
+                  results: searchResponse.results.map((r) => ({
+                    meetingId: r.meetingId,
+                    s3Key: r.s3Key,
+                    title: r.title,
+                    date: r.date,
+                    speakers: r.speakers,
+                    duration: r.duration,
+                    topic: r.topic,
+                    relevanceScore: r.relevanceScore,
+                    matchingChunks: r.matchingChunks,
+                    snippets: r.snippets,
+                    type: r.type,
+                    format: r.format,
+                    documentId: r.documentId,
+                  })),
+                },
+                null,
+                2
+              ),
+            },
+          ],
         };
       } catch (error) {
-        console.error('[MCP] Semantic search error:', error);
+        console.error('[MCP] Search error:', error);
         return {
-          content: [{
-            type: 'text',
-            text: JSON.stringify({
-              error: error instanceof Error ? error.message : 'Semantic search failed',
-            }, null, 2),
-          }],
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(
+                {
+                  error: error instanceof Error ? error.message : 'Search failed',
+                },
+                null,
+                2
+              ),
+            },
+          ],
         };
       }
     }
@@ -170,33 +154,194 @@ export function createServer(userId?: string, apiKey?: string): McpServer {
   // Tool: get_transcripts
   server.tool(
     'get_transcripts',
-    'Fetch full content of one or more transcripts by their S3 keys. Use keys from list_transcripts or search_transcripts.',
+    'Fetch transcript content by meeting IDs. Use summary_only=true to get metadata without full transcript text (recommended for multiple transcripts). Speaker corrections are automatically applied.',
     {
-      keys: z.array(z.string()).describe('S3 keys of transcripts to fetch'),
+      meeting_ids: z.array(z.string()).describe('Meeting IDs of transcripts to fetch (from list_transcripts)'),
+      summary_only: z
+        .boolean()
+        .optional()
+        .describe(
+          'If true, returns only title, summary, notes, action_items, and speakers (no full transcript text). Recommended when fetching multiple transcripts to avoid large responses.'
+        ),
     },
-    async ({ keys }) => {
-      const transcripts = await s3Client.getTranscripts(keys);
+    async ({ meeting_ids, summary_only }) => {
+      try {
+        const transcripts = await apiClient.getTranscripts(meeting_ids, { summaryOnly: summary_only });
 
-      return {
-        content: [{
-          type: 'text',
-          text: JSON.stringify({
-            count: transcripts.length,
-            transcripts: transcripts.map(t => t.error ? {
-              key: t.key,
-              error: t.error,
-            } : {
-              key: t.key,
-              title: t.title,
-              summary: t.summary,
-              notes: t.notes,
-              transcript: t.transcript,
-              action_items: t.actionItems,
-              speakers: t.speakers,
-            }),
-          }, null, 2),
-        }],
-      };
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(
+                {
+                  count: transcripts.length,
+                  transcripts,
+                },
+                null,
+                2
+              ),
+            },
+          ],
+        };
+      } catch (error) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(
+                {
+                  error: error instanceof Error ? error.message : 'Failed to fetch transcripts',
+                },
+                null,
+                2
+              ),
+            },
+          ],
+        };
+      }
+    }
+  );
+
+  // Tool: update_speakers
+  server.tool(
+    'update_speakers',
+    'Correct or identify speakers in a meeting transcript you own. Map generic names like "Speaker 2" to real names, or correct misspelled names. Optionally include LinkedIn URLs for reference. Corrections are stored and automatically applied when fetching transcripts.',
+    {
+      meeting_id: z.string().describe('The meeting ID to update speaker information for'),
+      speaker_mappings: z
+        .record(
+          z.string(),
+          z.object({
+            name: z.string().describe('Corrected speaker name'),
+            linkedin: z.string().optional().describe('LinkedIn profile URL (optional)'),
+          })
+        )
+        .describe(
+          'Object mapping original speaker names to corrected info. Keys are original names (e.g., "Speaker 2", "guy farber"), values are objects with "name" (required) and optional "linkedin" URL.'
+        ),
+    },
+    async ({ meeting_id, speaker_mappings }) => {
+      try {
+        const result = await apiClient.updateSpeakers(
+          meeting_id,
+          speaker_mappings as Record<string, { name: string; linkedin?: string }>
+        );
+
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(
+                {
+                  success: result.success,
+                  meetingId: meeting_id,
+                  speakerCorrections: result.speakerCorrections,
+                },
+                null,
+                2
+              ),
+            },
+          ],
+        };
+      } catch (error) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(
+                {
+                  error: error instanceof Error ? error.message : 'Failed to update speakers',
+                },
+                null,
+                2
+              ),
+            },
+          ],
+        };
+      }
+    }
+  );
+
+  // Tool: list_speakers
+  server.tool(
+    'list_speakers',
+    'List speakers from your knowledge graph. Returns speaker entities with metadata like names, LinkedIn URLs, and company associations.',
+    {
+      limit: z.number().optional().default(50).describe('Maximum number of speakers to return (default: 50)'),
+      company: z.string().optional().describe('Filter by company name'),
+      verified_only: z.boolean().optional().describe('Only return verified speakers'),
+    },
+    async ({ limit, company, verified_only }) => {
+      try {
+        const response = await apiClient.listSpeakers({
+          limit: limit || 50,
+          company,
+          verifiedOnly: verified_only,
+        });
+
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(response, null, 2),
+            },
+          ],
+        };
+      } catch (error) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(
+                {
+                  error: error instanceof Error ? error.message : 'Failed to list speakers',
+                },
+                null,
+                2
+              ),
+            },
+          ],
+        };
+      }
+    }
+  );
+
+  // Tool: list_companies
+  server.tool(
+    'list_companies',
+    'List companies from your knowledge graph. Returns company entities with metadata.',
+    {
+      limit: z.number().optional().default(50).describe('Maximum number of companies to return (default: 50)'),
+      type: z.string().optional().describe('Filter by company type (e.g., "customer", "partner", "vendor")'),
+    },
+    async ({ limit, type }) => {
+      try {
+        const response = await apiClient.listCompanies({ limit: limit || 50, type });
+
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(response, null, 2),
+            },
+          ],
+        };
+      } catch (error) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(
+                {
+                  error: error instanceof Error ? error.message : 'Failed to list companies',
+                },
+                null,
+                2
+              ),
+            },
+          ],
+        };
+      }
     }
   );
 
@@ -209,32 +354,33 @@ export function createServer(userId?: string, apiKey?: string): McpServer {
       search: z.string().optional().describe('Search by name (partial match)'),
     },
     async ({ limit, search }) => {
-      const stats = await dynamoClient.getLinkedInStats(currentUserId);
-      const connections = await dynamoClient.listLinkedInConnections(currentUserId, {
-        limit: limit || 50,
-        search,
-      });
+      try {
+        const response = await apiClient.listLinkedInConnections({ limit: limit || 50, search });
 
-      return {
-        content: [{
-          type: 'text',
-          text: JSON.stringify({
-            stats: {
-              totalConnections: stats.totalConnections,
-              lastImportAt: stats.lastImportAt,
-              importSource: stats.importSource,
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(response, null, 2),
             },
-            count: connections.length,
-            connections: connections.map(c => ({
-              fullName: c.fullName,
-              company: c.company,
-              position: c.position,
-              email: c.email,
-              connectedOn: c.connectedOn,
-            })),
-          }, null, 2),
-        }],
-      };
+          ],
+        };
+      } catch (error) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(
+                {
+                  error: error instanceof Error ? error.message : 'Failed to list LinkedIn connections',
+                },
+                null,
+                2
+              ),
+            },
+          ],
+        };
+      }
     }
   );
 
@@ -247,43 +393,61 @@ export function createServer(userId?: string, apiKey?: string): McpServer {
       company_hint: z.string().optional().describe('Optional company name to improve matching accuracy'),
     },
     async ({ speaker_name, company_hint }) => {
-      const match = await dynamoClient.matchLinkedInConnection(
-        currentUserId,
-        speaker_name,
-        company_hint ? { companies: [company_hint] } : undefined
-      );
+      try {
+        const response = await apiClient.matchLinkedInConnection(speaker_name, company_hint);
 
-      if (!match) {
+        if (!response.match) {
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify(
+                  {
+                    found: false,
+                    speakerName: speaker_name,
+                    message: 'No matching LinkedIn connection found. The speaker may not be a 1st-degree connection.',
+                  },
+                  null,
+                  2
+                ),
+              },
+            ],
+          };
+        }
+
         return {
-          content: [{
-            type: 'text',
-            text: JSON.stringify({
-              found: false,
-              speakerName: speaker_name,
-              message: 'No matching LinkedIn connection found. The speaker may not be a 1st-degree connection.',
-            }, null, 2),
-          }],
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(
+                {
+                  found: true,
+                  speakerName: speaker_name,
+                  match: response.match,
+                  confidence: response.confidence,
+                },
+                null,
+                2
+              ),
+            },
+          ],
+        };
+      } catch (error) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(
+                {
+                  error: error instanceof Error ? error.message : 'Failed to match LinkedIn connection',
+                },
+                null,
+                2
+              ),
+            },
+          ],
         };
       }
-
-      return {
-        content: [{
-          type: 'text',
-          text: JSON.stringify({
-            found: true,
-            speakerName: speaker_name,
-            match: {
-              fullName: match.fullName,
-              company: match.company,
-              position: match.position,
-              email: match.email,
-              connectedOn: match.connectedOn,
-              confidence: match.confidence,
-              matchReason: match.matchReason,
-            },
-          }, null, 2),
-        }],
-      };
     }
   );
 
@@ -295,192 +459,40 @@ export function createServer(userId?: string, apiKey?: string): McpServer {
       speaker_name: z.string().describe('Name of the speaker to get context for'),
     },
     async ({ speaker_name }) => {
-      const context = await dynamoClient.getSpeakerContext(currentUserId, speaker_name);
-
-      return {
-        content: [{
-          type: 'text',
-          text: JSON.stringify({
-            speakerName: speaker_name,
-            profile: context.profile ? {
-              displayName: context.profile.displayName,
-              role: context.profile.role,
-              company: context.profile.company,
-              linkedin: context.profile.linkedin,
-              aiSummary: context.profile.aiSummary,
-              topics: context.profile.topics,
-              enrichedAt: context.profile.enrichedAt,
-              confidence: context.profile.enrichedConfidence,
-            } : null,
-            linkedInMatch: context.linkedInMatch ? {
-              fullName: context.linkedInMatch.fullName,
-              company: context.linkedInMatch.company,
-              position: context.linkedInMatch.position,
-              confidence: context.linkedInMatch.confidence,
-              matchReason: context.linkedInMatch.matchReason,
-            } : null,
-            entity: context.entity ? {
-              entityId: context.entity.entity_id,
-              canonicalName: context.entity.canonical_name,
-              aliases: context.entity.aliases,
-            } : null,
-            transcriptCount: context.transcriptCount,
-          }, null, 2),
-        }],
-      };
-    }
-  );
-
-  // Tool: list_speakers
-  server.tool(
-    'list_speakers',
-    'List known speakers from meetings. Returns speaker entities with their metadata.',
-    {
-      limit: z.number().optional().default(50).describe('Maximum speakers to return (default: 50)'),
-      company: z.string().optional().describe('Filter by company name'),
-    },
-    async ({ limit, company }) => {
-      const speakers = await dynamoClient.listSpeakers(currentUserId, {
-        limit: limit || 50,
-        company,
-      });
-
-      return {
-        content: [{
-          type: 'text',
-          text: JSON.stringify({
-            count: speakers.length,
-            speakers: speakers.map(s => ({
-              entityId: s.entity_id,
-              name: s.canonical_name,
-              aliases: s.aliases,
-              metadata: s.metadata,
-              createdAt: s.created_at,
-              updatedAt: s.updated_at,
-            })),
-          }, null, 2),
-        }],
-      };
-    }
-  );
-
-  // Tool: list_companies
-  server.tool(
-    'list_companies',
-    'List known companies from meetings. Returns company entities with their metadata.',
-    {
-      limit: z.number().optional().default(50).describe('Maximum companies to return (default: 50)'),
-    },
-    async ({ limit }) => {
-      const companies = await dynamoClient.listCompanies(currentUserId, {
-        limit: limit || 50,
-      });
-
-      return {
-        content: [{
-          type: 'text',
-          text: JSON.stringify({
-            count: companies.length,
-            companies: companies.map(c => ({
-              entityId: c.entity_id,
-              name: c.canonical_name,
-              aliases: c.aliases,
-              metadata: c.metadata,
-              createdAt: c.created_at,
-              updatedAt: c.updated_at,
-            })),
-          }, null, 2),
-        }],
-      };
-    }
-  );
-
-  // Tool: test_connection
-  server.tool(
-    'test_connection',
-    'Test MCP server connectivity and verify all dependencies are working. Returns status of S3, DynamoDB, and other connections.',
-    {},
-    async () => {
-      const checks: {
-        name: string;
-        status: 'ok' | 'error';
-        message: string;
-        latencyMs?: number;
-      }[] = [];
-
-      // Check 1: S3 bucket access
-      const s3Start = Date.now();
       try {
-        const transcripts = await s3Client.listTranscripts(undefined, undefined, 1);
-        checks.push({
-          name: 's3_transcripts',
-          status: 'ok',
-          message: `Found ${transcripts.length} transcript(s)`,
-          latencyMs: Date.now() - s3Start,
-        });
+        const context = await apiClient.getSpeakerContext(speaker_name);
+
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(
+                {
+                  speakerName: speaker_name,
+                  ...context,
+                },
+                null,
+                2
+              ),
+            },
+          ],
+        };
       } catch (error) {
-        checks.push({
-          name: 's3_transcripts',
-          status: 'error',
-          message: error instanceof Error ? error.message : 'S3 access failed',
-          latencyMs: Date.now() - s3Start,
-        });
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(
+                {
+                  error: error instanceof Error ? error.message : 'Failed to get speaker context',
+                },
+                null,
+                2
+              ),
+            },
+          ],
+        };
       }
-
-      // Check 2: DynamoDB speakers table
-      const dynamoStart = Date.now();
-      try {
-        const speakers = await dynamoClient.listSpeakers(currentUserId, { limit: 1 });
-        checks.push({
-          name: 'dynamodb_speakers',
-          status: 'ok',
-          message: `Speakers table accessible (${speakers.length} returned)`,
-          latencyMs: Date.now() - dynamoStart,
-        });
-      } catch (error) {
-        checks.push({
-          name: 'dynamodb_speakers',
-          status: 'error',
-          message: error instanceof Error ? error.message : 'DynamoDB access failed',
-          latencyMs: Date.now() - dynamoStart,
-        });
-      }
-
-      // Check 3: LinkedIn data access
-      const linkedinStart = Date.now();
-      try {
-        const stats = await dynamoClient.getLinkedInStats(currentUserId);
-        checks.push({
-          name: 'linkedin_data',
-          status: 'ok',
-          message: `LinkedIn stats accessible (${stats.totalConnections || 0} connections)`,
-          latencyMs: Date.now() - linkedinStart,
-        });
-      } catch (error) {
-        checks.push({
-          name: 'linkedin_data',
-          status: 'error',
-          message: error instanceof Error ? error.message : 'LinkedIn data access failed',
-          latencyMs: Date.now() - linkedinStart,
-        });
-      }
-
-      const allOk = checks.every(c => c.status === 'ok');
-      const totalLatency = checks.reduce((sum, c) => sum + (c.latencyMs || 0), 0);
-
-      return {
-        content: [{
-          type: 'text',
-          text: JSON.stringify({
-            status: allOk ? 'healthy' : 'degraded',
-            userId: currentUserId.substring(0, 8) + '...',
-            authSource: 'env_var',
-            timestamp: new Date().toISOString(),
-            totalLatencyMs: totalLatency,
-            checks,
-          }, null, 2),
-        }],
-      };
     }
   );
 

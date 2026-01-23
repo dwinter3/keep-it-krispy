@@ -153,6 +153,13 @@ export class VectorsClient {
     try {
       // Write query to temp file to avoid command line length limits
       const tmpFile = path.join(os.tmpdir(), `query-${Date.now()}.json`);
+      console.error('[VECTORS] Query params:', JSON.stringify({
+        bucket: queryParams.vectorBucketName,
+        index: queryParams.indexName,
+        topK: queryParams.topK,
+        filter: queryParams.filter,
+        profile: process.env.AWS_PROFILE,
+      }));
       fs.writeFileSync(tmpFile, JSON.stringify(queryParams));
 
       try {
@@ -199,8 +206,12 @@ export class VectorsClient {
           fs.unlinkSync(tmpFile);
         }
       }
-    } catch (error) {
-      console.error('Vector query error:', error);
+    } catch (error: unknown) {
+      const err = error as { stderr?: string; message?: string };
+      console.error('Vector query error:', err.message || error);
+      if (err.stderr) {
+        console.error('AWS CLI stderr:', err.stderr);
+      }
       return [];
     }
   }

@@ -32,6 +32,12 @@ const dynamodb = DynamoDBDocumentClient.from(dynamoClient)
 interface TranscriptRecord {
   meeting_id: string
   s3_key: string
+  title?: string
+  date?: string
+  timestamp?: string
+  duration?: number
+  speakers?: string[]
+  topic?: string
   isPrivate?: boolean
   privacy_level?: string
   privacy_reason?: string
@@ -39,6 +45,110 @@ interface TranscriptRecord {
   privacy_confidence?: number
   privacy_work_percent?: number
   privacy_dismissed?: boolean
+  user_id?: string
+  owner_id?: string
+}
+
+/**
+ * GET /api/transcripts/[id]
+ * Get a single transcript by meeting ID
+ */
+export async function GET(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id: meetingId } = await params
+
+  try {
+    // Get authenticated user (via session or API key)
+    const session = await auth()
+    const apiKey = request.headers.get('x-api-key')
+
+    let userId: string | null = null
+
+    if (session?.user?.email) {
+      const user = await getUserByEmail(session.user.email)
+      userId = user?.user_id || null
+    } else if (apiKey) {
+      // Validate API key and get user
+      const { getUserByApiKey } = await import('@/lib/users')
+      const user = await getUserByApiKey(apiKey)
+      userId = user?.user_id || null
+    }
+
+    if (!userId) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+
+    // Get the transcript record from DynamoDB
+    const getCommand = new GetCommand({
+      TableName: TABLE_NAME,
+      Key: { meeting_id: meetingId },
+    })
+    const record = await dynamodb.send(getCommand)
+    const transcript = record.Item as TranscriptRecord | undefined
+
+    if (!transcript) {
+      return NextResponse.json({ error: 'Transcript not found' }, { status: 404 })
+    }
+
+    // Check access - user must own the transcript
+    const ownerId = transcript.owner_id || transcript.user_id
+    if (ownerId !== userId) {
+      return NextResponse.json({ error: 'Access denied' }, { status: 403 })
+    }
+
+    // Check if summary only requested
+    const summaryOnly = request.nextUrl.searchParams.get('summaryOnly') === 'true'
+
+    // If not summary only, fetch the full transcript from S3
+    let transcriptContent: string | undefined
+    let summary: string | undefined
+    let notes: string | undefined
+    let actionItems: string[] | undefined
+
+    if (transcript.s3_key && !summaryOnly) {
+      try {
+        const { GetObjectCommand } = await import('@aws-sdk/client-s3')
+        const s3Response = await s3.send(new GetObjectCommand({
+          Bucket: BUCKET_NAME,
+          Key: transcript.s3_key,
+        }))
+        const s3Content = await s3Response.Body?.transformToString()
+        if (s3Content) {
+          const parsed = JSON.parse(s3Content)
+          transcriptContent = parsed.transcript
+          summary = parsed.summary
+          notes = parsed.notes
+          actionItems = parsed.action_items
+        }
+      } catch (s3Error) {
+        console.error('Error fetching from S3:', s3Error)
+      }
+    }
+
+    return NextResponse.json({
+      meetingId: transcript.meeting_id,
+      key: transcript.s3_key,
+      title: transcript.title,
+      date: transcript.date,
+      timestamp: transcript.timestamp,
+      duration: transcript.duration,
+      speakers: transcript.speakers || [],
+      topic: transcript.topic,
+      isPrivate: transcript.isPrivate,
+      summary,
+      notes,
+      actionItems,
+      transcript: transcriptContent,
+    })
+  } catch (error) {
+    console.error('GET error:', error)
+    return NextResponse.json(
+      { error: 'Failed to get transcript', details: String(error) },
+      { status: 500 }
+    )
+  }
 }
 
 /**

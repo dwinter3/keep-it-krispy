@@ -54,6 +54,21 @@ export interface TranscriptListResponse {
   nextCursor: string | null;
 }
 
+export interface TranscriptContent {
+  key: string;
+  meetingId: string;
+  title: string;
+  date: string;
+  duration: number;
+  speakers: string[];
+  summary?: string;
+  notes?: string;
+  actionItems?: string[];
+  transcript?: string;
+  topic?: string;
+  error?: string;
+}
+
 export interface SpeakerStats {
   name: string;
   canonicalName: string;
@@ -101,6 +116,19 @@ export interface LinkedInMatchResponse {
   confidence: number;
 }
 
+export interface EntityRelationship {
+  relationshipId: string;
+  fromEntity: string;
+  toEntity: string;
+  relType: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface RelationshipsResponse {
+  entityId: string;
+  relationships: EntityRelationship[];
+}
+
 export class KrispyApiClient {
   private apiKey: string;
   private baseUrl: string;
@@ -108,6 +136,25 @@ export class KrispyApiClient {
   constructor(apiKey: string) {
     this.apiKey = apiKey;
     this.baseUrl = API_BASE_URL;
+  }
+
+  private async fetch<T>(path: string, options: RequestInit = {}): Promise<T> {
+    const url = `${this.baseUrl}${path}`;
+    const response = await fetch(url, {
+      ...options,
+      headers: {
+        'x-api-key': this.apiKey,
+        'Content-Type': 'application/json',
+        ...options.headers,
+      },
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(`API error: ${response.status} - ${error}`);
+    }
+
+    return response.json();
   }
 
   /**
@@ -131,22 +178,7 @@ export class KrispyApiClient {
     if (options.from) params.set('from', options.from);
     if (options.to) params.set('to', options.to);
 
-    const url = `${this.baseUrl}/api/search?${params.toString()}`;
-
-    const response = await fetch(url, {
-      method: 'GET',
-      headers: {
-        'x-api-key': this.apiKey,
-        'Content-Type': 'application/json',
-      },
-    });
-
-    if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`Search API error: ${response.status} - ${error}`);
-    }
-
-    return response.json();
+    return this.fetch<SearchResponse>(`/api/search?${params.toString()}`);
   }
 
   /**
@@ -155,95 +187,83 @@ export class KrispyApiClient {
   async listTranscripts(options: {
     limit?: number;
     cursor?: string;
-  } = {}): Promise<unknown> {
+    startDate?: string;
+    endDate?: string;
+    speaker?: string;
+  } = {}): Promise<TranscriptListResponse> {
     const params = new URLSearchParams({
       limit: String(options.limit || 20),
     });
 
     if (options.cursor) params.set('cursor', options.cursor);
+    if (options.startDate) params.set('startDate', options.startDate);
+    if (options.endDate) params.set('endDate', options.endDate);
+    if (options.speaker) params.set('speaker', options.speaker);
 
-    const url = `${this.baseUrl}/api/transcripts?${params.toString()}`;
-
-    const response = await fetch(url, {
-      method: 'GET',
-      headers: {
-        'x-api-key': this.apiKey,
-        'Content-Type': 'application/json',
-      },
-    });
-
-    if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`Transcripts API error: ${response.status} - ${error}`);
-    }
-
-    return response.json();
+    return this.fetch<TranscriptListResponse>(`/api/transcripts?${params.toString()}`);
   }
 
   /**
    * Get a specific transcript by ID.
    */
-  async getTranscript(meetingId: string): Promise<unknown> {
-    const url = `${this.baseUrl}/api/transcripts/${encodeURIComponent(meetingId)}`;
+  async getTranscript(meetingId: string): Promise<TranscriptContent> {
+    return this.fetch<TranscriptContent>(`/api/transcripts/${encodeURIComponent(meetingId)}`);
+  }
 
-    const response = await fetch(url, {
-      method: 'GET',
-      headers: {
-        'x-api-key': this.apiKey,
-        'Content-Type': 'application/json',
-      },
-    });
+  /**
+   * Get multiple transcripts by meeting IDs.
+   */
+  async getTranscripts(
+    meetingIds: string[],
+    options: { summaryOnly?: boolean } = {}
+  ): Promise<TranscriptContent[]> {
+    const results: TranscriptContent[] = [];
 
-    if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`Transcript API error: ${response.status} - ${error}`);
+    for (const meetingId of meetingIds) {
+      try {
+        const params = options.summaryOnly ? '?summaryOnly=true' : '';
+        const transcript = await this.fetch<TranscriptContent>(
+          `/api/transcripts/${encodeURIComponent(meetingId)}${params}`
+        );
+        results.push(transcript);
+      } catch (error) {
+        results.push({
+          key: meetingId,
+          meetingId: meetingId,
+          title: 'Error',
+          date: '',
+          duration: 0,
+          speakers: [],
+          error: error instanceof Error ? error.message : 'Failed to fetch transcript',
+        });
+      }
     }
 
-    return response.json();
+    return results;
   }
 
   /**
    * List all speakers from transcripts.
    */
-  async listSpeakers(): Promise<SpeakersListResponse> {
-    const url = `${this.baseUrl}/api/speakers`;
+  async listSpeakers(options: {
+    limit?: number;
+    company?: string;
+    verifiedOnly?: boolean;
+  } = {}): Promise<SpeakersListResponse> {
+    const params = new URLSearchParams();
+    if (options.limit) params.set('limit', String(options.limit));
+    if (options.company) params.set('company', options.company);
+    if (options.verifiedOnly) params.set('verified', 'true');
 
-    const response = await fetch(url, {
-      method: 'GET',
-      headers: {
-        'x-api-key': this.apiKey,
-        'Content-Type': 'application/json',
-      },
-    });
-
-    if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`Speakers API error: ${response.status} - ${error}`);
-    }
-
-    return response.json();
+    const queryString = params.toString();
+    return this.fetch<SpeakersListResponse>(`/api/speakers${queryString ? '?' + queryString : ''}`);
   }
 
   /**
    * Get context for a specific speaker.
    */
   async getSpeakerContext(speakerName: string): Promise<SpeakerContext> {
-    const url = `${this.baseUrl}/api/speakers/${encodeURIComponent(speakerName)}/context`;
-
-    const response = await fetch(url, {
-      method: 'GET',
-      headers: {
-        'x-api-key': this.apiKey,
-        'Content-Type': 'application/json',
-      },
-    });
-
-    if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`Speaker context API error: ${response.status} - ${error}`);
-    }
-
-    return response.json();
+    return this.fetch<SpeakerContext>(`/api/speakers/${encodeURIComponent(speakerName)}/context`);
   }
 
   /**
@@ -254,48 +274,41 @@ export class KrispyApiClient {
     if (options.limit) params.set('limit', String(options.limit));
     if (options.type) params.set('type', options.type);
 
-    const url = `${this.baseUrl}/api/companies${params.toString() ? '?' + params.toString() : ''}`;
+    const queryString = params.toString();
+    return this.fetch<CompaniesListResponse>(`/api/companies${queryString ? '?' + queryString : ''}`);
+  }
 
-    const response = await fetch(url, {
-      method: 'GET',
-      headers: {
-        'x-api-key': this.apiKey,
-        'Content-Type': 'application/json',
-      },
-    });
+  /**
+   * Get relationships for an entity.
+   */
+  async getEntityRelationships(
+    entityId: string,
+    options: { relType?: string; direction?: 'from' | 'to' | 'both' } = {}
+  ): Promise<RelationshipsResponse> {
+    const params = new URLSearchParams();
+    if (options.relType) params.set('type', options.relType);
+    if (options.direction) params.set('direction', options.direction);
 
-    if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`Companies API error: ${response.status} - ${error}`);
-    }
-
-    return response.json();
+    const queryString = params.toString();
+    return this.fetch<RelationshipsResponse>(
+      `/api/entities/${encodeURIComponent(entityId)}/relationships${queryString ? '?' + queryString : ''}`
+    );
   }
 
   /**
    * List LinkedIn connections.
    */
-  async listLinkedInConnections(options: { limit?: number; search?: string } = {}): Promise<{ connections: LinkedInConnection[] }> {
+  async listLinkedInConnections(
+    options: { limit?: number; search?: string } = {}
+  ): Promise<{ connections: LinkedInConnection[] }> {
     const params = new URLSearchParams();
     if (options.limit) params.set('limit', String(options.limit));
     if (options.search) params.set('search', options.search);
 
-    const url = `${this.baseUrl}/api/linkedin${params.toString() ? '?' + params.toString() : ''}`;
-
-    const response = await fetch(url, {
-      method: 'GET',
-      headers: {
-        'x-api-key': this.apiKey,
-        'Content-Type': 'application/json',
-      },
-    });
-
-    if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`LinkedIn API error: ${response.status} - ${error}`);
-    }
-
-    return response.json();
+    const queryString = params.toString();
+    return this.fetch<{ connections: LinkedInConnection[] }>(
+      `/api/linkedin${queryString ? '?' + queryString : ''}`
+    );
   }
 
   /**
@@ -305,25 +318,10 @@ export class KrispyApiClient {
     speakerName: string,
     companyHint?: string
   ): Promise<LinkedInMatchResponse> {
-    const params = new URLSearchParams({ speaker: speakerName });
-    if (companyHint) params.set('company', companyHint);
+    const params = new URLSearchParams({ name: speakerName });
+    if (companyHint) params.set('context', companyHint);
 
-    const url = `${this.baseUrl}/api/linkedin/match?${params.toString()}`;
-
-    const response = await fetch(url, {
-      method: 'GET',
-      headers: {
-        'x-api-key': this.apiKey,
-        'Content-Type': 'application/json',
-      },
-    });
-
-    if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`LinkedIn match API error: ${response.status} - ${error}`);
-    }
-
-    return response.json();
+    return this.fetch<LinkedInMatchResponse>(`/api/linkedin/match?${params.toString()}`);
   }
 
   /**
@@ -333,16 +331,10 @@ export class KrispyApiClient {
     meetingId: string,
     speakerMappings: Record<string, { name: string; linkedin?: string }>
   ): Promise<{ success: boolean; speakerCorrections: Record<string, unknown> }> {
-    const url = `${this.baseUrl}/api/transcripts`;
-
     // Apply each correction
     for (const [originalName, correction] of Object.entries(speakerMappings)) {
-      const response = await fetch(url, {
+      await this.fetch('/api/transcripts', {
         method: 'PATCH',
-        headers: {
-          'x-api-key': this.apiKey,
-          'Content-Type': 'application/json',
-        },
         body: JSON.stringify({
           meetingId,
           speakerCorrection: {
@@ -351,11 +343,6 @@ export class KrispyApiClient {
           },
         }),
       });
-
-      if (!response.ok) {
-        const error = await response.text();
-        throw new Error(`Speaker update API error: ${response.status} - ${error}`);
-      }
     }
 
     return { success: true, speakerCorrections: speakerMappings };
