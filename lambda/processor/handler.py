@@ -29,9 +29,9 @@ ENABLE_VECTORS = os.environ.get('ENABLE_VECTORS', 'true').lower() == 'true'
 ENABLE_TOPICS = os.environ.get('ENABLE_TOPICS', 'true').lower() == 'true'
 ENABLE_PRIVACY = os.environ.get('ENABLE_PRIVACY', 'true').lower() == 'true'
 ENABLE_RELEVANCE = os.environ.get('ENABLE_RELEVANCE', 'true').lower() == 'true'
-TOPIC_MODEL_ID = os.environ.get('TOPIC_MODEL_ID', 'amazon.nova-2-lite-v1:0')
-PRIVACY_MODEL_ID = os.environ.get('PRIVACY_MODEL_ID', 'amazon.nova-2-lite-v1:0')
-RELEVANCE_MODEL_ID = os.environ.get('RELEVANCE_MODEL_ID', 'amazon.nova-2-lite-v1:0')
+TOPIC_MODEL_ID = os.environ.get('TOPIC_MODEL_ID', 'us.amazon.nova-2-lite-v1:0')
+PRIVACY_MODEL_ID = os.environ.get('PRIVACY_MODEL_ID', 'us.amazon.nova-2-lite-v1:0')
+RELEVANCE_MODEL_ID = os.environ.get('RELEVANCE_MODEL_ID', 'us.amazon.nova-2-lite-v1:0')
 # Threshold for short calls that should be checked for relevance (5 minutes)
 SHORT_CALL_THRESHOLD_SECONDS = 300
 table = dynamodb.Table(TABLE_NAME)

@@ -72,7 +72,7 @@ def generate_embeddings_batch(texts: List[str], bedrock_client=None) -> List[Lis
     return embeddings
 
 
-def chunk_text(text: str, chunk_size: int = 500, overlap: int = 50) -> List[str]:
+def chunk_text(text: str, chunk_size: int = 500, overlap: int = 100) -> List[str]:
     """
     Split text into overlapping chunks for embedding.
 
