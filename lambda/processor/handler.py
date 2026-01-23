@@ -133,7 +133,8 @@ def handler(event: dict, context: Any) -> dict:
                             meeting_id=metadata['meeting_id'],
                             s3_key=key,
                             transcript_text=transcript_text,
-                            speakers=metadata.get('speakers', [])
+                            speakers=metadata.get('speakers', []),
+                            user_id=metadata.get('user_id')
                         )
                         vectors_stored += num_vectors
                         print(f"Stored {num_vectors} vectors for: {metadata['meeting_id']}")
@@ -495,13 +496,15 @@ def process_vectors(
     meeting_id: str,
     s3_key: str,
     transcript_text: str,
-    speakers: List[str]
+    speakers: List[str],
+    user_id: Optional[str] = None
 ) -> int:
     """
     Chunk transcript, generate embeddings, and store vectors.
 
     Includes real speaker names in embeddings for relationship-based search.
     Filters out generic names like "Speaker 1", "Speaker 2".
+    Includes user_id in metadata for multi-tenant filtering.
 
     Returns number of vectors stored.
     """
@@ -535,16 +538,21 @@ def process_vectors(
 
         # Create vector record
         vector_key = f"{meeting_id}_chunk_{i:04d}"
+        # Build metadata dict with optional user_id for multi-tenant filtering
+        vector_metadata = {
+            'meeting_id': meeting_id,
+            's3_key': s3_key,
+            'chunk_index': str(i),
+            'speaker': primary_speaker,
+            'text': chunk[:500]  # Truncate for metadata storage
+        }
+        if user_id:
+            vector_metadata['user_id'] = user_id
+
         vectors_to_store.append({
             'key': vector_key,
             'data': embedding,
-            'metadata': {
-                'meeting_id': meeting_id,
-                's3_key': s3_key,
-                'chunk_index': str(i),
-                'speaker': primary_speaker,
-                'text': chunk[:500]  # Truncate for metadata storage
-            }
+            'metadata': vector_metadata
         })
 
     # Store vectors in batches of 100
