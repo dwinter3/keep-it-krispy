@@ -117,10 +117,19 @@ export async function GET(
         const s3Content = await s3Response.Body?.transformToString()
         if (s3Content) {
           const parsed = JSON.parse(s3Content)
-          transcriptContent = parsed.transcript
-          summary = parsed.summary
-          notes = parsed.notes
-          actionItems = parsed.action_items
+          // Handle nested structure: raw_payload.data.content is array of {speaker, text}
+          const content = parsed.raw_payload?.data?.content
+          if (Array.isArray(content)) {
+            transcriptContent = content
+              .map((c: { speaker: string; text: string }) => `${c.speaker}: ${c.text}`)
+              .join('\n\n')
+          } else if (parsed.transcript) {
+            // Fallback for older format
+            transcriptContent = parsed.transcript
+          }
+          summary = parsed.summary || parsed.raw_payload?.data?.summary
+          notes = parsed.notes || parsed.raw_payload?.data?.notes
+          actionItems = parsed.action_items || parsed.raw_payload?.data?.action_items
         }
       } catch (s3Error) {
         console.error('Error fetching from S3:', s3Error)
