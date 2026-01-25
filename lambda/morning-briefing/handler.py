@@ -29,7 +29,7 @@ TRANSCRIPTS_TABLE = os.environ.get('DYNAMODB_TABLE', 'krisp-transcripts-index')
 BRIEFINGS_TABLE = os.environ.get('BRIEFINGS_TABLE', 'krisp-briefings')
 USERS_TABLE = os.environ.get('USERS_TABLE', 'krisp-users')
 S3_BUCKET = os.environ.get('KRISP_S3_BUCKET', '')
-MODEL_ID = os.environ.get('BRIEFING_MODEL_ID', 'us.anthropic.claude-3-5-sonnet-20240620-v1:0')
+MODEL_ID = os.environ.get('BRIEFING_MODEL_ID', 'amazon.nova-pro-v1:0')
 HISTORICAL_CONTEXT_DAYS = int(os.environ.get('HISTORICAL_CONTEXT_DAYS', '14'))
 
 transcripts_table = dynamodb.Table(TRANSCRIPTS_TABLE)
@@ -415,18 +415,26 @@ Guidelines for the narrative:
 Return ONLY valid JSON, no additional text or markdown code blocks."""
 
     try:
-        # Use Bedrock Converse API for Claude models
-        body = json.dumps({
-            "anthropic_version": "bedrock-2023-05-31",
-            "max_tokens": 5000,
-            "temperature": 0.4,
-            "messages": [
-                {
-                    "role": "user",
-                    "content": prompt
+        # Use Bedrock native format (works with Nova and Claude models)
+        # Detect model type to use correct format
+        is_anthropic = 'anthropic' in MODEL_ID.lower()
+
+        if is_anthropic:
+            body = json.dumps({
+                "anthropic_version": "bedrock-2023-05-31",
+                "max_tokens": 5000,
+                "temperature": 0.4,
+                "messages": [{"role": "user", "content": prompt}]
+            })
+        else:
+            # Amazon Nova format
+            body = json.dumps({
+                "messages": [{"role": "user", "content": [{"text": prompt}]}],
+                "inferenceConfig": {
+                    "maxTokens": 5000,
+                    "temperature": 0.4
                 }
-            ]
-        })
+            })
 
         response = bedrock_client.invoke_model(
             modelId=MODEL_ID,
@@ -437,13 +445,23 @@ Return ONLY valid JSON, no additional text or markdown code blocks."""
 
         response_body = json.loads(response['body'].read())
 
-        # Claude response format
+        # Extract text based on model format
         result_text = ''
-        if 'content' in response_body:
-            for block in response_body['content']:
-                if block.get('type') == 'text':
-                    result_text = block.get('text', '')
-                    break
+        if is_anthropic:
+            # Claude response format
+            if 'content' in response_body:
+                for block in response_body['content']:
+                    if block.get('type') == 'text':
+                        result_text = block.get('text', '')
+                        break
+        else:
+            # Nova response format
+            if 'output' in response_body and 'message' in response_body['output']:
+                content = response_body['output']['message'].get('content', [])
+                for block in content:
+                    if 'text' in block:
+                        result_text = block['text']
+                        break
 
         # Handle potential markdown code blocks
         if result_text.startswith('```'):
