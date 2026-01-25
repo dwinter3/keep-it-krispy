@@ -12,6 +12,9 @@
 
 import { MemoryProvider } from './provider'
 import { S3VectorsProvider, createS3VectorsProvider } from './s3-vectors'
+import { RuVectorProvider, createRuVectorProvider } from './ruvector'
+import { DualProvider, createDualProvider } from './dual'
+import { ABRouterProvider, createABRouterProvider } from './ab-router'
 import type {
   ProviderType,
   ProviderConfig,
@@ -44,6 +47,9 @@ export { MemoryProvider }
 
 // Re-export providers
 export { S3VectorsProvider, createS3VectorsProvider }
+export { RuVectorProvider, createRuVectorProvider }
+export { DualProvider, createDualProvider }
+export { ABRouterProvider, createABRouterProvider }
 
 /**
  * Singleton instance of the memory provider
@@ -72,8 +78,21 @@ export function createMemoryProvider(
       return createS3VectorsProvider(config)
 
     case 'ruvector':
-      // Future: import and create RuVectorProvider
-      throw new Error('RuVector provider not yet implemented. Set MEMORY_PROVIDER=s3-vectors')
+      return createRuVectorProvider(config)
+
+    case 'dual': {
+      // Create dual-write provider (S3 Vectors primary, RuVector secondary)
+      const primary = createS3VectorsProvider(config)
+      const secondary = createRuVectorProvider(config)
+      return createDualProvider(primary, secondary, config)
+    }
+
+    case 'ab-router': {
+      // Create A/B router (S3 Vectors control, RuVector experiment)
+      const control = createS3VectorsProvider(config)
+      const experiment = createRuVectorProvider(config)
+      return createABRouterProvider(control, experiment, config)
+    }
 
     case 'pinecone':
       // Future: import and create PineconeProvider

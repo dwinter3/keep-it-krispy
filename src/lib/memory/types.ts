@@ -136,4 +136,38 @@ export interface ProviderConfig {
 /**
  * Supported provider types
  */
-export type ProviderType = 's3-vectors' | 'ruvector' | 'pinecone' | 'opensearch' | 'mock'
+export type ProviderType =
+  | 's3-vectors'
+  | 'ruvector'
+  | 'dual'
+  | 'ab-router'
+  | 'pinecone'
+  | 'opensearch'
+  | 'mock'
+
+/**
+ * RuVector specific configuration
+ */
+export interface RuVectorConfig extends ProviderConfig {
+  collection?: string
+  model?: string
+  useLocalEmbeddings?: boolean
+}
+
+/**
+ * Dual provider configuration
+ */
+export interface DualConfig extends ProviderConfig {
+  primaryProvider?: string
+  secondaryProvider?: string
+}
+
+/**
+ * A/B Router configuration
+ */
+export interface ABRouterConfig extends ProviderConfig {
+  experimentPercentage?: number
+  enableShadow?: boolean
+  enableMetrics?: boolean
+  experimentName?: string
+}

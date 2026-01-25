@@ -3,8 +3,14 @@ Processing Lambda for Krisp transcripts.
 Triggered by S3 events when new transcripts are uploaded.
 
 Phase 1: Extract metadata and index to DynamoDB
-Phase 2: Generate embeddings and store in S3 Vectors
+Phase 2: Generate embeddings and store in vector database (S3 Vectors or RuVector)
 Phase 3: Generate AI topic for the meeting
+
+Memory Provider:
+  Set MEMORY_PROVIDER environment variable to control vector storage:
+  - s3-vectors (default): AWS S3 Vectors
+  - ruvector: RuVector server
+  - dual: Write to both (for migration)
 """
 
 import json
@@ -14,15 +20,21 @@ from datetime import datetime
 from typing import Any, List, Dict, Optional
 from urllib.parse import unquote_plus
 
-from embeddings import generate_embedding, chunk_text, get_bedrock_client
-from vectors import store_vectors, get_vectors_client
+# Legacy imports for backwards compatibility (to be removed after migration)
+from embeddings import get_bedrock_client
+
+# New memory provider abstraction
+from memory import get_memory_provider, MemoryProvider
 
 # Initialize clients outside handler for reuse
 # AWS_REGION is automatically set by Lambda
 dynamodb = boto3.resource('dynamodb')
 s3 = boto3.client('s3')
 bedrock_client = get_bedrock_client()
-vectors_client = get_vectors_client()
+
+# Initialize memory provider (singleton)
+memory_provider: MemoryProvider = get_memory_provider()
+print(f"Initialized memory provider: {memory_provider.name}")
 
 TABLE_NAME = os.environ.get('DYNAMODB_TABLE', 'krisp-transcripts-index')
 ENABLE_VECTORS = os.environ.get('ENABLE_VECTORS', 'true').lower() == 'true'
@@ -502,66 +514,36 @@ def process_vectors(
     """
     Chunk transcript, generate embeddings, and store vectors.
 
+    Uses the memory provider abstraction for backend-agnostic storage.
     Includes real speaker names in embeddings for relationship-based search.
     Filters out generic names like "Speaker 1", "Speaker 2".
     Includes user_id in metadata for multi-tenant filtering.
 
     Returns number of vectors stored.
     """
-    # Chunk the transcript
-    chunks = chunk_text(transcript_text, chunk_size=500, overlap=50)
-
-    if not chunks:
-        return 0
-
     # Filter to only real speaker names (not "Speaker 1", etc.)
     real_speakers = [s for s in speakers if is_real_speaker_name(s)]
 
-    # Create speaker context prefix if we have real names
-    speaker_context = ""
     if real_speakers:
-        speaker_names = ", ".join(real_speakers)
-        speaker_context = f"Meeting participants: {speaker_names}. "
-        print(f"Including speakers in embeddings: {speaker_names}")
+        print(f"Including speakers in embeddings: {', '.join(real_speakers)}")
 
-    # Generate embeddings and prepare vectors
-    vectors_to_store = []
-    primary_speaker = real_speakers[0] if real_speakers else (speakers[0] if speakers else 'unknown')
+    # Use the memory provider to process the transcript
+    # The provider handles chunking, embedding generation, and storage
+    result = memory_provider.process_transcript(
+        meeting_id=meeting_id,
+        s3_key=s3_key,
+        content=transcript_text,
+        speakers=real_speakers or speakers,
+        user_id=user_id,
+    )
 
-    for i, chunk in enumerate(chunks):
-        # Prepend speaker context to chunk for embedding generation
-        # This ensures speaker names are part of the semantic embedding
-        text_for_embedding = speaker_context + chunk
+    if result.failed > 0:
+        print(f"Warning: {result.failed} vector(s) failed to store")
+        if result.errors:
+            for error in result.errors[:5]:  # Log first 5 errors
+                print(f"  - {error['id']}: {error['error']}")
 
-        # Generate embedding with speaker-enriched text
-        embedding = generate_embedding(text_for_embedding, bedrock_client)
-
-        # Create vector record
-        vector_key = f"{meeting_id}_chunk_{i:04d}"
-        # Build metadata dict with optional user_id for multi-tenant filtering
-        vector_metadata = {
-            'meeting_id': meeting_id,
-            's3_key': s3_key,
-            'chunk_index': str(i),
-            'speaker': primary_speaker,
-            'text': chunk[:500]  # Truncate for metadata storage
-        }
-        if user_id:
-            vector_metadata['user_id'] = user_id
-
-        vectors_to_store.append({
-            'key': vector_key,
-            'data': embedding,
-            'metadata': vector_metadata
-        })
-
-    # Store vectors in batches of 100
-    batch_size = 100
-    for i in range(0, len(vectors_to_store), batch_size):
-        batch = vectors_to_store[i:i + batch_size]
-        store_vectors(batch, vectors_client)
-
-    return len(vectors_to_store)
+    return result.successful
 
 
 def calculate_speaker_word_counts(content: dict) -> Dict[str, int]:
