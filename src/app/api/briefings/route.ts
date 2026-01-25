@@ -2,8 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb'
 import { DynamoDBDocumentClient, QueryCommand, QueryCommandInput } from '@aws-sdk/lib-dynamodb'
 import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda'
-import { auth } from '@/lib/auth'
-import { getUserByEmail } from '@/lib/users'
+import { authenticateApiRequest } from '@/lib/api-auth'
 
 const BRIEFINGS_TABLE = process.env.BRIEFINGS_TABLE || 'krisp-briefings'
 const AWS_REGION = process.env.APP_REGION || 'us-east-1'
@@ -65,17 +64,11 @@ interface Briefing {
  * Retrieve user's briefings with optional date filter
  */
 export async function GET(request: NextRequest) {
-  const session = await auth()
-  console.log('GET /api/briefings - session:', JSON.stringify(session, null, 2))
-  if (!session?.user?.email) {
-    console.error('GET /api/briefings - Unauthorized: no session email', { session })
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const authResult = await authenticateApiRequest(request)
+  if (!authResult.authenticated || !authResult.userId) {
+    return NextResponse.json({ error: authResult.error || 'Unauthorized' }, { status: 401 })
   }
-
-  const user = await getUserByEmail(session.user.email)
-  if (!user) {
-    return NextResponse.json({ error: 'User not found' }, { status: 404 })
-  }
+  const userId = authResult.userId
 
   const { searchParams } = new URL(request.url)
   const date = searchParams.get('date')
@@ -89,8 +82,8 @@ export async function GET(request: NextRequest) {
         ? 'user_id = :userId AND #date = :date'
         : 'user_id = :userId',
       ExpressionAttributeValues: date
-        ? { ':userId': user.user_id, ':date': date }
-        : { ':userId': user.user_id },
+        ? { ':userId': userId, ':date': date }
+        : { ':userId': userId },
       ...(date && { ExpressionAttributeNames: { '#date': 'date' } }),
       ScanIndexForward: false, // Most recent first
       Limit: limit,
@@ -120,17 +113,11 @@ export async function GET(request: NextRequest) {
  * - Storing the briefing in DynamoDB
  */
 export async function POST(request: NextRequest) {
-  const session = await auth()
-  console.log('POST /api/briefings - session:', JSON.stringify(session, null, 2))
-  if (!session?.user?.email) {
-    console.error('POST /api/briefings - Unauthorized: no session email', { session })
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const authResult = await authenticateApiRequest(request)
+  if (!authResult.authenticated || !authResult.userId) {
+    return NextResponse.json({ error: authResult.error || 'Unauthorized' }, { status: 401 })
   }
-
-  const user = await getUserByEmail(session.user.email)
-  if (!user) {
-    return NextResponse.json({ error: 'User not found' }, { status: 404 })
-  }
+  const userId = authResult.userId
 
   let targetDate: string
   let forceRegenerate = false
@@ -156,7 +143,7 @@ export async function POST(request: NextRequest) {
       KeyConditionExpression: 'user_id = :userId AND #date = :date',
       ExpressionAttributeNames: { '#date': 'date' },
       ExpressionAttributeValues: {
-        ':userId': user.user_id,
+        ':userId': userId,
         ':date': targetDate,
       },
       Limit: 1,
@@ -173,14 +160,14 @@ export async function POST(request: NextRequest) {
     }
 
     // Invoke the morning briefing Lambda to generate the briefing
-    console.log(`Invoking Lambda ${LAMBDA_FUNCTION_NAME} for user ${user.user_id} date ${targetDate}`)
+    console.log(`Invoking Lambda ${LAMBDA_FUNCTION_NAME} for user ${userId} date ${targetDate}`)
 
     const invokeCommand = new InvokeCommand({
       FunctionName: LAMBDA_FUNCTION_NAME,
       InvocationType: 'RequestResponse',
       Payload: new TextEncoder().encode(JSON.stringify({
         body: JSON.stringify({
-          user_id: user.user_id,
+          user_id: userId,
           date: targetDate,
         })
       }))
