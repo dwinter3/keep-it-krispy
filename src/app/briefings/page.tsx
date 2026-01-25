@@ -59,7 +59,7 @@ export default function BriefingsPage() {
   const fetchBriefings = useCallback(async () => {
     try {
       setLoading(true)
-      const res = await fetch('/api/briefings?limit=30')
+      const res = await fetch('/api/briefings?limit=30', { credentials: 'include' })
       if (!res.ok) throw new Error('Failed to fetch briefings')
       const data = await res.json()
       setBriefings(data.briefings || [])
@@ -88,6 +88,7 @@ export default function BriefingsPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ date: generateDate, forceRegenerate }),
+        credentials: 'include',
       })
 
       if (!res.ok) {
