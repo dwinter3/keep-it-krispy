@@ -66,7 +66,9 @@ interface Briefing {
  */
 export async function GET(request: NextRequest) {
   const session = await auth()
+  console.log('GET /api/briefings - session:', JSON.stringify(session, null, 2))
   if (!session?.user?.email) {
+    console.error('GET /api/briefings - Unauthorized: no session email', { session })
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
@@ -119,7 +121,9 @@ export async function GET(request: NextRequest) {
  */
 export async function POST(request: NextRequest) {
   const session = await auth()
+  console.log('POST /api/briefings - session:', JSON.stringify(session, null, 2))
   if (!session?.user?.email) {
+    console.error('POST /api/briefings - Unauthorized: no session email', { session })
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
@@ -225,6 +229,7 @@ export async function POST(request: NextRequest) {
     })
   } catch (error) {
     console.error('Error generating briefing:', error)
+    console.error('Error stack:', error instanceof Error ? error.stack : 'no stack')
     return NextResponse.json(
       { error: 'Failed to generate briefing', details: String(error) },
       { status: 500 }
