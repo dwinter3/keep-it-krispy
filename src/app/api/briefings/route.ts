@@ -1,17 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb'
-import { DynamoDBDocumentClient, QueryCommand, PutCommand, QueryCommandInput } from '@aws-sdk/lib-dynamodb'
-import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3'
-import { BedrockRuntimeClient, InvokeModelCommand } from '@aws-sdk/client-bedrock-runtime'
+import { DynamoDBDocumentClient, QueryCommand, QueryCommandInput } from '@aws-sdk/lib-dynamodb'
+import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda'
 import { auth } from '@/lib/auth'
 import { getUserByEmail } from '@/lib/users'
-import { v4 as uuidv4 } from 'uuid'
 
 const BRIEFINGS_TABLE = process.env.BRIEFINGS_TABLE || 'krisp-briefings'
-const TRANSCRIPTS_TABLE = process.env.DYNAMODB_TABLE || 'krisp-transcripts-index'
-const BUCKET_NAME = process.env.KRISP_S3_BUCKET || ''
 const AWS_REGION = process.env.APP_REGION || 'us-east-1'
-const MODEL_ID = 'amazon.nova-2-lite-v1:0'
+const LAMBDA_FUNCTION_NAME = process.env.BRIEFING_LAMBDA_NAME || 'krisp-buddy-morning-briefing'
 
 // AWS clients with custom credentials for Amplify
 const credentials = process.env.S3_ACCESS_KEY_ID ? {
@@ -21,12 +17,12 @@ const credentials = process.env.S3_ACCESS_KEY_ID ? {
 
 const dynamoClient = new DynamoDBClient({ region: AWS_REGION, credentials })
 const dynamodb = DynamoDBDocumentClient.from(dynamoClient)
-const s3 = new S3Client({ region: AWS_REGION, credentials })
-const bedrock = new BedrockRuntimeClient({ region: AWS_REGION, credentials })
+const lambdaClient = new LambdaClient({ region: AWS_REGION, credentials })
 
 interface ActionItem {
   text: string
   meeting: string
+  assignee?: string
 }
 
 interface CrossReference {
@@ -39,12 +35,21 @@ interface MeetingSummary {
   summary: string
 }
 
+interface HistoricalCorrelation {
+  topic: string
+  meetings: string[]
+  insight: string
+}
+
 interface BriefingSummary {
+  narrative?: string
   meeting_count: number
+  total_duration_minutes?: number
   key_themes: string[]
   action_items: ActionItem[]
   cross_references: CrossReference[]
   meeting_summaries: MeetingSummary[]
+  historical_correlations?: HistoricalCorrelation[]
 }
 
 interface Briefing {
@@ -53,15 +58,6 @@ interface Briefing {
   date: string
   generated_at: string
   summary: BriefingSummary
-}
-
-interface TranscriptContent {
-  raw_payload?: {
-    data?: {
-      raw_content?: string
-      raw_meeting?: string
-    }
-  }
 }
 
 /**
@@ -114,6 +110,12 @@ export async function GET(request: NextRequest) {
 /**
  * POST /api/briefings
  * Manually trigger briefing generation for a specific date
+ *
+ * Invokes the morning-briefing Lambda function which handles:
+ * - Fetching transcripts from S3
+ * - Fetching 2 weeks of historical context
+ * - Generating narrative briefing via Claude Sonnet 4.5
+ * - Storing the briefing in DynamoDB
  */
 export async function POST(request: NextRequest) {
   const session = await auth()
@@ -127,10 +129,12 @@ export async function POST(request: NextRequest) {
   }
 
   let targetDate: string
+  let forceRegenerate = false
 
   try {
     const body = await request.json()
     targetDate = body.date || getYesterdayDate()
+    forceRegenerate = body.forceRegenerate || false
   } catch {
     targetDate = getYesterdayDate()
   }
@@ -157,110 +161,67 @@ export async function POST(request: NextRequest) {
     const existingBriefings = existingResponse.Items || []
 
     // Return cached briefing unless force regeneration
-    const forceRegenerate = (await request.clone().json().catch(() => ({}))).forceRegenerate
     if (existingBriefings.length > 0 && !forceRegenerate) {
       return NextResponse.json({
         cached: true,
-        briefing: existingBriefings[0],
+        briefing: existingBriefings[0] as Briefing,
       })
     }
 
-    // Query transcripts for this user and date
-    const transcriptsResponse = await dynamodb.send(new QueryCommand({
-      TableName: TRANSCRIPTS_TABLE,
-      IndexName: 'user-index',
-      KeyConditionExpression: 'user_id = :userId',
-      FilterExpression: '#date = :targetDate',
-      ExpressionAttributeNames: { '#date': 'date' },
-      ExpressionAttributeValues: {
-        ':userId': user.user_id,
-        ':targetDate': targetDate,
-      },
-    }))
+    // Invoke the morning briefing Lambda to generate the briefing
+    console.log(`Invoking Lambda ${LAMBDA_FUNCTION_NAME} for user ${user.user_id} date ${targetDate}`)
 
-    const transcripts = transcriptsResponse.Items || []
+    const invokeCommand = new InvokeCommand({
+      FunctionName: LAMBDA_FUNCTION_NAME,
+      InvocationType: 'RequestResponse',
+      Payload: new TextEncoder().encode(JSON.stringify({
+        body: JSON.stringify({
+          user_id: user.user_id,
+          date: targetDate,
+        })
+      }))
+    })
 
-    if (transcripts.length === 0) {
+    const lambdaResponse = await lambdaClient.send(invokeCommand)
+
+    if (lambdaResponse.FunctionError) {
+      console.error('Lambda function error:', lambdaResponse.FunctionError)
+      const errorPayload = lambdaResponse.Payload
+        ? JSON.parse(new TextDecoder().decode(lambdaResponse.Payload))
+        : {}
+      throw new Error(`Lambda error: ${errorPayload.errorMessage || lambdaResponse.FunctionError}`)
+    }
+
+    if (!lambdaResponse.Payload) {
+      throw new Error('No response from Lambda function')
+    }
+
+    const lambdaResult = JSON.parse(new TextDecoder().decode(lambdaResponse.Payload))
+
+    // Lambda returns { statusCode, headers, body } format
+    if (lambdaResult.statusCode !== 200) {
+      const errorBody = typeof lambdaResult.body === 'string'
+        ? JSON.parse(lambdaResult.body)
+        : lambdaResult.body
+      throw new Error(errorBody.error || errorBody.message || 'Lambda returned error status')
+    }
+
+    const briefingResult = typeof lambdaResult.body === 'string'
+      ? JSON.parse(lambdaResult.body)
+      : lambdaResult.body
+
+    // Check if we got a briefing or just a message (no transcripts)
+    if (briefingResult.message && !briefingResult.briefing_id) {
       return NextResponse.json({
         cached: false,
         briefing: null,
-        message: `No transcripts found for ${targetDate}`,
+        message: briefingResult.message,
       })
     }
-
-    // Fetch full content for each transcript from S3
-    const meetingContents = await Promise.all(
-      transcripts.map(async (transcript) => {
-        const s3Key = transcript.s3_key
-        if (!s3Key) {
-          return {
-            meeting_id: transcript.meeting_id,
-            title: transcript.title || 'Untitled',
-            duration: transcript.duration || 0,
-            speakers: transcript.speakers || [],
-            topic: transcript.topic,
-            content: '',
-          }
-        }
-
-        try {
-          const s3Response = await s3.send(new GetObjectCommand({
-            Bucket: BUCKET_NAME,
-            Key: s3Key,
-          }))
-          const body = await s3Response.Body?.transformToString()
-          if (!body) {
-            throw new Error('Empty S3 response')
-          }
-          const content: TranscriptContent = JSON.parse(body)
-          const rawContent = content.raw_payload?.data?.raw_content || ''
-
-          return {
-            meeting_id: transcript.meeting_id,
-            title: transcript.title || 'Untitled',
-            duration: transcript.duration || 0,
-            speakers: transcript.speakers || [],
-            topic: transcript.topic,
-            content: rawContent.slice(0, 8000), // Truncate for token limits
-          }
-        } catch (err) {
-          console.error(`Error fetching transcript ${s3Key}:`, err)
-          return {
-            meeting_id: transcript.meeting_id,
-            title: transcript.title || 'Untitled',
-            duration: transcript.duration || 0,
-            speakers: transcript.speakers || [],
-            topic: transcript.topic,
-            content: '',
-          }
-        }
-      })
-    )
-
-    // Generate briefing summary using Bedrock
-    const summary = await generateBriefingSummary(meetingContents)
-
-    // Create the briefing document
-    const briefingId = uuidv4()
-    const now = new Date().toISOString()
-
-    const briefing: Briefing = {
-      briefing_id: briefingId,
-      user_id: user.user_id,
-      date: targetDate,
-      generated_at: now,
-      summary,
-    }
-
-    // Store in DynamoDB
-    await dynamodb.send(new PutCommand({
-      TableName: BRIEFINGS_TABLE,
-      Item: briefing,
-    }))
 
     return NextResponse.json({
       cached: false,
-      briefing,
+      briefing: briefingResult as Briefing,
     })
   } catch (error) {
     console.error('Error generating briefing:', error)
@@ -275,127 +236,4 @@ function getYesterdayDate(): string {
   const yesterday = new Date()
   yesterday.setDate(yesterday.getDate() - 1)
   return yesterday.toISOString().split('T')[0]
-}
-
-interface MeetingContent {
-  meeting_id: string
-  title: string
-  duration: number
-  speakers: string[]
-  topic?: string
-  content: string
-}
-
-async function generateBriefingSummary(meetings: MeetingContent[]): Promise<BriefingSummary> {
-  if (meetings.length === 0) {
-    return {
-      meeting_count: 0,
-      key_themes: [],
-      action_items: [],
-      cross_references: [],
-      meeting_summaries: [],
-    }
-  }
-
-  // Build the prompt with all meeting content
-  const meetingsText = meetings.map((meeting, i) => {
-    const durationMins = Math.round((meeting.duration || 0) / 60)
-    const speakers = (meeting.speakers || []).slice(0, 5).join(', ')
-
-    return `
-Meeting ${i + 1}: ${meeting.title || 'Untitled'}
-Duration: ${durationMins} minutes
-Participants: ${speakers}
-Topic: ${meeting.topic || 'Not specified'}
-
-Transcript excerpt:
-${(meeting.content || '').slice(0, 4000)}
-`
-  }).join('\n---\n')
-
-  const prompt = `You are an executive assistant creating a daily morning briefing.
-Analyze the following ${meetings.length} meetings from the day and provide a comprehensive summary.
-
-${meetingsText}
-
-Create a JSON summary with the following structure:
-{
-    "meeting_count": ${meetings.length},
-    "key_themes": ["List 3-5 overarching themes or topics that were discussed across meetings"],
-    "action_items": [
-        {"text": "Specific action item or task", "meeting": "Meeting title where this was mentioned"}
-    ],
-    "cross_references": [
-        {"topic": "Topic that appeared in multiple meetings", "meetings": ["Meeting 1", "Meeting 2"]}
-    ],
-    "meeting_summaries": [
-        {"title": "Meeting title", "summary": "2-3 sentence summary of key points"}
-    ]
-}
-
-Focus on:
-1. Extracting concrete action items (tasks, follow-ups, deadlines)
-2. Identifying themes that span multiple meetings
-3. Creating concise but informative meeting summaries
-4. Noting any cross-references or related topics across meetings
-
-Return ONLY valid JSON, no additional text.`
-
-  try {
-    const invokeCommand = new InvokeModelCommand({
-      modelId: MODEL_ID,
-      contentType: 'application/json',
-      accept: 'application/json',
-      body: JSON.stringify({
-        messages: [
-          {
-            role: 'user',
-            content: [{ text: prompt }],
-          },
-        ],
-        inferenceConfig: {
-          maxTokens: 3000,
-          temperature: 0.3,
-        },
-      }),
-    })
-
-    const response = await bedrock.send(invokeCommand)
-    const responseBody = JSON.parse(new TextDecoder().decode(response.body))
-    let resultText = responseBody.output?.message?.content?.[0]?.text
-      || responseBody.content?.[0]?.text
-      || ''
-
-    // Handle potential markdown code blocks
-    if (resultText.startsWith('```')) {
-      resultText = resultText.split('```')[1]
-      if (resultText.startsWith('json')) {
-        resultText = resultText.slice(4)
-      }
-      resultText = resultText.trim()
-    }
-
-    const summary = JSON.parse(resultText)
-
-    return {
-      meeting_count: summary.meeting_count || meetings.length,
-      key_themes: (summary.key_themes || []).slice(0, 10),
-      action_items: (summary.action_items || []).slice(0, 20),
-      cross_references: (summary.cross_references || []).slice(0, 10),
-      meeting_summaries: summary.meeting_summaries || [],
-    }
-  } catch (error) {
-    console.error('Error generating briefing summary:', error)
-    // Return a basic summary on error
-    return {
-      meeting_count: meetings.length,
-      key_themes: [],
-      action_items: [],
-      cross_references: [],
-      meeting_summaries: meetings.map(m => ({
-        title: m.title || 'Untitled',
-        summary: `Meeting with ${(m.speakers || []).slice(0, 3).join(', ')}`,
-      })),
-    }
-  }
 }

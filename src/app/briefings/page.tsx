@@ -6,6 +6,7 @@ import Shell from '@/components/Shell'
 interface ActionItem {
   text: string
   meeting: string
+  assignee?: string
 }
 
 interface CrossReference {
@@ -18,12 +19,21 @@ interface MeetingSummary {
   summary: string
 }
 
+interface HistoricalCorrelation {
+  topic: string
+  meetings: string[]
+  insight: string
+}
+
 interface BriefingSummary {
+  narrative?: string
   meeting_count: number
+  total_duration_minutes?: number
   key_themes: string[]
   action_items: ActionItem[]
   cross_references: CrossReference[]
   meeting_summaries: MeetingSummary[]
+  historical_correlations?: HistoricalCorrelation[]
 }
 
 interface Briefing {
@@ -119,6 +129,17 @@ export default function BriefingsPage() {
       minute: '2-digit',
     })
   }
+
+  const formatDuration = (minutes: number) => {
+    const hours = Math.floor(minutes / 60)
+    const mins = minutes % 60
+    if (hours === 0) return `${mins}min`
+    if (mins === 0) return `${hours}h`
+    return `${hours}h ${mins}min`
+  }
+
+  // Check if this briefing has the new narrative format
+  const hasNarrative = selectedBriefing?.summary?.narrative
 
   return (
     <Shell>
@@ -218,8 +239,9 @@ export default function BriefingsPage() {
                       </p>
                       <p className="text-sm text-gray-500 mt-1">
                         {briefing.summary.meeting_count} meeting{briefing.summary.meeting_count !== 1 ? 's' : ''}
-                        {' | '}
-                        {briefing.summary.action_items.length} action item{briefing.summary.action_items.length !== 1 ? 's' : ''}
+                        {briefing.summary.total_duration_minutes && (
+                          <> | {formatDuration(briefing.summary.total_duration_minutes)}</>
+                        )}
                       </p>
                       <p className="text-xs text-gray-400 mt-1">
                         Generated {formatTime(briefing.generated_at)}
@@ -243,7 +265,10 @@ export default function BriefingsPage() {
                         {formatDate(selectedBriefing.date)}
                       </h2>
                       <p className="text-sm text-gray-500 mt-1">
-                        {selectedBriefing.summary.meeting_count} meeting{selectedBriefing.summary.meeting_count !== 1 ? 's' : ''} summarized
+                        {selectedBriefing.summary.meeting_count} meeting{selectedBriefing.summary.meeting_count !== 1 ? 's' : ''}
+                        {selectedBriefing.summary.total_duration_minutes && (
+                          <> | {formatDuration(selectedBriefing.summary.total_duration_minutes)} total</>
+                        )}
                       </p>
                     </div>
                     <button
@@ -263,23 +288,42 @@ export default function BriefingsPage() {
                 </div>
 
                 <div className="p-6 space-y-8">
-                  {/* Key Themes */}
-                  {selectedBriefing.summary.key_themes.length > 0 && (
+                  {/* PRIMARY: Narrative Briefing (new format) */}
+                  {hasNarrative && (
+                    <section>
+                      <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg p-6 border border-blue-100">
+                        <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
+                          <svg className="w-5 h-5 mr-2 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+                          </svg>
+                          Your Morning Briefing
+                        </h3>
+                        <div className="prose prose-gray max-w-none text-gray-700 leading-relaxed whitespace-pre-line">
+                          {selectedBriefing.summary.narrative}
+                        </div>
+                      </div>
+                    </section>
+                  )}
+
+                  {/* Historical Correlations (new format) */}
+                  {selectedBriefing.summary.historical_correlations && selectedBriefing.summary.historical_correlations.length > 0 && (
                     <section>
                       <h3 className="text-lg font-semibold text-gray-900 mb-3 flex items-center">
-                        <svg className="w-5 h-5 mr-2 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
+                        <svg className="w-5 h-5 mr-2 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
                         </svg>
-                        Key Themes
+                        Ongoing Threads
                       </h3>
-                      <div className="flex flex-wrap gap-2">
-                        {selectedBriefing.summary.key_themes.map((theme, i) => (
-                          <span
-                            key={i}
-                            className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-blue-100 text-blue-800"
-                          >
-                            {theme}
-                          </span>
+                      <div className="space-y-3">
+                        {selectedBriefing.summary.historical_correlations.map((corr, i) => (
+                          <div key={i} className="bg-amber-50 rounded-lg p-4 border border-amber-100">
+                            <p className="font-medium text-amber-900">{corr.topic}</p>
+                            <p className="text-sm text-amber-700 mt-1">{corr.insight}</p>
+                            <p className="text-xs text-amber-600 mt-2">
+                              Seen in: {corr.meetings.slice(0, 3).join(', ')}
+                              {corr.meetings.length > 3 && ` +${corr.meetings.length - 3} more`}
+                            </p>
+                          </div>
                         ))}
                       </div>
                     </section>
@@ -300,7 +344,10 @@ export default function BriefingsPage() {
                             <span className="flex-shrink-0 w-5 h-5 rounded-full border-2 border-gray-300 mt-0.5 mr-3"></span>
                             <div>
                               <p className="text-gray-900">{item.text}</p>
-                              <p className="text-sm text-gray-500">From: {item.meeting}</p>
+                              <p className="text-sm text-gray-500">
+                                From: {item.meeting}
+                                {item.assignee && <> | Assignee: {item.assignee}</>}
+                              </p>
                             </div>
                           </li>
                         ))}
@@ -308,46 +355,80 @@ export default function BriefingsPage() {
                     </section>
                   )}
 
-                  {/* Cross References */}
-                  {selectedBriefing.summary.cross_references.length > 0 && (
-                    <section>
-                      <h3 className="text-lg font-semibold text-gray-900 mb-3 flex items-center">
-                        <svg className="w-5 h-5 mr-2 text-purple-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
-                        </svg>
-                        Cross-References
-                      </h3>
-                      <div className="space-y-3">
-                        {selectedBriefing.summary.cross_references.map((ref, i) => (
-                          <div key={i} className="bg-purple-50 rounded-lg p-3">
-                            <p className="font-medium text-purple-900">{ref.topic}</p>
-                            <p className="text-sm text-purple-700 mt-1">
-                              Mentioned in: {ref.meetings.join(', ')}
-                            </p>
+                  {/* Collapsible: Structured Details (for backwards compatibility and supplementary info) */}
+                  {(selectedBriefing.summary.key_themes.length > 0 ||
+                    selectedBriefing.summary.cross_references.length > 0 ||
+                    selectedBriefing.summary.meeting_summaries.length > 0) && (
+                    <details className="border border-gray-200 rounded-lg">
+                      <summary className="p-4 cursor-pointer text-gray-600 hover:bg-gray-50 font-medium">
+                        {hasNarrative ? 'View Structured Details' : 'Meeting Details'}
+                      </summary>
+                      <div className="p-4 border-t border-gray-200 space-y-6">
+                        {/* Key Themes */}
+                        {selectedBriefing.summary.key_themes.length > 0 && (
+                          <div>
+                            <h4 className="text-md font-semibold text-gray-900 mb-3 flex items-center">
+                              <svg className="w-4 h-4 mr-2 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
+                              </svg>
+                              Key Themes
+                            </h4>
+                            <div className="flex flex-wrap gap-2">
+                              {selectedBriefing.summary.key_themes.map((theme, i) => (
+                                <span
+                                  key={i}
+                                  className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-blue-100 text-blue-800"
+                                >
+                                  {theme}
+                                </span>
+                              ))}
+                            </div>
                           </div>
-                        ))}
-                      </div>
-                    </section>
-                  )}
+                        )}
 
-                  {/* Meeting Summaries */}
-                  {selectedBriefing.summary.meeting_summaries.length > 0 && (
-                    <section>
-                      <h3 className="text-lg font-semibold text-gray-900 mb-3 flex items-center">
-                        <svg className="w-5 h-5 mr-2 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                        </svg>
-                        Meeting Summaries
-                      </h3>
-                      <div className="space-y-4">
-                        {selectedBriefing.summary.meeting_summaries.map((meeting, i) => (
-                          <div key={i} className="border border-gray-200 rounded-lg p-4">
-                            <h4 className="font-medium text-gray-900">{meeting.title}</h4>
-                            <p className="text-gray-600 mt-1">{meeting.summary}</p>
+                        {/* Cross References */}
+                        {selectedBriefing.summary.cross_references.length > 0 && (
+                          <div>
+                            <h4 className="text-md font-semibold text-gray-900 mb-3 flex items-center">
+                              <svg className="w-4 h-4 mr-2 text-purple-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                              </svg>
+                              Cross-References
+                            </h4>
+                            <div className="space-y-2">
+                              {selectedBriefing.summary.cross_references.map((ref, i) => (
+                                <div key={i} className="bg-purple-50 rounded-lg p-3">
+                                  <p className="font-medium text-purple-900">{ref.topic}</p>
+                                  <p className="text-sm text-purple-700 mt-1">
+                                    Mentioned in: {ref.meetings.join(', ')}
+                                  </p>
+                                </div>
+                              ))}
+                            </div>
                           </div>
-                        ))}
+                        )}
+
+                        {/* Meeting Summaries */}
+                        {selectedBriefing.summary.meeting_summaries.length > 0 && (
+                          <div>
+                            <h4 className="text-md font-semibold text-gray-900 mb-3 flex items-center">
+                              <svg className="w-4 h-4 mr-2 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                              </svg>
+                              Individual Meeting Summaries
+                            </h4>
+                            <div className="space-y-3">
+                              {selectedBriefing.summary.meeting_summaries.map((meeting, i) => (
+                                <div key={i} className="border border-gray-200 rounded-lg p-4">
+                                  <h5 className="font-medium text-gray-900">{meeting.title}</h5>
+                                  <p className="text-gray-600 mt-1">{meeting.summary}</p>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
                       </div>
-                    </section>
+                    </details>
                   )}
 
                   {/* Empty State */}
