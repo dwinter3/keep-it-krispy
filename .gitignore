@@ -58,3 +58,6 @@ client_secret_*.json
 # Screenshots
 CleanShot*.png
 lambda/**/function.zip
+
+# Local databases (RuVector, SQLite, etc.)
+*.db
