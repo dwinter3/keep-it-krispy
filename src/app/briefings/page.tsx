@@ -114,7 +114,9 @@ export default function BriefingsPage() {
   }
 
   const formatDate = (dateStr: string) => {
-    const date = new Date(dateStr)
+    // Parse YYYY-MM-DD without timezone conversion
+    const [year, month, day] = dateStr.split('-').map(Number)
+    const date = new Date(year, month - 1, day) // month is 0-indexed
     return date.toLocaleDateString('en-US', {
       weekday: 'long',
       year: 'numeric',
