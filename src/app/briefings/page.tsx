@@ -227,7 +227,15 @@ export default function BriefingsPage() {
                     </p>
                   </div>
                 ) : (
-                  briefings.map((briefing) => (
+                  [...briefings]
+                    .sort((a, b) => {
+                      // First sort by briefing date descending
+                      const dateCompare = b.date.localeCompare(a.date)
+                      if (dateCompare !== 0) return dateCompare
+                      // Then by generated_at descending (most recent first)
+                      return b.generated_at.localeCompare(a.generated_at)
+                    })
+                    .map((briefing) => (
                     <button
                       key={briefing.briefing_id}
                       onClick={() => setSelectedBriefing(briefing)}
