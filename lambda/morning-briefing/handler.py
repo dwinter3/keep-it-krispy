@@ -16,7 +16,7 @@ import json
 import os
 import uuid
 import boto3
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 # Initialize clients outside handler for reuse
@@ -31,6 +31,152 @@ USERS_TABLE = os.environ.get('USERS_TABLE', 'krisp-users')
 S3_BUCKET = os.environ.get('KRISP_S3_BUCKET', '')
 MODEL_ID = os.environ.get('BRIEFING_MODEL_ID', 'amazon.nova-pro-v1:0')
 HISTORICAL_CONTEXT_DAYS = int(os.environ.get('HISTORICAL_CONTEXT_DAYS', '14'))
+
+# =============================================================================
+# PROMPT TEMPLATES
+# =============================================================================
+
+def get_est_datetime() -> str:
+    """Get current datetime in EST timezone."""
+    from datetime import timezone as tz
+    est = tz(timedelta(hours=-5))
+    return datetime.now(est).strftime('%Y-%m-%d %I:%M %p EST')
+
+PROMPTS = {
+    "prompt_001": {
+        "id": "prompt_001",
+        "name": "Standard Briefing",
+        "created_at": "2026-01-25 06:00 PM EST",
+        "description": "Original narrative briefing format",
+        "template": """You are an executive assistant providing a morning briefing for a busy professional.
+Write naturally and conversationally, as if speaking to the person directly. Avoid bulleted lists in the narrative sections - write in prose.
+
+BRIEFING DATE: {briefing_date}
+
+=== MEETINGS FROM {briefing_date} ===
+{all_meetings_text}
+
+=== HISTORICAL CONTEXT (Past {historical_days} Days) ===
+{historical_text}
+
+---
+
+Create a narrative morning briefing. Your response must be valid JSON with this structure:
+
+{{
+    "narrative": "A multi-paragraph narrative briefing. Include:\\n\\n**Good morning!** Start with a warm opening summarizing the day's activity level.\\n\\nThen write 2-3 sentences about each meeting, capturing key discussion points, decisions made, and notable moments. Reference specific speakers when relevant.\\n\\nInclude a section on connections you noticed - topics that came up in multiple meetings, or threads that connect to discussions from the past 2 weeks.\\n\\nEnd with any forward-looking items mentioned in the meetings.",
+
+    "meeting_count": {meeting_count},
+
+    "key_themes": ["3-5 overarching themes from the meetings"],
+
+    "action_items": [
+        {{"text": "Specific action item or follow-up", "meeting": "Meeting title", "assignee": "Person responsible if mentioned"}}
+    ],
+
+    "cross_references": [
+        {{"topic": "Topic appearing in multiple meetings", "meetings": ["Meeting 1", "Meeting 2"]}}
+    ],
+
+    "meeting_summaries": [
+        {{"title": "Meeting title", "summary": "2-3 sentence summary"}}
+    ],
+
+    "historical_correlations": [
+        {{"topic": "Ongoing topic/project from past 2 weeks", "meetings": ["Meeting titles where it appeared"], "insight": "Brief note on the pattern or trend"}}
+    ]
+}}
+
+Guidelines for the narrative:
+1. Write in a warm, professional tone - like a trusted assistant briefing their executive
+2. Use the person's actual meeting titles and speaker names
+3. Be specific rather than generic - reference actual topics discussed
+4. For historical correlations, look for: recurring projects, people met multiple times, themes gaining momentum
+5. The narrative should flow naturally - don't just list things
+6. Use \\n for line breaks within the narrative string
+
+Return ONLY valid JSON, no additional text or markdown code blocks."""
+    },
+
+    "prompt_002": {
+        "id": "prompt_002",
+        "name": "Deep Analysis + Research",
+        "created_at": get_est_datetime(),
+        "description": "Enhanced briefing with detailed cross-references per meeting and research suggestions",
+        "template": """You are an executive assistant providing a RECAP briefing of meetings from a previous day.
+This is NOT about today - you are summarizing what happened on {briefing_date} to help the executive remember and follow up.
+
+Write naturally and conversationally. Be analytical and insightful.
+
+RECAP DATE: {briefing_date} (this day has already passed)
+
+=== MEETINGS FROM {briefing_date} ===
+{all_meetings_text}
+
+=== HISTORICAL CONTEXT (Past {historical_days} Days) ===
+{historical_text}
+
+---
+
+Create an analytical recap briefing. Your response must be valid JSON with this structure:
+
+{{
+    "narrative": "A multi-paragraph recap briefing. Include:\\n\\n**Here's your recap of {briefing_date}:** Start by framing this as a look back at the day.\\n\\nFor each meeting, write 2-3 sentences capturing key discussion points. IMPORTANTLY: after each meeting summary, add a line noting any connections to past meetings from the historical context (e.g., 'This continues the discussion from your Jan 15 call with the same team about X').\\n\\nInclude a 'Connecting the Dots' section analyzing patterns across all meetings and historical context.\\n\\nEnd with a 'Suggested Follow-ups' section with specific next steps.",
+
+    "meeting_count": {meeting_count},
+
+    "key_themes": ["3-5 overarching themes - be specific to the actual content discussed"],
+
+    "action_items": [
+        {{"text": "Specific action item or follow-up", "meeting": "Meeting title", "assignee": "Person responsible if mentioned", "priority": "high/medium/low"}}
+    ],
+
+    "cross_references": [
+        {{"topic": "Topic appearing in multiple meetings", "meetings": ["Meeting 1", "Meeting 2"], "evolution": "How the topic evolved across meetings"}}
+    ],
+
+    "meeting_summaries": [
+        {{"title": "Meeting title", "summary": "2-3 sentence summary", "related_past_meetings": ["List of past meeting titles that relate to this one"], "key_decisions": ["Any decisions made"], "open_questions": ["Unresolved items"]}}
+    ],
+
+    "historical_correlations": [
+        {{"topic": "Ongoing topic/project from past 2 weeks", "meetings": ["All meeting titles where it appeared, both from recap day and history"], "insight": "Analysis of how this topic is progressing", "trajectory": "growing/stable/declining"}}
+    ],
+
+    "research_suggestions": [
+        {{"topic": "A topic worth researching", "reason": "Why this would be valuable", "suggested_searches": ["2-3 specific search queries that would yield useful results"]}}
+    ],
+
+    "people_insights": [
+        {{"person": "Name of person met with", "recent_interactions": "Summary of recent meetings with this person", "relationship_notes": "Any patterns in what you discuss with them"}}
+    ]
+}}
+
+Guidelines:
+1. Frame everything as a RECAP - past tense, reflecting on what happened
+2. For EACH meeting summary, explicitly reference related past meetings from the historical context
+3. Be specific about connections - mention actual dates, names, and topics from history
+4. Research suggestions should be practical and tied to actual discussion points
+5. Look for patterns: people you meet with repeatedly, topics that keep coming up, projects gaining/losing momentum
+6. Identify any inconsistencies or evolving positions across meetings
+7. Use \\n for line breaks within strings
+
+Return ONLY valid JSON, no additional text or markdown code blocks."""
+    }
+}
+
+DEFAULT_PROMPT_ID = "prompt_001"
+
+def get_prompt_template(prompt_id: str) -> Dict:
+    """Get a prompt template by ID, falling back to default if not found."""
+    return PROMPTS.get(prompt_id, PROMPTS[DEFAULT_PROMPT_ID])
+
+def list_prompts() -> List[Dict]:
+    """Return list of available prompts with metadata (no template text)."""
+    return [
+        {"id": p["id"], "name": p["name"], "created_at": p["created_at"], "description": p["description"]}
+        for p in PROMPTS.values()
+    ]
 
 transcripts_table = dynamodb.Table(TRANSCRIPTS_TABLE)
 briefings_table = dynamodb.Table(BRIEFINGS_TABLE)
@@ -56,8 +202,18 @@ def lambda_handler(event: dict, context: Any) -> dict:
         if isinstance(body, str):
             body = json.loads(body) if body else {}
 
+        # Special action: list available prompts
+        action = body.get('action')
+        if action == 'list_prompts':
+            return {
+                'statusCode': 200,
+                'headers': {'Content-Type': 'application/json'},
+                'body': json.dumps({'prompts': list_prompts()})
+            }
+
         user_id = body.get('user_id')
         target_date = body.get('date')  # Optional: specific date in YYYY-MM-DD format
+        prompt_id = body.get('prompt_id', DEFAULT_PROMPT_ID)  # Optional: which prompt to use
 
         if not user_id:
             return {
@@ -67,7 +223,7 @@ def lambda_handler(event: dict, context: Any) -> dict:
             }
 
         # Generate briefing for single user
-        briefing = generate_briefing_for_user(user_id, target_date)
+        briefing = generate_briefing_for_user(user_id, target_date, prompt_id)
 
         return {
             'statusCode': 200,
@@ -192,13 +348,14 @@ def fetch_historical_context(user_id: str, target_date: str, days: int = 14) -> 
         return []
 
 
-def generate_briefing_for_user(user_id: str, target_date: Optional[str] = None) -> Optional[Dict]:
+def generate_briefing_for_user(user_id: str, target_date: Optional[str] = None, prompt_id: str = DEFAULT_PROMPT_ID) -> Optional[Dict]:
     """
     Generate a morning briefing for a specific user.
 
     Args:
         user_id: The user's ID
         target_date: Optional date string (YYYY-MM-DD). Defaults to yesterday.
+        prompt_id: Which prompt template to use. Defaults to prompt_001.
 
     Returns:
         The briefing document if transcripts were found, None otherwise.
@@ -274,8 +431,8 @@ def generate_briefing_for_user(user_id: str, target_date: Optional[str] = None) 
     # Fetch historical context (past 2 weeks)
     historical_context = fetch_historical_context(user_id, briefing_date, HISTORICAL_CONTEXT_DAYS)
 
-    # Generate the briefing using Bedrock
-    briefing_summary = generate_briefing_summary(meeting_contents, historical_context, briefing_date)
+    # Generate the briefing using Bedrock with selected prompt
+    briefing_summary = generate_briefing_summary(meeting_contents, historical_context, briefing_date, prompt_id)
 
     # Add total duration
     briefing_summary['total_duration_minutes'] = int(total_duration / 60)
@@ -283,12 +440,15 @@ def generate_briefing_for_user(user_id: str, target_date: Optional[str] = None) 
     # Create the briefing document
     briefing_id = str(uuid.uuid4())
     now = datetime.now().isoformat() + 'Z'
+    prompt_info = get_prompt_template(prompt_id)
 
     briefing = {
         'briefing_id': briefing_id,
         'user_id': user_id,
         'date': briefing_date,
         'generated_at': now,
+        'prompt_id': prompt_id,
+        'prompt_name': prompt_info['name'],
         'summary': briefing_summary
     }
 
@@ -300,14 +460,15 @@ def generate_briefing_for_user(user_id: str, target_date: Optional[str] = None) 
     return briefing
 
 
-def generate_briefing_summary(meetings: List[Dict], historical_context: List[Dict], briefing_date: str) -> Dict:
+def generate_briefing_summary(meetings: List[Dict], historical_context: List[Dict], briefing_date: str, prompt_id: str = DEFAULT_PROMPT_ID) -> Dict:
     """
     Use Bedrock to generate a comprehensive narrative summary of all meetings.
 
     Args:
-        meetings: List of today's meeting content dictionaries
+        meetings: List of meeting content dictionaries
         historical_context: List of past meetings metadata (no content)
         briefing_date: The date being briefed (YYYY-MM-DD)
+        prompt_id: Which prompt template to use
 
     Returns:
         Summary dictionary with narrative, themes, action items, and meeting summaries
@@ -323,7 +484,7 @@ def generate_briefing_summary(meetings: List[Dict], historical_context: List[Dic
             'historical_correlations': []
         }
 
-    # Build today's meetings text with full content
+    # Build meetings text with full content
     meetings_text = []
     for i, meeting in enumerate(meetings, 1):
         duration_mins = int(meeting.get('duration', 0) / 60)
@@ -364,55 +525,18 @@ Transcript excerpt:
                     historical_lines.append(f"    Topic: {m.get('topic')}")
 
         historical_text = '\n'.join(historical_lines)
+    else:
+        historical_text = "No previous meetings in the last 2 weeks."
 
-    prompt = f"""You are an executive assistant providing a morning briefing for a busy professional.
-Write naturally and conversationally, as if speaking to the person directly. Avoid bulleted lists in the narrative sections - write in prose.
-
-TODAY'S DATE: {briefing_date}
-
-=== TODAY'S MEETINGS ===
-{all_meetings_text}
-
-=== HISTORICAL CONTEXT (Past {HISTORICAL_CONTEXT_DAYS} Days) ===
-{historical_text if historical_text else "No previous meetings in the last 2 weeks."}
-
----
-
-Create a narrative morning briefing. Your response must be valid JSON with this structure:
-
-{{
-    "narrative": "A multi-paragraph narrative briefing. Include:\\n\\n**Good morning!** Start with a warm opening summarizing the day's activity level.\\n\\nThen write 2-3 sentences about each meeting, capturing key discussion points, decisions made, and notable moments. Reference specific speakers when relevant.\\n\\nInclude a section on connections you noticed - topics that came up in multiple meetings today, or threads that connect to discussions from the past 2 weeks.\\n\\nEnd with any forward-looking items mentioned in the meetings.",
-
-    "meeting_count": {len(meetings)},
-
-    "key_themes": ["3-5 overarching themes from today's meetings"],
-
-    "action_items": [
-        {{"text": "Specific action item or follow-up", "meeting": "Meeting title", "assignee": "Person responsible if mentioned"}}
-    ],
-
-    "cross_references": [
-        {{"topic": "Topic appearing in multiple TODAY's meetings", "meetings": ["Meeting 1", "Meeting 2"]}}
-    ],
-
-    "meeting_summaries": [
-        {{"title": "Meeting title", "summary": "2-3 sentence summary"}}
-    ],
-
-    "historical_correlations": [
-        {{"topic": "Ongoing topic/project from past 2 weeks", "meetings": ["Meeting titles where it appeared"], "insight": "Brief note on the pattern or trend"}}
-    ]
-}}
-
-Guidelines for the narrative:
-1. Write in a warm, professional tone - like a trusted assistant briefing their executive
-2. Use the person's actual meeting titles and speaker names
-3. Be specific rather than generic - reference actual topics discussed
-4. For historical correlations, look for: recurring projects, people met multiple times, themes gaining momentum
-5. The narrative should flow naturally - don't just list things
-6. Use \\n for line breaks within the narrative string
-
-Return ONLY valid JSON, no additional text or markdown code blocks."""
+    # Get the prompt template and format it
+    prompt_template = get_prompt_template(prompt_id)
+    prompt = prompt_template['template'].format(
+        briefing_date=briefing_date,
+        all_meetings_text=all_meetings_text,
+        historical_days=HISTORICAL_CONTEXT_DAYS,
+        historical_text=historical_text,
+        meeting_count=len(meetings)
+    )
 
     try:
         # Use Bedrock with Amazon Nova
@@ -453,16 +577,24 @@ Return ONLY valid JSON, no additional text or markdown code blocks."""
 
         summary = json.loads(result_text)
 
-        # Validate and set defaults
-        return {
+        # Validate and set defaults - include all possible fields from different prompts
+        result = {
             'narrative': summary.get('narrative', ''),
             'meeting_count': summary.get('meeting_count', len(meetings)),
             'key_themes': summary.get('key_themes', [])[:10],
             'action_items': summary.get('action_items', [])[:20],
             'cross_references': summary.get('cross_references', [])[:10],
             'meeting_summaries': summary.get('meeting_summaries', []),
-            'historical_correlations': summary.get('historical_correlations', [])[:10]
+            'historical_correlations': summary.get('historical_correlations', [])[:10],
         }
+
+        # Add optional fields from enhanced prompts (prompt_002+)
+        if 'research_suggestions' in summary:
+            result['research_suggestions'] = summary['research_suggestions'][:10]
+        if 'people_insights' in summary:
+            result['people_insights'] = summary['people_insights'][:10]
+
+        return result
 
     except Exception as e:
         print(f"Error generating briefing summary: {str(e)}")

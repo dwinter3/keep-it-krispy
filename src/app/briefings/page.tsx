@@ -7,22 +7,40 @@ interface ActionItem {
   text: string
   meeting: string
   assignee?: string
+  priority?: string
 }
 
 interface CrossReference {
   topic: string
   meetings: string[]
+  evolution?: string
 }
 
 interface MeetingSummary {
   title: string
   summary: string
+  related_past_meetings?: string[]
+  key_decisions?: string[]
+  open_questions?: string[]
 }
 
 interface HistoricalCorrelation {
   topic: string
   meetings: string[]
   insight: string
+  trajectory?: string
+}
+
+interface ResearchSuggestion {
+  topic: string
+  reason: string
+  suggested_searches?: string[]
+}
+
+interface PeopleInsight {
+  person: string
+  recent_interactions: string
+  relationship_notes?: string
 }
 
 interface BriefingSummary {
@@ -34,6 +52,8 @@ interface BriefingSummary {
   cross_references: CrossReference[]
   meeting_summaries: MeetingSummary[]
   historical_correlations?: HistoricalCorrelation[]
+  research_suggestions?: ResearchSuggestion[]
+  people_insights?: PeopleInsight[]
 }
 
 interface Briefing {
@@ -41,7 +61,16 @@ interface Briefing {
   user_id: string
   date: string
   generated_at: string
+  prompt_id?: string
+  prompt_name?: string
   summary: BriefingSummary
+}
+
+interface PromptOption {
+  id: string
+  name: string
+  created_at: string
+  description: string
 }
 
 export default function BriefingsPage() {
@@ -55,6 +84,8 @@ export default function BriefingsPage() {
     yesterday.setDate(yesterday.getDate() - 1)
     return yesterday.toISOString().split('T')[0]
   })
+  const [prompts, setPrompts] = useState<PromptOption[]>([])
+  const [selectedPromptId, setSelectedPromptId] = useState<string>('prompt_001')
 
   const fetchBriefings = useCallback(async () => {
     try {
@@ -75,6 +106,27 @@ export default function BriefingsPage() {
     }
   }, [selectedBriefing])
 
+  const fetchPrompts = useCallback(async () => {
+    try {
+      const res = await fetch('/api/briefings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'list_prompts' }),
+        credentials: 'include',
+      })
+      if (res.ok) {
+        const data = await res.json()
+        setPrompts(data.prompts || [])
+      }
+    } catch (err) {
+      console.error('Error fetching prompts:', err)
+    }
+  }, [])
+
+  useEffect(() => {
+    fetchPrompts()
+  }, [fetchPrompts])
+
   useEffect(() => {
     fetchBriefings()
   }, [fetchBriefings])
@@ -87,7 +139,7 @@ export default function BriefingsPage() {
       const res = await fetch('/api/briefings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ date: generateDate, forceRegenerate }),
+        body: JSON.stringify({ date: generateDate, forceRegenerate, prompt_id: selectedPromptId }),
         credentials: 'include',
       })
 
@@ -171,6 +223,32 @@ export default function BriefingsPage() {
                 max={new Date().toISOString().split('T')[0]}
                 className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
               />
+            </div>
+            <div className="flex-1">
+              <label htmlFor="prompt" className="block text-sm font-medium text-gray-700 mb-1">
+                Prompt Style
+              </label>
+              <select
+                id="prompt"
+                value={selectedPromptId}
+                onChange={(e) => setSelectedPromptId(e.target.value)}
+                className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+              >
+                {prompts.length > 0 ? (
+                  prompts.map((prompt) => (
+                    <option key={prompt.id} value={prompt.id}>
+                      {prompt.name} ({prompt.id}) - {prompt.created_at}
+                    </option>
+                  ))
+                ) : (
+                  <option value="prompt_001">Standard Briefing (prompt_001)</option>
+                )}
+              </select>
+              {prompts.find(p => p.id === selectedPromptId)?.description && (
+                <p className="mt-1 text-xs text-gray-500">
+                  {prompts.find(p => p.id === selectedPromptId)?.description}
+                </p>
+              )}
             </div>
             <button
               onClick={() => generateBriefing(false)}
@@ -281,6 +359,11 @@ export default function BriefingsPage() {
                           <> | {formatDuration(selectedBriefing.summary.total_duration_minutes)} total</>
                         )}
                       </p>
+                      {selectedBriefing.prompt_name && (
+                        <p className="text-xs text-gray-400 mt-1">
+                          Prompt: {selectedBriefing.prompt_name} ({selectedBriefing.prompt_id})
+                        </p>
+                      )}
                     </div>
                     <button
                       onClick={() => {
@@ -340,6 +423,59 @@ export default function BriefingsPage() {
                     </section>
                   )}
 
+                  {/* Research Suggestions (from prompt_002+) */}
+                  {selectedBriefing.summary.research_suggestions && selectedBriefing.summary.research_suggestions.length > 0 && (
+                    <section>
+                      <h3 className="text-lg font-semibold text-gray-900 mb-3 flex items-center">
+                        <svg className="w-5 h-5 mr-2 text-cyan-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                        </svg>
+                        Research Suggestions
+                      </h3>
+                      <div className="space-y-3">
+                        {selectedBriefing.summary.research_suggestions.map((suggestion, i) => (
+                          <div key={i} className="bg-cyan-50 rounded-lg p-4 border border-cyan-100">
+                            <p className="font-medium text-cyan-900">{suggestion.topic}</p>
+                            <p className="text-sm text-cyan-700 mt-1">{suggestion.reason}</p>
+                            {suggestion.suggested_searches && suggestion.suggested_searches.length > 0 && (
+                              <div className="mt-2">
+                                <p className="text-xs text-cyan-600 font-medium">Suggested searches:</p>
+                                <ul className="text-xs text-cyan-600 mt-1 list-disc list-inside">
+                                  {suggestion.suggested_searches.map((search, j) => (
+                                    <li key={j}>{search}</li>
+                                  ))}
+                                </ul>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </section>
+                  )}
+
+                  {/* People Insights (from prompt_002+) */}
+                  {selectedBriefing.summary.people_insights && selectedBriefing.summary.people_insights.length > 0 && (
+                    <section>
+                      <h3 className="text-lg font-semibold text-gray-900 mb-3 flex items-center">
+                        <svg className="w-5 h-5 mr-2 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                        </svg>
+                        People Insights
+                      </h3>
+                      <div className="space-y-3">
+                        {selectedBriefing.summary.people_insights.map((insight, i) => (
+                          <div key={i} className="bg-indigo-50 rounded-lg p-4 border border-indigo-100">
+                            <p className="font-medium text-indigo-900">{insight.person}</p>
+                            <p className="text-sm text-indigo-700 mt-1">{insight.recent_interactions}</p>
+                            {insight.relationship_notes && (
+                              <p className="text-xs text-indigo-600 mt-2 italic">{insight.relationship_notes}</p>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </section>
+                  )}
+
                   {/* Action Items */}
                   {selectedBriefing.summary.action_items.length > 0 && (
                     <section>
@@ -352,9 +488,24 @@ export default function BriefingsPage() {
                       <ul className="space-y-3">
                         {selectedBriefing.summary.action_items.map((item, i) => (
                           <li key={i} className="flex items-start">
-                            <span className="flex-shrink-0 w-5 h-5 rounded-full border-2 border-gray-300 mt-0.5 mr-3"></span>
+                            <span className={`flex-shrink-0 w-5 h-5 rounded-full border-2 mt-0.5 mr-3 ${
+                              item.priority === 'high' ? 'border-red-400 bg-red-50' :
+                              item.priority === 'medium' ? 'border-yellow-400 bg-yellow-50' :
+                              'border-gray-300'
+                            }`}></span>
                             <div>
-                              <p className="text-gray-900">{item.text}</p>
+                              <p className="text-gray-900">
+                                {item.text}
+                                {item.priority && (
+                                  <span className={`ml-2 text-xs px-2 py-0.5 rounded ${
+                                    item.priority === 'high' ? 'bg-red-100 text-red-700' :
+                                    item.priority === 'medium' ? 'bg-yellow-100 text-yellow-700' :
+                                    'bg-gray-100 text-gray-600'
+                                  }`}>
+                                    {item.priority}
+                                  </span>
+                                )}
+                              </p>
                               <p className="text-sm text-gray-500">
                                 From: {item.meeting}
                                 {item.assignee && <> | Assignee: {item.assignee}</>}

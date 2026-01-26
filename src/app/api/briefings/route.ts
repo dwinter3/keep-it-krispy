@@ -121,13 +121,32 @@ export async function POST(request: NextRequest) {
 
   let targetDate: string
   let forceRegenerate = false
+  let promptId = 'prompt_001'
+  let action: string | undefined
 
   try {
     const body = await request.json()
     targetDate = body.date || getYesterdayDate()
     forceRegenerate = body.forceRegenerate || false
+    promptId = body.prompt_id || 'prompt_001'
+    action = body.action
   } catch {
     targetDate = getYesterdayDate()
+  }
+
+  // Special action: list available prompts
+  if (action === 'list_prompts') {
+    const invokeCommand = new InvokeCommand({
+      FunctionName: LAMBDA_FUNCTION_NAME,
+      InvocationType: 'RequestResponse',
+      Payload: new TextEncoder().encode(JSON.stringify({
+        body: JSON.stringify({ action: 'list_prompts' })
+      }))
+    })
+    const lambdaResponse = await lambdaClient.send(invokeCommand)
+    const result = JSON.parse(new TextDecoder().decode(lambdaResponse.Payload))
+    const prompts = typeof result.body === 'string' ? JSON.parse(result.body) : result.body
+    return NextResponse.json(prompts)
   }
 
   // Validate date format
@@ -169,7 +188,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Invoke the morning briefing Lambda to generate the briefing
-    console.log(`Invoking Lambda ${LAMBDA_FUNCTION_NAME} for user ${userId} date ${targetDate}`)
+    console.log(`Invoking Lambda ${LAMBDA_FUNCTION_NAME} for user ${userId} date ${targetDate} prompt ${promptId}`)
 
     const invokeCommand = new InvokeCommand({
       FunctionName: LAMBDA_FUNCTION_NAME,
@@ -178,6 +197,7 @@ export async function POST(request: NextRequest) {
         body: JSON.stringify({
           user_id: userId,
           date: targetDate,
+          prompt_id: promptId,
         })
       }))
     })
