@@ -151,12 +151,21 @@ export async function POST(request: NextRequest) {
 
     const existingBriefings = existingResponse.Items || []
 
-    // Return cached briefing unless force regeneration
+    // Return cached briefing unless force regeneration or the briefing failed
     if (existingBriefings.length > 0 && !forceRegenerate) {
-      return NextResponse.json({
-        cached: true,
-        briefing: existingBriefings[0] as Briefing,
-      })
+      const existingBriefing = existingBriefings[0] as Briefing
+      // Check if the briefing has a proper narrative (not a fallback message)
+      const hasValidNarrative = existingBriefing.summary?.narrative &&
+        !existingBriefing.summary.narrative.startsWith('Unable to generate')
+
+      if (hasValidNarrative) {
+        return NextResponse.json({
+          cached: true,
+          briefing: existingBriefing,
+        })
+      }
+      // If narrative failed, regenerate
+      console.log('Existing briefing has no valid narrative, regenerating...')
     }
 
     // Invoke the morning briefing Lambda to generate the briefing
