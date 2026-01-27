@@ -8,8 +8,14 @@
     "start": "node dist/handler.js",
     "dev": "tsc && node dist/handler.js",
     "bundle": "esbuild src/handler.ts --bundle --platform=node --target=node20 --outfile=dist/handler.js --external:@aws-sdk/*",
-    "build:stdio": "esbuild src/stdio-server.ts --bundle --platform=node --target=node20 --outfile=dist/stdio-server.cjs --format=cjs",
-    "stdio": "node dist/stdio-server.js",
+    "build:apps": "npm run build:app-meeting-dashboard && npm run build:app-transcript-viewer && npm run build:app-speaker-profile && npm run build:app-search-explorer",
+    "build:app-meeting-dashboard": "cross-env INPUT=apps/meeting-dashboard/meeting-dashboard.html vite build",
+    "build:app-transcript-viewer": "cross-env INPUT=apps/transcript-viewer/transcript-viewer.html vite build",
+    "build:app-speaker-profile": "cross-env INPUT=apps/speaker-profile/speaker-profile.html vite build",
+    "build:app-search-explorer": "cross-env INPUT=apps/search-explorer/search-explorer.html vite build",
+    "build:stdio": "npm run build:apps && esbuild src/stdio-server.ts --bundle --platform=node --target=node20 --outfile=dist/stdio-server.cjs --format=cjs",
+    "build:all": "npm run build:apps && npm run build:stdio",
+    "stdio": "node dist/stdio-server.cjs",
     "local": "npx tsx src/local-server.ts"
   },
   "keywords": [
@@ -26,15 +32,24 @@
     "@aws-sdk/client-s3": "^3.967.0",
     "@aws-sdk/client-s3vectors": "^3.968.0",
     "@aws-sdk/lib-dynamodb": "^3.967.0",
+    "@modelcontextprotocol/ext-apps": "^1.0.1",
     "@modelcontextprotocol/sdk": "^1.25.2",
     "express": "^5.2.1",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
     "zod": "^4.3.5"
   },
   "devDependencies": {
     "@types/aws-lambda": "^8.10.159",
     "@types/express": "^5.0.6",
     "@types/node": "^25.0.8",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^4.5.2",
+    "cross-env": "^7.0.3",
     "esbuild": "^0.27.2",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "vite": "^6.3.5",
+    "vite-plugin-singlefile": "^2.0.3"
   }
 }

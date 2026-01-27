@@ -8,6 +8,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { KrispyApiClient } from './krispy-api-client.js';
+import { registerApps } from './apps/register-apps.js';
 
 export function createServer(apiKey?: string): McpServer {
   // API key is required - all operations go through the API
@@ -29,6 +30,7 @@ export function createServer(apiKey?: string): McpServer {
     {
       capabilities: {
         tools: {},
+        resources: {},
       },
     }
   );
@@ -495,6 +497,14 @@ export function createServer(apiKey?: string): McpServer {
       }
     }
   );
+
+  // Register interactive MCP App tools (non-fatal if HTML not built)
+  try {
+    registerApps(server, apiClient);
+  } catch (error) {
+    console.error('[MCP] Warning: Failed to register MCP Apps:',
+      error instanceof Error ? error.message : error);
+  }
 
   return server;
 }
